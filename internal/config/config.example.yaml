@@ -1,0 +1,32 @@
+env: dev # 实际部署时通过 ENV 环境变量覆盖
+
+server:
+  port: 8080
+  read_timeout: 30s
+  write_timeout: 30s
+  log_level: debug
+
+database:
+  host: localhost
+  port: 5432
+  user: lighthouse_user
+  password: "[SECRET]" # 实际通过 DB_PASSWORD 环境变量注入
+  name: lighthouse_db
+  ssl_mode: disable
+
+prometheus:
+  address: http://prometheus:9090
+  query_timeout: 10s
+
+kubernetes:
+  api_server: https://kubernetes.default.svc
+  rbac:
+    enabled: true
+
+business:
+  cost_calculation:
+    cpu_price_per_core_hour: 0.025
+    mem_price_per_gb_hour: 0.01
+  slo_thresholds:
+    availability: 99.9
+    latency: 300

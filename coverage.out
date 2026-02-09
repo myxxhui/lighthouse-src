@@ -1,0 +1,27 @@
+mode: set
+github.com/myxxhui/lighthouse-src/pkg/costmodel/calculator.go:13.109,15.72 1 1
+github.com/myxxhui/lighthouse-src/pkg/costmodel/calculator.go:15.72,17.3 1 1
+github.com/myxxhui/lighthouse-src/pkg/costmodel/calculator.go:20.2,41.8 6 1
+github.com/myxxhui/lighthouse-src/pkg/costmodel/calculator.go:44.83,45.88 1 1
+github.com/myxxhui/lighthouse-src/pkg/costmodel/calculator.go:45.88,47.3 1 1
+github.com/myxxhui/lighthouse-src/pkg/costmodel/calculator.go:48.2,48.37 1 1
+github.com/myxxhui/lighthouse-src/pkg/costmodel/calculator.go:48.37,50.3 1 1
+github.com/myxxhui/lighthouse-src/pkg/costmodel/calculator.go:51.2,51.12 1 1
+github.com/myxxhui/lighthouse-src/pkg/costmodel/calculator.go:54.75,58.2 3 1
+github.com/myxxhui/lighthouse-src/pkg/costmodel/calculator.go:60.72,64.2 3 1
+github.com/myxxhui/lighthouse-src/pkg/costmodel/calculator.go:66.49,68.2 1 1
+github.com/myxxhui/lighthouse-src/pkg/costmodel/calculator.go:70.53,73.23 2 1
+github.com/myxxhui/lighthouse-src/pkg/costmodel/calculator.go:73.23,75.3 1 1
+github.com/myxxhui/lighthouse-src/pkg/costmodel/calculator.go:78.2,82.38 3 1
+github.com/myxxhui/lighthouse-src/pkg/costmodel/calculator.go:85.50,87.20 1 1
+github.com/myxxhui/lighthouse-src/pkg/costmodel/calculator.go:87.20,89.3 1 1
+github.com/myxxhui/lighthouse-src/pkg/costmodel/calculator.go:91.2,91.9 1 1
+github.com/myxxhui/lighthouse-src/pkg/costmodel/calculator.go:92.20,93.16 1 1
+github.com/myxxhui/lighthouse-src/pkg/costmodel/calculator.go:94.20,95.25 1 0
+github.com/myxxhui/lighthouse-src/pkg/costmodel/calculator.go:96.20,97.17 1 1
+github.com/myxxhui/lighthouse-src/pkg/costmodel/calculator.go:98.20,99.14 1 1
+github.com/myxxhui/lighthouse-src/pkg/costmodel/calculator.go:100.10,101.17 1 1
+github.com/myxxhui/lighthouse-src/pkg/costmodel/calculator.go:105.47,107.2 1 1
+github.com/myxxhui/lighthouse-src/pkg/costmodel/types.go:99.42,111.2 2 0
+github.com/myxxhui/lighthouse-src/pkg/costmodel/types.go:146.53,153.2 2 0
+github.com/myxxhui/lighthouse-src/pkg/costmodel/types.go:156.56,164.2 3 0
