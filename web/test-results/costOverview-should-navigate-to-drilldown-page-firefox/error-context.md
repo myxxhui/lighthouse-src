@@ -1,0 +1,185 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - heading "全域成本透视" [level=2] [ref=e5]
+    - generic [ref=e6]:
+      - generic [ref=e7]: 使用Mock数据
+      - switch "是 否" [checked] [ref=e9] [cursor=pointer]:
+        - generic [ref=e11]:
+          - generic: 是
+          - generic: 否
+  - generic [ref=e12]:
+    - generic [ref=e16]:
+      - generic [ref=e17]: 总账单成本
+      - generic [ref=e18]:
+        - generic [ref=e19]: ¥
+        - generic [ref=e20]: 125,000
+    - generic [ref=e24]:
+      - generic [ref=e25]: 可优化空间
+      - generic [ref=e26]:
+        - generic [ref=e27]: ¥
+        - generic [ref=e28]: 37,500
+    - generic [ref=e32]:
+      - generic [ref=e33]: 全局效率分
+      - generic [ref=e34]:
+        - generic [ref=e35]: "70"
+        - generic [ref=e36]: "%"
+    - img [ref=e44]:
+      - generic [ref=e45]:
+        - generic [ref=e46]:
+          - img [ref=e48]
+          - img [ref=e50]
+        - generic [ref=e51]:
+          - generic [ref=e52]: 70%
+          - generic [ref=e53]: 30%
+  - generic [ref=e54]:
+    - generic [ref=e57]: 领域成本分解
+    - generic [ref=e59]:
+      - generic [ref=e63]:
+        - generic [ref=e64]: 计算资源
+        - generic [ref=e65]:
+          - generic [ref=e66]: ¥
+          - generic [ref=e67]: 85,000
+          - generic [ref=e70]: "效率: 70%"
+      - generic [ref=e74]:
+        - generic [ref=e75]: 存储资源
+        - generic [ref=e76]:
+          - generic [ref=e77]: ¥
+          - generic [ref=e78]: 25,000
+          - generic [ref=e81]: "效率: 70%"
+      - generic [ref=e85]:
+        - generic [ref=e86]: 网络资源
+        - generic [ref=e87]:
+          - generic [ref=e88]: ¥
+          - generic [ref=e89]: 15,000
+          - generic [ref=e92]: "效率: 70%"
+  - generic [ref=e93]:
+    - generic [ref=e96]: 命名空间成本明细
+    - generic [ref=e100]:
+      - table [ref=e104]:
+        - rowgroup [ref=e107]:
+          - row "命名空间 成本 (¥) 可优化空间 (¥) 效率分 (%) 资源使用率 健康状态 操作" [ref=e108]:
+            - columnheader [ref=e109]
+            - columnheader "命名空间" [ref=e110]
+            - columnheader "成本 (¥)" [ref=e111] [cursor=pointer]:
+              - generic [ref=e112]:
+                - generic [ref=e113]: 成本 (¥)
+                - generic [ref=e115]:
+                  - img [ref=e116]:
+                    - img [ref=e117]
+                  - img [ref=e119]:
+                    - img [ref=e120]
+            - columnheader "可优化空间 (¥)" [ref=e122] [cursor=pointer]:
+              - generic [ref=e123]:
+                - generic [ref=e124]: 可优化空间 (¥)
+                - generic [ref=e126]:
+                  - img [ref=e127]:
+                    - img [ref=e128]
+                  - img [ref=e130]:
+                    - img [ref=e131]
+            - columnheader "效率分 (%)" [ref=e133] [cursor=pointer]:
+              - generic [ref=e134]:
+                - generic [ref=e135]: 效率分 (%)
+                - generic [ref=e137]:
+                  - img [ref=e138]:
+                    - img [ref=e139]
+                  - img [ref=e141]:
+                    - img [ref=e142]
+            - columnheader "资源使用率" [ref=e144]
+            - columnheader "健康状态" [ref=e145]
+            - columnheader "操作" [ref=e146]
+        - rowgroup [ref=e147]:
+          - 'row "展开行 production 65,000 19,500 70% CPU: 65% 内存: 72% 存储: 58% 详情" [ref=e148]':
+            - cell "展开行" [ref=e149]:
+              - button "展开行" [ref=e150] [cursor=pointer]
+            - cell "production" [ref=e151]:
+              - strong [ref=e152]: production
+            - cell "65,000" [ref=e153]
+            - cell "19,500" [ref=e154]:
+              - generic [ref=e155]: 19,500
+            - cell "70%" [ref=e156]:
+              - generic [ref=e157]:
+                - img [ref=e162]:
+                  - generic [ref=e164]:
+                    - img [ref=e166]
+                    - img [ref=e168]
+                - generic [ref=e170]: 70%
+            - 'cell "CPU: 65% 内存: 72% 存储: 58%" [ref=e171]':
+              - generic [ref=e172]:
+                - generic [ref=e174]: "CPU: 65%"
+                - generic [ref=e176]: "内存: 72%"
+                - generic [ref=e178]: "存储: 58%"
+            - cell [ref=e179]
+            - cell "详情" [ref=e183]:
+              - button "详情" [ref=e184] [cursor=pointer]:
+                - generic [ref=e185]: 详情
+          - 'row "展开行 staging 35,000 10,500 70% CPU: 45% 内存: 52% 存储: 62% 详情" [ref=e186]':
+            - cell "展开行" [ref=e187]:
+              - button "展开行" [ref=e188] [cursor=pointer]
+            - cell "staging" [ref=e189]:
+              - strong [ref=e190]: staging
+            - cell "35,000" [ref=e191]
+            - cell "10,500" [ref=e192]:
+              - generic [ref=e193]: 10,500
+            - cell "70%" [ref=e194]:
+              - generic [ref=e195]:
+                - img [ref=e200]:
+                  - generic [ref=e202]:
+                    - img [ref=e204]
+                    - img [ref=e206]
+                - generic [ref=e208]: 70%
+            - 'cell "CPU: 45% 内存: 52% 存储: 62%" [ref=e209]':
+              - generic [ref=e210]:
+                - generic [ref=e212]: "CPU: 45%"
+                - generic [ref=e214]: "内存: 52%"
+                - generic [ref=e216]: "存储: 62%"
+            - cell [ref=e217]
+            - cell "详情" [ref=e221]:
+              - button "详情" [ref=e222] [cursor=pointer]:
+                - generic [ref=e223]: 详情
+          - 'row "展开行 development 25,000 7,500 70% CPU: 35% 内存: 42% 存储: 55% 详情" [ref=e224]':
+            - cell "展开行" [ref=e225]:
+              - button "展开行" [ref=e226] [cursor=pointer]
+            - cell "development" [ref=e227]:
+              - strong [ref=e228]: development
+            - cell "25,000" [ref=e229]
+            - cell "7,500" [ref=e230]:
+              - generic [ref=e231]: 7,500
+            - cell "70%" [ref=e232]:
+              - generic [ref=e233]:
+                - img [ref=e238]:
+                  - generic [ref=e240]:
+                    - img [ref=e242]
+                    - img [ref=e244]
+                - generic [ref=e246]: 70%
+            - 'cell "CPU: 35% 内存: 42% 存储: 55%" [ref=e247]':
+              - generic [ref=e248]:
+                - generic [ref=e250]: "CPU: 35%"
+                - generic [ref=e252]: "内存: 42%"
+                - generic [ref=e254]: "存储: 55%"
+            - cell [ref=e255]
+            - cell "详情" [ref=e259]:
+              - button "详情" [ref=e260] [cursor=pointer]:
+                - generic [ref=e261]: 详情
+      - list [ref=e262]:
+        - listitem "上一页" [ref=e263]:
+          - button "left" [disabled] [ref=e264]:
+            - img "left" [ref=e265]:
+              - img [ref=e266]
+        - listitem "1" [ref=e268] [cursor=pointer]:
+          - generic [ref=e269]: "1"
+        - listitem "下一页" [ref=e270]:
+          - button "right" [disabled] [ref=e271]:
+            - img "right" [ref=e272]:
+              - img [ref=e273]
+        - listitem [ref=e275]:
+          - generic "页码" [ref=e276] [cursor=pointer]:
+            - generic [ref=e278]:
+              - combobox "页码" [ref=e280]
+              - generic "10 条/页" [ref=e281]
+            - generic:
+              - img:
+                - img
+```

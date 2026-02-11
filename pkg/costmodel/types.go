@@ -1,164 +1,203 @@
-// Package costmodel defines the core types for Lighthouse's dual-cost model.
-// These types are shared across different modules and should be kept stable.
+// Package costmodel provides the core types and algorithms for calculating
+// dual costs (billable vs usage) in Kubernetes resource analysis.
 package costmodel
 
-import (
-	"encoding/json"
-	"time"
-)
+import "time"
 
-// ResourceMetric represents the resource usage and request metrics for a container/pod.
-// This is the fundamental data structure for cost calculation.
+// ResourceMetric represents the resource usage metrics for a Kubernetes resource.
+// This includes both requested resources (configuration) and actual usage (P95).
 type ResourceMetric struct {
-	// CPU metrics
-	CPURequest  float64 `json:"cpu_request"`
+	// CPU requested in cores (e.g., 2.5 cores)
+	CPURequest float64 `json:"cpu_request"`
+
+	// CPU usage at P95 percentile in cores
 	CPUUsageP95 float64 `json:"cpu_usage_p95"`
 
-	// Memory metrics (in bytes)
-	MemRequest  float64 `json:"mem_request"`
-	MemUsageP95 float64 `json:"mem_usage_p95"`
+	// Memory requested in bytes
+	MemRequest int64 `json:"mem_request"`
 
-	// Timestamp of the metric
+	// Memory usage at P95 percentile in bytes
+	MemUsageP95 int64 `json:"mem_usage_p95"`
+
+	// Timestamp of the measurement
 	Timestamp time.Time `json:"timestamp"`
 }
 
-// CostResult represents the result of dual-cost calculation for a resource.
-// This includes billable cost, usage value, waste, and efficiency score.
+// CostResult represents the calculated cost results for a single resource.
 type CostResult struct {
-	// BillableCost is the cost based on K8s Request configuration.
-	// Formula: Σ(Request_Core × Price_Node_Core) + Σ(Request_Mem × Price_Mem)
-	BillableCost float64 `json:"billable_cost"`
+	// CPU costs
+	CPUBillableCost    float64 `json:"cpu_billable_cost"`
+	CPUUsageCost       float64 `json:"cpu_usage_cost"`
+	CPUWasteCost       float64 `json:"cpu_waste_cost"`
+	CPUEfficiencyScore float64 `json:"cpu_efficiency_score"`
 
-	// UsageCost is the cost based on actual usage (P95).
-	// Formula: Σ(Usage_P95_Core × Price_Node_Core) + Σ(Usage_P95_Mem × Price_Mem)
-	UsageCost float64 `json:"usage_cost"`
+	// Memory costs
+	MemBillableCost    float64 `json:"mem_billable_cost"`
+	MemUsageCost       float64 `json:"mem_usage_cost"`
+	MemWasteCost       float64 `json:"mem_waste_cost"`
+	MemEfficiencyScore float64 `json:"mem_efficiency_score"`
 
-	// WasteCost is the difference between billable and usage cost.
-	// Formula: Cost_Billable - Cost_Usage
-	WasteCost float64 `json:"waste_cost"`
+	// Total costs
+	TotalBillableCost      float64 `json:"total_billable_cost"`
+	TotalUsageCost         float64 `json:"total_usage_cost"`
+	TotalWasteCost         float64 `json:"total_waste_cost"`
+	OverallEfficiencyScore float64 `json:"overall_efficiency_score"`
 
-	// EfficiencyScore is the resource utilization efficiency percentage.
-	// Formula: (Usage_P95 / Request) × 100%
-	// Range: 0.0 - 100.0
-	EfficiencyScore float64 `json:"efficiency_score"`
-
-	// Grade represents the efficiency grade based on the score.
-	// Valid values: Zombie, OverProvisioned, Healthy, Risk
-	Grade EfficiencyGrade `json:"grade"`
-
-	// Resource type (CPU or Memory)
-	ResourceType string `json:"resource_type"`
+	// Efficiency grade
+	OverallGrade EfficiencyGrade `json:"overall_grade"`
 }
 
-// EfficiencyGrade represents the efficiency classification based on efficiency score.
+// DualCostResult is an alias for CostResult for backward compatibility.
+type DualCostResult = CostResult
+
+// EfficiencyGrade represents the efficiency rating of a resource.
 type EfficiencyGrade string
 
 const (
-	// Zombie represents extremely wasteful resources (< 10% efficiency).
-	// Recommendation: Consider shutting down.
-	Zombie EfficiencyGrade = "Zombie"
+	// GradeZombie indicates extremely wasteful resources (<10% utilization)
+	GradeZombie EfficiencyGrade = "Zombie"
 
-	// OverProvisioned represents over-provisioned resources (10% - 40% efficiency).
-	// Recommendation: Consider downgrading configuration.
-	OverProvisioned EfficiencyGrade = "OverProvisioned"
+	// GradeOverProvisioned indicates over-provisioned resources (10%-40% utilization)
+	GradeOverProvisioned EfficiencyGrade = "OverProvisioned"
 
-	// Healthy represents healthy resources (40% - 70% efficiency).
-	// This is the optimal buffer range.
-	Healthy EfficiencyGrade = "Healthy"
+	// GradeHealthy indicates healthy resources with reasonable buffer (40%-70% utilization)
+	GradeHealthy EfficiencyGrade = "Healthy"
 
-	// Risk represents risky resources (> 90% efficiency).
-	// Warning: Risk of OOM/Throttling due to insufficient resources.
-	Risk EfficiencyGrade = "Risk"
+	// GradeRisk indicates under-provisioned resources at risk (>90% utilization)
+	GradeRisk EfficiencyGrade = "Risk"
+
+	// GradeUnknown indicates unknown or unclassified efficiency
+	GradeUnknown EfficiencyGrade = "Unknown"
 )
 
-// ZombieMetrics represents the metrics used for zombie asset detection.
-// A service is considered zombie if it meets all the criteria below.
-type ZombieMetrics struct {
-	// CPU usage average over 7 days (in cores)
-	CPUUsageAvg7d float64 `json:"cpu_usage_avg_7d"`
-
-	// CPU usage standard deviation over 7 days
-	CPUUsageStdDev7d float64 `json:"cpu_usage_stddev_7d"`
-
-	// Memory usage average over 7 days (in bytes)
-	MemUsageAvg7d float64 `json:"mem_usage_avg_7d"`
-
-	// Network I/O average over 7 days (in bytes per second)
-	NetworkIOAvg7d float64 `json:"network_io_avg_7d"`
-
-	// Timestamp range for the metrics
-	StartTime time.Time `json:"start_time"`
-	EndTime   time.Time `json:"end_time"`
-}
-
-// IsZombie determines if the metrics indicate a zombie asset.
-// Criteria:
-// - CPU: avg(usage_7d) < 0.1 Core AND stddev(usage_7d) ≈ 0 (dead line)
-// - Memory: avg(mem_usage_7d) < 0.1 GiB AND no fluctuation
-// - Network: avg(network_io_7d) < 1 KB/s
-func (zm *ZombieMetrics) IsZombie() bool {
-	const (
-		cpuThreshold     = 0.1       // 0.1 Core
-		memThreshold     = 0.1 * 1e9 // 0.1 GiB in bytes
-		networkThreshold = 1024.0    // 1 KB/s in bytes
-		stdDevThreshold  = 0.01      // Very low fluctuation
-	)
-
-	return zm.CPUUsageAvg7d < cpuThreshold &&
-		zm.CPUUsageStdDev7d < stdDevThreshold &&
-		zm.MemUsageAvg7d < memThreshold &&
-		zm.NetworkIOAvg7d < networkThreshold
-}
-
-// AggregationLevel represents the four-level drill-down hierarchy.
-type AggregationLevel string
+// AggregationLevel represents the level at which costs are aggregated.
+type AggregationLevel int
 
 const (
-	LevelNamespace AggregationLevel = "namespace" // L1: Namespace (Domain) view
-	LevelNode      AggregationLevel = "node"      // L2: Node view
-	LevelWorkload  AggregationLevel = "workload"  // L3: Workload (Deployment) view
-	LevelPod       AggregationLevel = "pod"       // L4: Pod (Instance) view
+	// LevelPod represents pod-level aggregation
+	LevelPod AggregationLevel = iota + 1
+
+	// LevelWorkload represents workload-level aggregation
+	LevelWorkload
+
+	// LevelNamespace represents namespace-level aggregation
+	LevelNamespace
+
+	// LevelNode represents node-level aggregation
+	LevelNode
+
+	// LevelCluster represents cluster-level aggregation
+	LevelCluster
 )
 
-// AggregationResult represents the result of aggregation at a specific level.
+// AggregationResult represents the result of aggregating costs at a specific level.
 type AggregationResult struct {
-	Level AggregationLevel `json:"level"`
-
-	// Total costs
-	TotalBillableCost float64 `json:"total_billable_cost"`
-	TotalUsageCost    float64 `json:"total_usage_cost"`
-	TotalWasteCost    float64 `json:"total_waste_cost"`
-
-	// Average efficiency score
-	AverageEfficiencyScore float64 `json:"average_efficiency_score"`
-
-	// Count of resources
-	ResourceCount int `json:"resource_count"`
-
-	// Identifier for the aggregation (e.g., namespace name, node name, etc.)
-	Identifier string `json:"identifier"`
-
-	// Timestamp of the aggregation
-	Timestamp time.Time `json:"timestamp"`
+	Level         AggregationLevel `json:"level"`
+	Identifier    string           `json:"identifier"`
+	TotalCost     CostResult       `json:"total_cost"`
+	ResourceCount int              `json:"resource_count"`
+	Timestamp     time.Time        `json:"timestamp"`
 }
 
-// MarshalJSON implements custom JSON marshaling for CostResult.
-func (cr *CostResult) MarshalJSON() ([]byte, error) {
-	type Alias CostResult
-	return json.Marshal(&struct {
-		*Alias
-	}{
-		Alias: (*Alias)(cr),
-	})
+// Aggregator interface defines the contract for cost aggregators.
+type Aggregator interface {
+	Aggregate(results []DualCostResult) (*AggregationResult, error)
 }
 
-// UnmarshalJSON implements custom JSON unmarshaling for CostResult.
-func (cr *CostResult) UnmarshalJSON(data []byte) error {
-	type Alias CostResult
-	aux := &struct {
-		*Alias
-	}{
-		Alias: (*Alias)(cr),
+// DailyNamespaceCost represents the daily aggregated cost data for a namespace.
+// This is the source data for L0 (global view) aggregation from daily_namespace_costs table.
+type DailyNamespaceCost struct {
+	Namespace     string    `json:"namespace"`
+	Date          time.Time `json:"date"`
+	BillableCost  float64   `json:"billable_cost"`
+	UsageCost     float64   `json:"usage_cost"`
+	WasteCost     float64   `json:"waste_cost"`
+	PodCount      int       `json:"pod_count"`
+	NodeCount     int       `json:"node_count"`
+	WorkloadCount int       `json:"workload_count"`
+}
+
+// HourlyWorkloadStat represents hourly statistics for a workload.
+// This is the source data for L1-L4 aggregation from hourly_workload_stats table.
+type HourlyWorkloadStat struct {
+	Namespace         string    `json:"namespace"`
+	WorkloadName      string    `json:"workload_name"`
+	WorkloadType      string    `json:"workload_type"`
+	NodeName          string    `json:"node_name"`
+	PodName           string    `json:"pod_name"`
+	Timestamp         time.Time `json:"timestamp"`
+	CPURequest        float64   `json:"cpu_request"`
+	CPUUsageP95       float64   `json:"cpu_usage_p95"`
+	MemRequest        int64     `json:"mem_request"`
+	MemUsageP95       int64     `json:"mem_usage_p95"`
+	CPUBillableCost   float64   `json:"cpu_billable_cost"`
+	CPUUsageCost      float64   `json:"cpu_usage_cost"`
+	CPUWasteCost      float64   `json:"cpu_waste_cost"`
+	MemBillableCost   float64   `json:"mem_billable_cost"`
+	MemUsageCost      float64   `json:"mem_usage_cost"`
+	MemWasteCost      float64   `json:"mem_waste_cost"`
+	TotalBillableCost float64   `json:"total_billable_cost"`
+	TotalUsageCost    float64   `json:"total_usage_cost"`
+	TotalWasteCost    float64   `json:"total_waste_cost"`
+}
+
+// GlobalAggregatedResult represents the result of L0 global aggregation.
+type GlobalAggregatedResult struct {
+	TotalBillableCost float64   `json:"total_billable_cost"`
+	TotalWaste        float64   `json:"total_waste"`
+	GlobalEfficiency  float64   `json:"global_efficiency"`
+	Timestamp         time.Time `json:"timestamp"`
+}
+
+// DomainBreakdownItem represents a single namespace/domain in the domain breakdown pie chart.
+type DomainBreakdownItem struct {
+	DomainName     string  `json:"domain_name"`
+	CostPercentage float64 `json:"cost_percentage"`
+	BillableCost   float64 `json:"billable_cost"`
+	UsageCost      float64 `json:"usage_cost"`
+	WasteCost      float64 `json:"waste_cost"`
+	PodCount       int     `json:"pod_count"`
+}
+
+// AggregatedResult is a generic result type for L1-L4 aggregation.
+type AggregatedResult struct {
+	Identifier        string    `json:"identifier"`
+	TotalBillableCost float64   `json:"total_billable_cost"`
+	TotalUsageCost    float64   `json:"total_usage_cost"`
+	TotalWasteCost    float64   `json:"total_waste_cost"`
+	EfficiencyScore   float64   `json:"efficiency_score"`
+	ResourceCount     int       `json:"resource_count"`
+	Timestamp         time.Time `json:"timestamp"`
+}
+
+// PrecisionConfig holds configuration for decimal precision in financial calculations.
+type PrecisionConfig struct {
+	DecimalPlaces int     `json:"decimal_places"`
+	RoundingMode  string  `json:"rounding_mode"`
+	Epsilon       float64 `json:"epsilon"` // for floating point comparisons
+}
+
+// DefaultPrecisionConfig returns the default precision configuration.
+func DefaultPrecisionConfig() PrecisionConfig {
+	return PrecisionConfig{
+		DecimalPlaces: 2, // financial precision to cents
+		RoundingMode:  "half_up",
+		Epsilon:       1e-9,
 	}
-	return json.Unmarshal(data, &aux)
+}
+
+// ZombieMetrics represents metrics for detecting zombie resources.
+// Includes 7-day usage statistics for CPU, memory, and network.
+type ZombieMetrics struct {
+	CPUUtilization float64   `json:"cpu_utilization"`
+	MemUtilization float64   `json:"mem_utilization"`
+	InactiveDays   int       `json:"inactive_days"`
+	LastAccessTime time.Time `json:"last_access_time"`
+	// 7-day statistics
+	CPUAvg        float64 `json:"cpu_avg"`         // CPU 7-day average usage (cores)
+	CPUStdDev     float64 `json:"cpu_std_dev"`     // CPU 7-day standard deviation
+	MemAvg        float64 `json:"mem_avg"`         // Memory 7-day average usage (GiB)
+	MemStdDev     float64 `json:"mem_std_dev"`     // Memory 7-day standard deviation
+	NetworkAvg    float64 `json:"network_avg"`     // Network 7-day average IO (KB/s)
+	NetworkStdDev float64 `json:"network_std_dev"` // Network 7-day standard deviation
 }
