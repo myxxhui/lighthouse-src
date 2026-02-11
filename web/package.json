@@ -1,0 +1,78 @@
+{
+  "name": "lighthouse-web",
+  "version": "1.0.0",
+  "description": "Lighthouse frontend dashboard for cost optimization and resource efficiency",
+  "private": true,
+  "dependencies": {
+    "@ant-design/pro-components": "^2.8.0",
+    "@ant-design/pro-layout": "^7.13.0",
+    "@ant-design/pro-table": "^3.10.0",
+    "@umijs/route-utils": "^4.0.0",
+    "antd": "^5.12.0",
+    "axios": "^1.6.0",
+    "classnames": "^2.3.2",
+    "lodash": "^4.17.21",
+    "moment": "^2.29.4",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^6.18.0",
+    "recharts": "^2.10.0",
+    "zustand": "^4.4.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.40.0",
+    "@storybook/addon-essentials": "^7.6.0",
+    "@storybook/addon-interactions": "^7.6.0",
+    "@storybook/addon-links": "^7.6.0",
+    "@storybook/blocks": "^7.6.0",
+    "@storybook/react": "^7.6.0",
+    "@storybook/react-webpack5": "^7.6.0",
+    "@testing-library/jest-dom": "^6.1.4",
+    "@testing-library/react": "^14.0.0",
+    "@testing-library/user-event": "^14.5.1",
+    "@types/lodash": "^4.14.201",
+    "@types/node": "^20.9.0",
+    "@types/react": "^18.2.37",
+    "@types/react-dom": "^18.2.15",
+    "@typescript-eslint/eslint-plugin": "^6.10.0",
+    "@typescript-eslint/parser": "^6.10.0",
+    "@umijs/fabric": "^2.14.1",
+    "eslint": "^8.53.0",
+    "eslint-config-react-app": "^7.0.1",
+    "eslint-plugin-react": "^7.33.2",
+    "eslint-plugin-react-hooks": "^4.6.0",
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0",
+    "prettier": "^3.0.3",
+    "ts-jest": "^29.1.1",
+    "typescript": "^5.2.2",
+    "umi": "^4.6.28",
+    "webpack": "^5.89.0"
+  },
+  "scripts": {
+    "start": "umi dev",
+    "build": "umi build",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "e2e": "playwright test",
+    "e2e:ui": "playwright test --ui",
+    "storybook": "storybook dev -p 6006",
+    "build-storybook": "storybook build",
+    "lint": "eslint src --ext .js,.jsx,.ts,.tsx",
+    "lint:fix": "eslint src --ext .js,.jsx,.ts,.tsx --fix",
+    "format": "prettier --write \"src/**/*.{js,jsx,ts,tsx,json,md}\"",
+    "format:check": "prettier --check \"src/**/*.{js,jsx,ts,tsx,json,md}\""
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  }
+}

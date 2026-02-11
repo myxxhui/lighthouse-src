@@ -1,0 +1,1010 @@
+openapi: 3.0.3
+info:
+  title: Lighthouse API
+  description: |
+    REST API for Lighthouse - Infrastructure Decision Cockpit.
+    Provides cost analysis, SLO health monitoring, and ROI tracking.
+  version: 1.0.0
+  contact:
+    name: Lighthouse Team
+    url: https://github.com/myxxhui/lighthouse-src
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+servers:
+  - url: /api/v1
+    description: API v1 base path
+  - url: http://localhost:8080/api/v1
+    description: Local development server
+tags:
+  - name: Cost
+    description: Cost analysis and resource efficiency APIs
+  - name: SLO
+    description: Service Level Objective health monitoring APIs
+  - name: ROI
+    description: Return on Investment tracking and dashboard APIs
+  - name: Health
+    description: System health and readiness checks
+paths:
+  /health:
+    get:
+      tags:
+        - Health
+      summary: Health check endpoint
+      description: Returns the health status of the API server
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /cost/global:
+    get:
+      tags:
+        - Cost
+      summary: Global cost overview
+      description: |
+        Returns global cost overview aggregated from L1 namespace costs.
+        **Performance**: Pure memory calculation, response time <10ms.
+        **Data consistency**: Guarantees L0 total equals sum of all L1 namespaces.
+      operationId: getGlobalCost
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GlobalCostResponse'
+        '400':
+          description: Bad request
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /cost/namespace/{namespace}:
+    get:
+      tags:
+        - Cost
+      summary: Namespace cost details
+      description: Returns detailed cost breakdown for a specific namespace
+      operationId: getNamespaceCost
+      parameters:
+        - name: namespace
+          in: path
+          required: true
+          schema:
+            type: string
+          example: default
+        - name: start_time
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: Start time for filtering (RFC3339)
+        - name: end_time
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: End time for filtering (RFC3339)
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NamespaceCostResponse'
+        '404':
+          description: Namespace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+
+  /cost/drilldown/{level}/{identifier}:
+    get:
+      tags:
+        - Cost
+      summary: Cost drilldown
+      description: Drill down into cost details at a specific aggregation level
+      operationId: getDrilldownCost
+      parameters:
+        - name: level
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [L0, L1, L2, L3]
+          example: L1
+        - name: identifier
+          in: path
+          required: true
+          schema:
+            type: string
+          example: default
+        - name: dimension
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Optional dimension filter
+        - name: start_time
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: end_time
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DrilldownResponse'
+        '400':
+          description: Invalid level or identifier
+        '404':
+          description: Resource not found
+        '500':
+          description: Internal server error
+
+  /slo/health:
+    get:
+      tags:
+        - SLO
+      summary: SLO health status
+      description: Returns current SLO health status across all services
+      operationId: getSLOHealth
+      parameters:
+        - name: namespace
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Optional namespace filter
+        - name: service
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Optional service filter
+        - name: time_range
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Time range (e.g., "24h", "7d")
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SLOHealthResponse'
+        '500':
+          description: Internal server error
+
+  /slo/history:
+    get:
+      tags:
+        - SLO
+      summary: SLO history
+      description: Returns historical SLO data for a service
+      operationId: getSLOHistory
+      parameters:
+        - name: service
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Service name
+        - name: metric
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Specific metric
+        - name: start_time
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: end_time
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: granularity
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [hour, day, week]
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SLOHistoryResponse'
+        '400':
+          description: Missing required parameters
+        '500':
+          description: Internal server error
+
+  /slo/burnrate:
+    get:
+      tags:
+        - SLO
+      summary: SLO burn rate
+      description: Returns SLO burn rate and remaining budget
+      operationId: getSLOBurnRate
+      parameters:
+        - name: service
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Service name
+        - name: window
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [1h, 6h, 24h]
+          description: Time window for burn rate calculation
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SLOBurnRateResponse'
+        '400':
+          description: Missing service parameter
+        '500':
+          description: Internal server error
+
+  /roi/dashboard:
+    get:
+      tags:
+        - ROI
+      summary: ROI dashboard
+      description: Returns ROI dashboard with summary, trends, and recommendations
+      operationId: getROIDashboard
+      parameters:
+        - name: time_range
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Time range (e.g., "30d", "90d")
+        - name: granularity
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [daily, weekly, monthly]
+        - name: metric
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Specific metric filter
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ROIDashboardResponse'
+        '500':
+          description: Internal server error
+
+  /roi/details:
+    get:
+      tags:
+        - ROI
+      summary: ROI detailed analysis
+      description: Returns detailed ROI analysis for a category
+      operationId: getROIDetails
+      parameters:
+        - name: category
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Category filter
+        - name: start_time
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: end_time
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ROIDetailsResponse'
+        '500':
+          description: Internal server error
+
+  /roi/comparison:
+    get:
+      tags:
+        - ROI
+      summary: ROI comparison
+      description: Compares ROI between two periods
+      operationId: getROIComparison
+      parameters:
+        - name: baseline_period
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Baseline period (e.g., "2023-Q4")
+        - name: comparison_period
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Comparison period (e.g., "2024-Q1")
+        - name: metric
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ROIComparisonResponse'
+        '500':
+          description: Internal server error
+
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: healthy
+        timestamp:
+          type: string
+          format: date-time
+        version:
+          type: string
+          example: 1.0.0
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+          example: Not Found
+        code:
+          type: string
+          example: NOT_FOUND
+        message:
+          type: string
+          example: The requested resource was not found
+        request_id:
+          type: string
+          example: 550e8400-e29b-41d4-a716-446655440000
+
+    GlobalCostResponse:
+      type: object
+      properties:
+        total_cost:
+          type: number
+          format: float
+          example: 10000.0
+        namespaces:
+          type: array
+          items:
+            $ref: '#/components/schemas/NamespaceCostSummary'
+        timestamp:
+          type: string
+          format: date-time
+
+    NamespaceCostSummary:
+      type: object
+      properties:
+        name:
+          type: string
+          example: default
+        cost:
+          type: number
+          format: float
+          example: 5000.0
+        grade:
+          type: string
+          example: Healthy
+        pod_count:
+          type: integer
+          example: 10
+        node_count:
+          type: integer
+          example: 2
+
+    NamespaceCostResponse:
+      type: object
+      properties:
+        namespace:
+          type: string
+        cost:
+          $ref: '#/components/schemas/CostBreakdown'
+        workloads:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkloadCost'
+        nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/NodeCostSummary'
+        timestamp:
+          type: string
+          format: date-time
+
+    CostBreakdown:
+      type: object
+      properties:
+        total:
+          type: number
+          format: float
+        cpu:
+          type: number
+          format: float
+        memory:
+          type: number
+          format: float
+        storage:
+          type: number
+          format: float
+        network:
+          type: number
+          format: float
+        billable:
+          type: number
+          format: float
+        usage:
+          type: number
+          format: float
+        waste:
+          type: number
+          format: float
+        efficiency:
+          type: number
+          format: float
+
+    WorkloadCost:
+      type: object
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+        cost:
+          type: number
+          format: float
+        pod_count:
+          type: integer
+        grade:
+          type: string
+        namespace:
+          type: string
+
+    NodeCostSummary:
+      type: object
+      properties:
+        name:
+          type: string
+        total_cost:
+          type: number
+          format: float
+        utilization_cpu:
+          type: number
+          format: float
+        utilization_mem:
+          type: number
+          format: float
+        pod_count:
+          type: integer
+
+    DrilldownResponse:
+      type: object
+      properties:
+        level:
+          type: string
+        identifier:
+          type: string
+        cost:
+          $ref: '#/components/schemas/CostBreakdown'
+        children:
+          type: array
+          items:
+            $ref: '#/components/schemas/DrilldownChild'
+        granularity:
+          type: array
+          items:
+            $ref: '#/components/schemas/GranularCostDataPoint'
+        timestamp:
+          type: string
+          format: date-time
+
+    DrilldownChild:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        cost:
+          type: number
+          format: float
+        grade:
+          type: string
+        resource:
+          type: string
+        utilization:
+          type: number
+          format: float
+
+    GranularCostDataPoint:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        cost:
+          type: number
+          format: float
+        usage:
+          type: number
+          format: float
+        waste:
+          type: number
+          format: float
+
+    SLOHealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        metrics:
+          type: array
+          items:
+            $ref: '#/components/schemas/SLOMetric'
+        violations:
+          type: array
+          items:
+            $ref: '#/components/schemas/SLOViolation'
+        summary:
+          $ref: '#/components/schemas/SLOSummary'
+        timestamp:
+          type: string
+          format: date-time
+
+    SLOMetric:
+      type: object
+      properties:
+        name:
+          type: string
+        value:
+          type: number
+          format: float
+        threshold:
+          type: number
+          format: float
+        unit:
+          type: string
+        status:
+          type: string
+        trend:
+          type: string
+        last_updated:
+          type: string
+          format: date-time
+
+    SLOViolation:
+      type: object
+      properties:
+        id:
+          type: string
+        service:
+          type: string
+        metric:
+          type: string
+        violated_at:
+          type: string
+          format: date-time
+        duration:
+          type: string
+        severity:
+          type: string
+        description:
+          type: string
+        evidence:
+          type: array
+          items:
+            type: string
+
+    SLOSummary:
+      type: object
+      properties:
+        total_services:
+          type: integer
+        healthy_services:
+          type: integer
+        at_risk_services:
+          type: integer
+        breached_services:
+          type: integer
+        overall_health:
+          type: number
+          format: float
+        mttr:
+          type: string
+        availability:
+          type: number
+          format: float
+        latency_p95:
+          type: integer
+        error_rate:
+          type: number
+          format: float
+
+    SLOHistoryResponse:
+      type: object
+      properties:
+        service:
+          type: string
+        metric:
+          type: string
+        data_points:
+          type: array
+          items:
+            $ref: '#/components/schemas/SLOHistoryDataPoint'
+        trend:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    SLOHistoryDataPoint:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        value:
+          type: number
+          format: float
+        threshold:
+          type: number
+          format: float
+        status:
+          type: string
+        violation:
+          type: boolean
+
+    SLOBurnRateResponse:
+      type: object
+      properties:
+        service:
+          type: string
+        window:
+          type: string
+        burn_rate:
+          type: number
+          format: float
+        remaining_budget:
+          type: number
+          format: float
+        budget_consumed:
+          type: number
+          format: float
+        status:
+          type: string
+        projected_exhaustion:
+          type: string
+          format: date-time
+        timestamp:
+          type: string
+          format: date-time
+
+    ROIDashboardResponse:
+      type: object
+      properties:
+        summary:
+          $ref: '#/components/schemas/ROISummary'
+        trends:
+          type: array
+          items:
+            $ref: '#/components/schemas/ROITrend'
+        breakdown:
+          type: array
+          items:
+            $ref: '#/components/schemas/ROIBreakdown'
+        recommendations:
+          type: array
+          items:
+            $ref: '#/components/schemas/ROIRecommendation'
+        timestamp:
+          type: string
+          format: date-time
+
+    ROISummary:
+      type: object
+      properties:
+        roi_percentage:
+          type: number
+          format: float
+        total_investment:
+          type: number
+          format: float
+        total_savings:
+          type: number
+          format: float
+        total_benefits:
+          type: number
+          format: float
+        payback_period:
+          type: string
+        net_present_value:
+          type: number
+          format: float
+        internal_rate_of_return:
+          type: number
+          format: float
+        status:
+          type: string
+        trend:
+          type: string
+
+    ROITrend:
+      type: object
+      properties:
+        period:
+          type: string
+        roi:
+          type: number
+          format: float
+        investment:
+          type: number
+          format: float
+        savings:
+          type: number
+          format: float
+        benefits:
+          type: number
+          format: float
+
+    ROIBreakdown:
+      type: object
+      properties:
+        category:
+          type: string
+        investment:
+          type: number
+          format: float
+        savings:
+          type: number
+          format: float
+        benefits:
+          type: number
+          format: float
+        roi:
+          type: number
+          format: float
+        percentage:
+          type: number
+          format: float
+
+    ROIRecommendation:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        impact:
+          type: string
+        effort:
+          type: string
+        roi_potential:
+          type: number
+          format: float
+        category:
+          type: string
+        status:
+          type: string
+        priority:
+          type: integer
+
+    ROIDetailsResponse:
+      type: object
+      properties:
+        category:
+          type: string
+        metrics:
+          type: array
+          items:
+            $ref: '#/components/schemas/ROIMetric'
+        initiatives:
+          type: array
+          items:
+            $ref: '#/components/schemas/ROIInitiative'
+        timeline:
+          type: array
+          items:
+            $ref: '#/components/schemas/ROITimelineEvent'
+        timestamp:
+          type: string
+          format: date-time
+
+    ROIMetric:
+      type: object
+      properties:
+        name:
+          type: string
+        value:
+          type: number
+          format: float
+        unit:
+          type: string
+        target:
+          type: number
+          format: float
+        variance:
+          type: number
+          format: float
+        status:
+          type: string
+
+    ROIInitiative:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        start_date:
+          type: string
+          format: date-time
+        end_date:
+          type: string
+          format: date-time
+        budget:
+          type: number
+          format: float
+        actual_cost:
+          type: number
+          format: float
+        savings:
+          type: number
+          format: float
+        roi:
+          type: number
+          format: float
+        status:
+          type: string
+        owner:
+          type: string
+
+    ROITimelineEvent:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date-time
+        event:
+          type: string
+        description:
+          type: string
+        impact:
+          type: string
+
+    ROIComparisonResponse:
+      type: object
+      properties:
+        baseline:
+          $ref: '#/components/schemas/ROIPeriod'
+        comparison:
+          $ref: '#/components/schemas/ROIPeriod'
+        delta:
+          $ref: '#/components/schemas/ROIDelta'
+        insights:
+          type: array
+          items:
+            type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    ROIPeriod:
+      type: object
+      properties:
+        period:
+          type: string
+        roi:
+          type: number
+          format: float
+        investment:
+          type: number
+          format: float
+        savings:
+          type: number
+          format: float
+        benefits:
+          type: number
+          format: float
+
+    ROIDelta:
+      type: object
+      properties:
+        roi_change:
+          type: number
+          format: float
+        investment_change:
+          type: number
+          format: float
+        savings_change:
+          type: number
+          format: float
+        benefits_change:
+          type: number
+          format: float
+        percentage_change:
+          type: number
+          format: float
+        interpretation:
+          type: string
+
+securitySchemes:
+  BearerAuth:
+    type: http
+    scheme: bearer
+    bearerFormat: JWT
+
+security:
+  - BearerAuth: []

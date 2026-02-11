@@ -1,0 +1,40 @@
+# golangci-lint configuration file
+# Reference: https://golangci-lint.run/usage/configuration/
+# This configuration works with golangci-lint v1.55.2
+
+run:
+  timeout: 5m
+  modules-download-mode: readonly
+
+linters:
+  disable-all: true
+  enable:
+    # 基本代码质量检查
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - typecheck
+    - unused
+    # 阴影变量检查
+    - predeclared
+    # 代码风格检查（替代golint）
+    - revive
+    - stylecheck
+
+linters-settings:
+  revive:
+    rules:
+      - name: exported
+      - name: package-comments
+
+issues:
+  exclude-use-default: false
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+output:
+  formats:
+    - format: colored-line-number
+      path: stdout

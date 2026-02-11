@@ -1,0 +1,2167 @@
+{
+  "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+  "pkg": {
+    "name": "lighthouse-web",
+    "version": "1.0.0",
+    "description": "Lighthouse frontend dashboard for cost optimization and resource efficiency",
+    "private": true,
+    "dependencies": {
+      "@ant-design/pro-components": "^2.8.0",
+      "@ant-design/pro-layout": "^7.13.0",
+      "@ant-design/pro-table": "^3.10.0",
+      "@umijs/route-utils": "^4.0.0",
+      "antd": "^5.12.0",
+      "axios": "^1.6.0",
+      "classnames": "^2.3.2",
+      "lodash": "^4.17.21",
+      "moment": "^2.29.4",
+      "react": "^18.2.0",
+      "react-dom": "^18.2.0",
+      "react-router-dom": "^6.18.0",
+      "recharts": "^2.10.0",
+      "zustand": "^4.4.0"
+    },
+    "devDependencies": {
+      "@playwright/test": "^1.40.0",
+      "@storybook/addon-essentials": "^7.6.0",
+      "@storybook/addon-interactions": "^7.6.0",
+      "@storybook/addon-links": "^7.6.0",
+      "@storybook/blocks": "^7.6.0",
+      "@storybook/react": "^7.6.0",
+      "@storybook/react-webpack5": "^7.6.0",
+      "@testing-library/jest-dom": "^6.1.4",
+      "@testing-library/react": "^14.0.0",
+      "@testing-library/user-event": "^14.5.1",
+      "@types/lodash": "^4.14.201",
+      "@types/node": "^20.9.0",
+      "@types/react": "^18.2.37",
+      "@types/react-dom": "^18.2.15",
+      "@typescript-eslint/eslint-plugin": "^6.10.0",
+      "@typescript-eslint/parser": "^6.10.0",
+      "@umijs/fabric": "^2.14.1",
+      "eslint": "^8.53.0",
+      "eslint-config-react-app": "^7.0.1",
+      "eslint-plugin-react": "^7.33.2",
+      "eslint-plugin-react-hooks": "^4.6.0",
+      "jest": "^29.7.0",
+      "jest-environment-jsdom": "^29.7.0",
+      "prettier": "^3.0.3",
+      "ts-jest": "^29.1.1",
+      "typescript": "^5.2.2",
+      "umi": "^4.6.28",
+      "webpack": "^5.89.0"
+    },
+    "scripts": {
+      "start": "umi dev",
+      "build": "umi build",
+      "test": "jest",
+      "test:watch": "jest --watch",
+      "e2e": "playwright test",
+      "e2e:ui": "playwright test --ui",
+      "storybook": "storybook dev -p 6006",
+      "build-storybook": "storybook build",
+      "lint": "eslint src --ext .js,.jsx,.ts,.tsx",
+      "lint:fix": "eslint src --ext .js,.jsx,.ts,.tsx --fix",
+      "format": "prettier --write \"src/**/*.{js,jsx,ts,tsx,json,md}\"",
+      "format:check": "prettier --check \"src/**/*.{js,jsx,ts,tsx,json,md}\""
+    },
+    "browserslist": {
+      "production": [
+        ">0.2%",
+        "not dead",
+        "not op_mini all"
+      ],
+      "development": [
+        "last 1 chrome version",
+        "last 1 firefox version",
+        "last 1 safari version"
+      ]
+    }
+  },
+  "pkgPath": "/root/sean/workspace/lighthouse/lighthouse-src/web/package.json",
+  "plugins": {
+    "./node_modules/@umijs/core/dist/service/servicePlugin": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "preset",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/core/dist/service/servicePlugin.js",
+      "id": "./node_modules/@umijs/core/dist/service/servicePlugin",
+      "key": "servicePlugin",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 1
+      },
+      "enableBy": "register"
+    },
+    "@umijs/preset-umi": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "preset",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/index.js",
+      "id": "@umijs/preset-umi",
+      "key": "umi",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 3
+      },
+      "enableBy": "register"
+    },
+    "./node_modules/@umijs/preset-umi/dist/registerMethods": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/registerMethods.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/registerMethods",
+      "key": "registerMethods",
+      "config": {},
+      "time": {
+        "hooks": {
+          "onStart": [
+            0
+          ]
+        },
+        "register": 2
+      },
+      "enableBy": "register"
+    },
+    "@umijs/did-you-know": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/did-you-know/dist/plugin.js",
+      "id": "@umijs/did-you-know",
+      "key": "umijsDidYouKnow",
+      "config": {},
+      "time": {
+        "hooks": {
+          "onStart": [
+            3
+          ]
+        },
+        "register": 2
+      },
+      "enableBy": "register"
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/404/404": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/404/404.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/404/404",
+      "key": "404",
+      "config": {},
+      "time": {
+        "hooks": {
+          "modifyRoutes": [
+            0
+          ]
+        },
+        "register": 1
+      },
+      "enableBy": "register"
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/aiDev/aiDev": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/aiDev/aiDev.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/aiDev/aiDev",
+      "key": "aiDev",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 1
+      },
+      "enableBy": "register"
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/appData/appData": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/appData/appData.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/appData/appData",
+      "key": "appData",
+      "config": {},
+      "time": {
+        "hooks": {
+          "modifyAppData": [
+            24
+          ]
+        },
+        "register": 22
+      },
+      "enableBy": "register"
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/appData/umiInfo": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/appData/umiInfo.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/appData/umiInfo",
+      "key": "umiInfo",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 1
+      },
+      "enableBy": "register"
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/check/check": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/check/check.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/check/check",
+      "key": "check",
+      "config": {},
+      "time": {
+        "hooks": {
+          "onCheckConfig": [
+            0
+          ],
+          "onCheck": [
+            1
+          ]
+        },
+        "register": 1
+      },
+      "enableBy": "register"
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/check/babel722": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/check/babel722.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/check/babel722",
+      "key": "babel722",
+      "config": {},
+      "time": {
+        "hooks": {
+          "onCheck": [
+            0
+          ]
+        },
+        "register": 0
+      },
+      "enableBy": "register"
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/codeSplitting/codeSplitting": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/codeSplitting/codeSplitting.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/codeSplitting/codeSplitting",
+      "key": "codeSplitting",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 0
+      },
+      "enableBy": "config"
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/configPlugins/configPlugins": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/configPlugins/configPlugins.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/configPlugins/configPlugins",
+      "key": "configPlugins",
+      "config": {},
+      "time": {
+        "hooks": {
+          "modifyConfig": [
+            0
+          ]
+        },
+        "register": 9
+      },
+      "enableBy": "register"
+    },
+    "virtual: config-title": {
+      "id": "virtual: config-title",
+      "key": "title",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-styles": {
+      "id": "virtual: config-styles",
+      "key": "styles",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-scripts": {
+      "id": "virtual: config-scripts",
+      "key": "scripts",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-routes": {
+      "id": "virtual: config-routes",
+      "key": "routes",
+      "config": {
+        "onChange": "regenerateTmpFiles"
+      },
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-routeLoader": {
+      "id": "virtual: config-routeLoader",
+      "key": "routeLoader",
+      "config": {
+        "default": {
+          "moduleType": "esm"
+        }
+      },
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-reactRouter5Compat": {
+      "id": "virtual: config-reactRouter5Compat",
+      "key": "reactRouter5Compat",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-presets": {
+      "id": "virtual: config-presets",
+      "key": "presets",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-plugins": {
+      "id": "virtual: config-plugins",
+      "key": "plugins",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-npmClient": {
+      "id": "virtual: config-npmClient",
+      "key": "npmClient",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-mountElementId": {
+      "id": "virtual: config-mountElementId",
+      "key": "mountElementId",
+      "config": {
+        "default": "root"
+      },
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-metas": {
+      "id": "virtual: config-metas",
+      "key": "metas",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-links": {
+      "id": "virtual: config-links",
+      "key": "links",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-historyWithQuery": {
+      "id": "virtual: config-historyWithQuery",
+      "key": "historyWithQuery",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-history": {
+      "id": "virtual: config-history",
+      "key": "history",
+      "config": {
+        "default": {
+          "type": "browser"
+        }
+      },
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-headScripts": {
+      "id": "virtual: config-headScripts",
+      "key": "headScripts",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-esbuildMinifyIIFE": {
+      "id": "virtual: config-esbuildMinifyIIFE",
+      "key": "esbuildMinifyIIFE",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-conventionRoutes": {
+      "id": "virtual: config-conventionRoutes",
+      "key": "conventionRoutes",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-conventionLayout": {
+      "id": "virtual: config-conventionLayout",
+      "key": "conventionLayout",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-base": {
+      "id": "virtual: config-base",
+      "key": "base",
+      "config": {
+        "default": "/"
+      },
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-analyze": {
+      "id": "virtual: config-analyze",
+      "key": "analyze",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-writeToDisk": {
+      "id": "virtual: config-writeToDisk",
+      "key": "writeToDisk",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-transformRuntime": {
+      "id": "virtual: config-transformRuntime",
+      "key": "transformRuntime",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-theme": {
+      "id": "virtual: config-theme",
+      "key": "theme",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-targets": {
+      "id": "virtual: config-targets",
+      "key": "targets",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-svgr": {
+      "id": "virtual: config-svgr",
+      "key": "svgr",
+      "config": {
+        "default": {}
+      },
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-svgo": {
+      "id": "virtual: config-svgo",
+      "key": "svgo",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-stylusLoader": {
+      "id": "virtual: config-stylusLoader",
+      "key": "stylusLoader",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-styleLoader": {
+      "id": "virtual: config-styleLoader",
+      "key": "styleLoader",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-srcTranspilerOptions": {
+      "id": "virtual: config-srcTranspilerOptions",
+      "key": "srcTranspilerOptions",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-srcTranspiler": {
+      "id": "virtual: config-srcTranspiler",
+      "key": "srcTranspiler",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-sassLoader": {
+      "id": "virtual: config-sassLoader",
+      "key": "sassLoader",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-runtimePublicPath": {
+      "id": "virtual: config-runtimePublicPath",
+      "key": "runtimePublicPath",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-purgeCSS": {
+      "id": "virtual: config-purgeCSS",
+      "key": "purgeCSS",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-publicPath": {
+      "id": "virtual: config-publicPath",
+      "key": "publicPath",
+      "config": {
+        "default": "/"
+      },
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-proxy": {
+      "id": "virtual: config-proxy",
+      "key": "proxy",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-postcssLoader": {
+      "id": "virtual: config-postcssLoader",
+      "key": "postcssLoader",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-outputPath": {
+      "id": "virtual: config-outputPath",
+      "key": "outputPath",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-normalCSSLoaderModules": {
+      "id": "virtual: config-normalCSSLoaderModules",
+      "key": "normalCSSLoaderModules",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-mfsu": {
+      "id": "virtual: config-mfsu",
+      "key": "mfsu",
+      "config": {
+        "default": {
+          "strategy": "eager"
+        }
+      },
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-mdx": {
+      "id": "virtual: config-mdx",
+      "key": "mdx",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-manifest": {
+      "id": "virtual: config-manifest",
+      "key": "manifest",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-lessLoader": {
+      "id": "virtual: config-lessLoader",
+      "key": "lessLoader",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-jsMinifierOptions": {
+      "id": "virtual: config-jsMinifierOptions",
+      "key": "jsMinifierOptions",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-jsMinifier": {
+      "id": "virtual: config-jsMinifier",
+      "key": "jsMinifier",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-inlineLimit": {
+      "id": "virtual: config-inlineLimit",
+      "key": "inlineLimit",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-ignoreMomentLocale": {
+      "id": "virtual: config-ignoreMomentLocale",
+      "key": "ignoreMomentLocale",
+      "config": {
+        "default": true
+      },
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-https": {
+      "id": "virtual: config-https",
+      "key": "https",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-hash": {
+      "id": "virtual: config-hash",
+      "key": "hash",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-forkTSChecker": {
+      "id": "virtual: config-forkTSChecker",
+      "key": "forkTSChecker",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-fastRefresh": {
+      "id": "virtual: config-fastRefresh",
+      "key": "fastRefresh",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-extraPostCSSPlugins": {
+      "id": "virtual: config-extraPostCSSPlugins",
+      "key": "extraPostCSSPlugins",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-extraBabelPresets": {
+      "id": "virtual: config-extraBabelPresets",
+      "key": "extraBabelPresets",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-extraBabelPlugins": {
+      "id": "virtual: config-extraBabelPlugins",
+      "key": "extraBabelPlugins",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-extraBabelIncludes": {
+      "id": "virtual: config-extraBabelIncludes",
+      "key": "extraBabelIncludes",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-externals": {
+      "id": "virtual: config-externals",
+      "key": "externals",
+      "config": {
+        "default": {}
+      },
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-esm": {
+      "id": "virtual: config-esm",
+      "key": "esm",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-devtool": {
+      "id": "virtual: config-devtool",
+      "key": "devtool",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-depTranspiler": {
+      "id": "virtual: config-depTranspiler",
+      "key": "depTranspiler",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-define": {
+      "id": "virtual: config-define",
+      "key": "define",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-deadCode": {
+      "id": "virtual: config-deadCode",
+      "key": "deadCode",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-cssPublicPath": {
+      "id": "virtual: config-cssPublicPath",
+      "key": "cssPublicPath",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-cssMinifierOptions": {
+      "id": "virtual: config-cssMinifierOptions",
+      "key": "cssMinifierOptions",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-cssMinifier": {
+      "id": "virtual: config-cssMinifier",
+      "key": "cssMinifier",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-cssLoaderModules": {
+      "id": "virtual: config-cssLoaderModules",
+      "key": "cssLoaderModules",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-cssLoader": {
+      "id": "virtual: config-cssLoader",
+      "key": "cssLoader",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-copy": {
+      "id": "virtual: config-copy",
+      "key": "copy",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-checkDepCssModules": {
+      "id": "virtual: config-checkDepCssModules",
+      "key": "checkDepCssModules",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-chainWebpack": {
+      "id": "virtual: config-chainWebpack",
+      "key": "chainWebpack",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-cacheDirectoryPath": {
+      "id": "virtual: config-cacheDirectoryPath",
+      "key": "cacheDirectoryPath",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-babelLoaderCustomize": {
+      "id": "virtual: config-babelLoaderCustomize",
+      "key": "babelLoaderCustomize",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-autoprefixer": {
+      "id": "virtual: config-autoprefixer",
+      "key": "autoprefixer",
+      "config": {},
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-autoCSSModules": {
+      "id": "virtual: config-autoCSSModules",
+      "key": "autoCSSModules",
+      "config": {
+        "default": true
+      },
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "virtual: config-alias": {
+      "id": "virtual: config-alias",
+      "key": "alias",
+      "config": {
+        "default": {
+          "umi": "@@/exports",
+          "react": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/react",
+          "react-dom": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/react-dom",
+          "react-router": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/node_modules/react-router",
+          "react-router-dom": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/node_modules/react-router-dom"
+        }
+      },
+      "type": "plugin",
+      "enableBy": "register",
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/crossorigin/crossorigin": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/crossorigin/crossorigin.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/crossorigin/crossorigin",
+      "key": "crossorigin",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 1
+      },
+      "enableBy": "config"
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/depsOnDemand/depsOnDemand": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/depsOnDemand/depsOnDemand.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/depsOnDemand/depsOnDemand",
+      "key": "depsOnDemand",
+      "config": {},
+      "time": {
+        "hooks": {
+          "onStart": [
+            0
+          ]
+        },
+        "register": 1
+      },
+      "enableBy": "register"
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/devTool/devTool": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/devTool/devTool.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/devTool/devTool",
+      "key": "devTool",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 0
+      },
+      "enableBy": "register"
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/esbuildHelperChecker/esbuildHelperChecker": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/esbuildHelperChecker/esbuildHelperChecker.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/esbuildHelperChecker/esbuildHelperChecker",
+      "key": "esbuildHelperChecker",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 96
+      },
+      "enableBy": "register"
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/esmi/esmi": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/esmi/esmi.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/esmi/esmi",
+      "key": "esmi",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 31
+      },
+      "enableBy": "config"
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/exportStatic/exportStatic": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/exportStatic/exportStatic.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/exportStatic/exportStatic",
+      "key": "exportStatic",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 11
+      },
+      "enableBy": "config"
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/favicons/favicons": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/favicons/favicons.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/favicons/favicons",
+      "key": "favicons",
+      "config": {},
+      "time": {
+        "hooks": {
+          "modifyAppData": [
+            0
+          ]
+        },
+        "register": 1
+      },
+      "enableBy": "register"
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/helmet/helmet": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/helmet/helmet.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/helmet/helmet",
+      "key": "helmet",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 1
+      },
+      "enableBy": "register"
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/icons/icons": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/icons/icons.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/icons/icons",
+      "key": "icons",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 1
+      },
+      "enableBy": "config"
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/mock/mock": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/mock/mock.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/mock/mock",
+      "key": "mock",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 36
+      }
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/mpa/mpa": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/mpa/mpa.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/mpa/mpa",
+      "key": "mpa",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 1
+      },
+      "enableBy": "config"
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/okam/okam": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/okam/okam.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/okam/okam",
+      "key": "okam",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/overrides/overrides": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/overrides/overrides.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/overrides/overrides",
+      "key": "overrides",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 0
+      },
+      "enableBy": "register"
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/phantomDependency/phantomDependency": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/phantomDependency/phantomDependency.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/phantomDependency/phantomDependency",
+      "key": "phantomDependency",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 1
+      },
+      "enableBy": "config"
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/polyfill/polyfill": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/polyfill/polyfill.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/polyfill/polyfill",
+      "key": "polyfill",
+      "config": {},
+      "time": {
+        "hooks": {
+          "modifyConfig": [
+            1
+          ]
+        },
+        "register": 2
+      }
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/polyfill/publicPathPolyfill": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/polyfill/publicPathPolyfill.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/polyfill/publicPathPolyfill",
+      "key": "publicPathPolyfill",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 0
+      },
+      "enableBy": "register"
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/prepare/prepare": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/prepare/prepare.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/prepare/prepare",
+      "key": "prepare",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 1
+      },
+      "enableBy": "register"
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/routePrefetch/routePrefetch": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/routePrefetch/routePrefetch.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/routePrefetch/routePrefetch",
+      "key": "routePrefetch",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 1
+      },
+      "enableBy": "config"
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/stagewise/stagewise": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/stagewise/stagewise.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/stagewise/stagewise",
+      "key": "stagewise",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 0
+      },
+      "enableBy": "config"
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/terminal/terminal": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/terminal/terminal.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/terminal/terminal",
+      "key": "terminal",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 1
+      },
+      "enableBy": "register"
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/tmpFiles/tmpFiles": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/tmpFiles/tmpFiles.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/tmpFiles/tmpFiles",
+      "key": "tmpFiles",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 4
+      },
+      "enableBy": "register"
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/clientLoader/clientLoader": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/clientLoader/clientLoader.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/clientLoader/clientLoader",
+      "key": "clientLoader",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 1
+      },
+      "enableBy": "config"
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/routeProps/routeProps": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/routeProps/routeProps.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/routeProps/routeProps",
+      "key": "routeProps",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 1
+      }
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/ssr/ssr": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/ssr/ssr.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/ssr/ssr",
+      "key": "ssr",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 2
+      },
+      "enableBy": "config"
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/tmpFiles/configTypes": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/tmpFiles/configTypes.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/tmpFiles/configTypes",
+      "key": "configTypes",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 2
+      },
+      "enableBy": "register"
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/transform/transform": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/transform/transform.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/transform/transform",
+      "key": "transform",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 3
+      },
+      "enableBy": "register"
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/lowImport/lowImport": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/lowImport/lowImport.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/lowImport/lowImport",
+      "key": "lowImport",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 3
+      },
+      "enableBy": "config"
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/vite/vite": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/vite/vite.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/vite/vite",
+      "key": "vite",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 1
+      },
+      "enableBy": "config"
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/apiRoute/apiRoute": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/apiRoute/apiRoute.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/apiRoute/apiRoute",
+      "key": "apiRoute",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 4
+      }
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/monorepo/redirect": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/monorepo/redirect.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/monorepo/redirect",
+      "key": "monorepoRedirect",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 23
+      },
+      "enableBy": "config"
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/test/test": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/test/test.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/test/test",
+      "key": "test",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 1
+      }
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/clickToComponent/clickToComponent": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/clickToComponent/clickToComponent.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/clickToComponent/clickToComponent",
+      "key": "clickToComponent",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 0
+      }
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/legacy/legacy": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/legacy/legacy.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/legacy/legacy",
+      "key": "legacy",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 1
+      },
+      "enableBy": "config"
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/classPropertiesLoose/classPropertiesLoose": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/classPropertiesLoose/classPropertiesLoose.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/classPropertiesLoose/classPropertiesLoose",
+      "key": "classPropertiesLoose",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 1
+      },
+      "enableBy": "config"
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/webpack/webpack": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/webpack/webpack.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/webpack/webpack",
+      "key": "preset-umi:webpack",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 1
+      }
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/swc/swc": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/swc/swc.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/swc/swc",
+      "key": "swc",
+      "config": {},
+      "time": {
+        "hooks": {
+          "addOnDemandDeps": [
+            0
+          ]
+        },
+        "register": 0
+      },
+      "enableBy": "register"
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/ui/ui": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/ui/ui.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/ui/ui",
+      "key": "ui",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 3
+      }
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/mako/mako": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/mako/mako.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/mako/mako",
+      "key": "mako",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 1
+      },
+      "enableBy": "config"
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/utoopack/utoopack": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/utoopack/utoopack.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/utoopack/utoopack",
+      "key": "utoopack",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 1
+      }
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/hmrGuardian/hmrGuardian": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/hmrGuardian/hmrGuardian.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/hmrGuardian/hmrGuardian",
+      "key": "hmrGuardian",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 8
+      }
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/routePreloadOnLoad/routePreloadOnLoad": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/routePreloadOnLoad/routePreloadOnLoad.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/routePreloadOnLoad/routePreloadOnLoad",
+      "key": "routePreloadOnLoad",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 38
+      }
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/forget/forget": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/forget/forget.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/forget/forget",
+      "key": "forget",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 1
+      },
+      "enableBy": "config"
+    },
+    "./node_modules/@umijs/preset-umi/dist/features/bundler/bundler": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/features/bundler/bundler.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/features/bundler/bundler",
+      "key": "preset-umi:bundler",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 1
+      },
+      "enableBy": "register"
+    },
+    "./node_modules/@umijs/preset-umi/dist/commands/build": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/commands/build.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/commands/build",
+      "key": "build",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 3
+      },
+      "enableBy": "register"
+    },
+    "./node_modules/@umijs/preset-umi/dist/commands/config/config": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/commands/config/config.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/commands/config/config",
+      "key": "config",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 45
+      },
+      "enableBy": "register"
+    },
+    "./node_modules/@umijs/preset-umi/dist/commands/dev/dev": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/commands/dev/dev.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/commands/dev/dev",
+      "key": "dev",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 22
+      }
+    },
+    "./node_modules/@umijs/preset-umi/dist/commands/help": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/commands/help.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/commands/help",
+      "key": "help",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 1
+      },
+      "enableBy": "register"
+    },
+    "./node_modules/@umijs/preset-umi/dist/commands/lint": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/commands/lint.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/commands/lint",
+      "key": "lint",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 0
+      },
+      "enableBy": "register"
+    },
+    "./node_modules/@umijs/preset-umi/dist/commands/setup": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/commands/setup.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/commands/setup",
+      "key": "setup",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 1
+      },
+      "enableBy": "register"
+    },
+    "./node_modules/@umijs/preset-umi/dist/commands/deadcode": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/commands/deadcode.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/commands/deadcode",
+      "key": "deadcode",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 1
+      },
+      "enableBy": "register"
+    },
+    "./node_modules/@umijs/preset-umi/dist/commands/version": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/commands/version.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/commands/version",
+      "key": "version",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 0
+      },
+      "enableBy": "register"
+    },
+    "./node_modules/@umijs/preset-umi/dist/commands/generators/page": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/commands/generators/page.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/commands/generators/page",
+      "key": "generator:page",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 2
+      },
+      "enableBy": "register"
+    },
+    "./node_modules/@umijs/preset-umi/dist/commands/generators/prettier": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/commands/generators/prettier.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/commands/generators/prettier",
+      "key": "generator:prettier",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 1
+      },
+      "enableBy": "register"
+    },
+    "./node_modules/@umijs/preset-umi/dist/commands/generators/tsconfig": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/commands/generators/tsconfig.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/commands/generators/tsconfig",
+      "key": "generator:tsconfig",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 0
+      },
+      "enableBy": "register"
+    },
+    "./node_modules/@umijs/preset-umi/dist/commands/generators/jest": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/commands/generators/jest.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/commands/generators/jest",
+      "key": "generator:jest",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 1
+      },
+      "enableBy": "register"
+    },
+    "./node_modules/@umijs/preset-umi/dist/commands/generators/tailwindcss": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/commands/generators/tailwindcss.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/commands/generators/tailwindcss",
+      "key": "generator:tailwindcss",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 0
+      },
+      "enableBy": "register"
+    },
+    "./node_modules/@umijs/preset-umi/dist/commands/generators/dva": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/commands/generators/dva.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/commands/generators/dva",
+      "key": "generator:dva",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 1
+      },
+      "enableBy": "register"
+    },
+    "./node_modules/@umijs/preset-umi/dist/commands/generators/component": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/commands/generators/component.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/commands/generators/component",
+      "key": "generator:component",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 1
+      },
+      "enableBy": "register"
+    },
+    "./node_modules/@umijs/preset-umi/dist/commands/generators/mock": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/commands/generators/mock.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/commands/generators/mock",
+      "key": "generator:mock",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 0
+      },
+      "enableBy": "register"
+    },
+    "./node_modules/@umijs/preset-umi/dist/commands/generators/cypress": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/commands/generators/cypress.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/commands/generators/cypress",
+      "key": "generator:cypress",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 1
+      },
+      "enableBy": "register"
+    },
+    "./node_modules/@umijs/preset-umi/dist/commands/generators/api": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/commands/generators/api.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/commands/generators/api",
+      "key": "generator:api",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 0
+      },
+      "enableBy": "register"
+    },
+    "./node_modules/@umijs/preset-umi/dist/commands/generators/precommit": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/commands/generators/precommit.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/commands/generators/precommit",
+      "key": "generator:precommit",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 1
+      },
+      "enableBy": "register"
+    },
+    "./node_modules/@umijs/preset-umi/dist/commands/plugin": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/commands/plugin.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/commands/plugin",
+      "key": "command:plugin",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 0
+      },
+      "enableBy": "register"
+    },
+    "./node_modules/@umijs/preset-umi/dist/commands/verify-commit": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/commands/verify-commit.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/commands/verify-commit",
+      "key": "verifyCommit",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 2
+      },
+      "enableBy": "register"
+    },
+    "./node_modules/@umijs/preset-umi/dist/commands/preview": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/commands/preview.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/commands/preview",
+      "key": "preview",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 24
+      },
+      "enableBy": "register"
+    },
+    "./node_modules/@umijs/preset-umi/dist/commands/mfsu/mfsu": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/dist/commands/mfsu/mfsu.js",
+      "id": "./node_modules/@umijs/preset-umi/dist/commands/mfsu/mfsu",
+      "key": "mfsu-cli",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 1
+      },
+      "enableBy": "register"
+    },
+    "@umijs/plugin-run": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/plugin-run/dist/index.js",
+      "id": "@umijs/plugin-run",
+      "key": "run",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 4
+      },
+      "enableBy": "register"
+    },
+    "./node_modules/@umijs/core/dist/service/generatePlugin": {
+      "cwd": "/root/sean/workspace/lighthouse/lighthouse-src/web",
+      "type": "plugin",
+      "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/core/dist/service/generatePlugin.js",
+      "id": "./node_modules/@umijs/core/dist/service/generatePlugin",
+      "key": "generatePlugin",
+      "config": {},
+      "time": {
+        "hooks": {},
+        "register": 1
+      },
+      "enableBy": "register"
+    }
+  },
+  "presets": [],
+  "name": "build",
+  "args": {
+    "_": []
+  },
+  "userConfig": {
+    "routes": [
+      {
+        "path": "/",
+        "component": "@/pages/CostOverviewPage"
+      },
+      {
+        "path": "/drilldown",
+        "component": "@/pages/DrilldownPage"
+      },
+      {
+        "path": "/slo",
+        "component": "@/pages/SLODashboard"
+      },
+      {
+        "path": "/roi",
+        "component": "@/pages/ROIDashboard"
+      }
+    ],
+    "fastRefresh": true,
+    "proxy": {
+      "/api": {
+        "target": "http://localhost:8080",
+        "changeOrigin": true
+      }
+    }
+  },
+  "mainConfigFile": "/root/sean/workspace/lighthouse/lighthouse-src/web/.umirc.ts",
+  "config": {
+    "routeLoader": {
+      "moduleType": "esm"
+    },
+    "mountElementId": "root",
+    "history": {
+      "type": "browser"
+    },
+    "base": "/",
+    "svgr": {},
+    "publicPath": "/",
+    "mfsu": {
+      "strategy": "eager"
+    },
+    "ignoreMomentLocale": true,
+    "externals": {},
+    "autoCSSModules": true,
+    "alias": {
+      "umi": "@@/exports",
+      "react": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/react",
+      "react-dom": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/react-dom",
+      "react-router": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/node_modules/react-router",
+      "react-router-dom": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/@umijs/preset-umi/node_modules/react-router-dom",
+      "@": "/root/sean/workspace/lighthouse/lighthouse-src/web/src",
+      "@@": "/root/sean/workspace/lighthouse/lighthouse-src/web/src/.umi-production",
+      "regenerator-runtime": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/regenerator-runtime"
+    },
+    "routes": [
+      {
+        "path": "/",
+        "component": "@/pages/CostOverviewPage"
+      },
+      {
+        "path": "/drilldown",
+        "component": "@/pages/DrilldownPage"
+      },
+      {
+        "path": "/slo",
+        "component": "@/pages/SLODashboard"
+      },
+      {
+        "path": "/roi",
+        "component": "@/pages/ROIDashboard"
+      }
+    ],
+    "fastRefresh": true,
+    "proxy": {
+      "/api": {
+        "target": "http://localhost:8080",
+        "changeOrigin": true
+      }
+    },
+    "targets": {
+      "chrome": 80
+    }
+  },
+  "routes": {
+    "1": {
+      "path": "/",
+      "file": "@/pages/CostOverviewPage.tsx",
+      "id": "1",
+      "absPath": "/",
+      "__content": "import React, { useEffect } from 'react';\nimport { Card, Row, Col, Statistic, Switch, Space, Alert } from 'antd';\nimport { LoadingOutlined } from '@ant-design/icons';\nimport CostTable from '@/components/CostTable';\nimport EfficiencyChart from '@/components/EfficiencyChart';\nimport { useAppStore } from '@/store';\n\nconst CostOverviewPage: React.FC = () => {\n  const {\n    globalCostMetrics,\n    namespaceCosts,\n    loadingGlobalMetrics,\n    loadingNamespaceCosts,\n    errorGlobalMetrics,\n    errorNamespaceCosts,\n    useMockData,\n    fetchGlobalCostMetrics,\n    fetchNamespaceCosts,\n    setUseMockData,\n  } = useAppStore();\n\n  useEffect(() => {\n    fetchGlobalCostMetrics();\n    fetchNamespaceCosts();\n  }, [fetchGlobalCostMetrics, fetchNamespaceCosts]);\n\n  const handleRowClick = (record: any) => {\n    // TODO: 导航到钻取页面\n    console.log('Navigate to drilldown for:', record.namespace);\n  };\n\n  const renderGlobalMetrics = () => {\n    if (loadingGlobalMetrics) {\n      return (\n        <Card loading={true}>\n          <LoadingOutlined />\n        </Card>\n      );\n    }\n\n    if (errorGlobalMetrics) {\n      return (\n        <Alert message=\"加载全局指标失败\" description={errorGlobalMetrics} type=\"error\" showIcon />\n      );\n    }\n\n    if (!globalCostMetrics) {\n      return <Card>暂无数据</Card>;\n    }\n\n    return (\n      <Row gutter={[16, 16]}>\n        <Col xs={24} sm={12} md={6}>\n          <Card>\n            <Statistic\n              title=\"总账单成本\"\n              value={globalCostMetrics.totalBillableCost}\n              prefix=\"¥\"\n              formatter={value => Number(value).toLocaleString()}\n            />\n          </Card>\n        </Col>\n        <Col xs={24} sm={12} md={6}>\n          <Card>\n            <Statistic\n              title=\"可优化空间\"\n              value={globalCostMetrics.totalOptimizableSpace}\n              prefix=\"¥\"\n              formatter={value => Number(value).toLocaleString()}\n            />\n          </Card>\n        </Col>\n        <Col xs={24} sm={12} md={6}>\n          <Card>\n            <Statistic title=\"全局效率分\" value={globalCostMetrics.globalEfficiency} suffix=\"%\" />\n          </Card>\n        </Col>\n        <Col xs={24} sm={12} md={6}>\n          <Card>\n            <div\n              style={{\n                display: 'flex',\n                justifyContent: 'center',\n                alignItems: 'center',\n                height: '100%',\n              }}\n            >\n              <EfficiencyChart efficiency={globalCostMetrics.globalEfficiency} size={80} />\n            </div>\n          </Card>\n        </Col>\n      </Row>\n    );\n  };\n\n  const renderDomainBreakdown = () => {\n    if (!globalCostMetrics?.domainBreakdown?.length) {\n      return null;\n    }\n\n    return (\n      <Card title=\"领域成本分解\" style={{ marginTop: 16 }}>\n        <Row gutter={[16, 16]}>\n          {globalCostMetrics.domainBreakdown.map((domain, index) => (\n            <Col key={index} xs={24} sm={12} md={8} lg={6}>\n              <Card size=\"small\">\n                <Statistic\n                  title={domain.domain}\n                  value={domain.cost}\n                  prefix=\"¥\"\n                  formatter={value => Number(value).toLocaleString()}\n                  suffix={\n                    <div style={{ marginTop: 8 }}>\n                      <small>效率: {domain.efficiency}%</small>\n                    </div>\n                  }\n                />\n              </Card>\n            </Col>\n          ))}\n        </Row>\n      </Card>\n    );\n  };\n\n  return (\n    <div>\n      <div\n        style={{\n          display: 'flex',\n          justifyContent: 'space-between',\n          alignItems: 'center',\n          marginBottom: 16,\n        }}\n      >\n        <h2>全域成本透视</h2>\n        <Space>\n          <span>使用Mock数据</span>\n          <Switch\n            checked={useMockData}\n            onChange={setUseMockData}\n            checkedChildren=\"是\"\n            unCheckedChildren=\"否\"\n          />\n        </Space>\n      </div>\n\n      {renderGlobalMetrics()}\n      {renderDomainBreakdown()}\n\n      <Card title=\"命名空间成本明细\" style={{ marginTop: 16 }}>\n        {loadingNamespaceCosts ? (\n          <div style={{ textAlign: 'center', padding: '20px' }}>\n            <LoadingOutlined spin /> 加载中...\n          </div>\n        ) : errorNamespaceCosts ? (\n          <Alert\n            message=\"加载命名空间成本失败\"\n            description={errorNamespaceCosts}\n            type=\"error\"\n            showIcon\n          />\n        ) : namespaceCosts?.length ? (\n          <CostTable data={namespaceCosts} onRowClick={handleRowClick} />\n        ) : (\n          <div style={{ textAlign: 'center', padding: '20px' }}>暂无命名空间数据</div>\n        )}\n      </Card>\n    </div>\n  );\n};\n\nexport default CostOverviewPage;\n",
+      "__isJSFile": true,
+      "__absFile": "/root/sean/workspace/lighthouse/lighthouse-src/web/src/pages/CostOverviewPage.tsx"
+    },
+    "2": {
+      "path": "/drilldown",
+      "file": "@/pages/DrilldownPage.tsx",
+      "id": "2",
+      "absPath": "/drilldown",
+      "__content": "import React, { useEffect } from 'react';\nimport { Card, Descriptions, Button, Space, Alert, Spin } from 'antd';\nimport { LoadingOutlined } from '@ant-design/icons';\nimport { useNavigate, useSearchParams } from 'react-router-dom';\nimport DrilldownNavigator from '@/components/DrilldownNavigator';\nimport EfficiencyChart from '@/components/EfficiencyChart';\nimport StatusIndicator from '@/components/StatusIndicator';\nimport { useAppStore } from '@/store';\n\nconst DrilldownPage: React.FC = () => {\n  const navigate = useNavigate();\n  const [searchParams] = useSearchParams();\n\n  const {\n    currentDrilldownItem,\n    loadingDrilldown,\n    errorDrilldown,\n    fetchDrilldownData,\n    clearDrilldownPath,\n  } = useAppStore();\n\n  const type = searchParams.get('type') as 'namespace' | 'node' | 'workload' | 'pod';\n  const id = searchParams.get('id');\n\n  useEffect(() => {\n    if (type && id) {\n      fetchDrilldownData(type, id);\n    }\n\n    return () => {\n      clearDrilldownPath();\n    };\n  }, [type, id, fetchDrilldownData, clearDrilldownPath]);\n\n  const handleBack = () => {\n    navigate(-1);\n  };\n\n  const handleHome = () => {\n    navigate('/');\n  };\n\n  const renderDrilldownContent = () => {\n    if (loadingDrilldown) {\n      return (\n        <div style={{ textAlign: 'center', padding: '40px' }}>\n          <Spin indicator={<LoadingOutlined spin />} />\n          <p>加载中...</p>\n        </div>\n      );\n    }\n\n    if (errorDrilldown) {\n      return (\n        <Alert\n          message=\"加载钻取数据失败\"\n          description={errorDrilldown}\n          type=\"error\"\n          showIcon\n          action={\n            <Button type=\"primary\" onClick={() => type && id && fetchDrilldownData(type, id)}>\n              重试\n            </Button>\n          }\n        />\n      );\n    }\n\n    if (!currentDrilldownItem) {\n      return (\n        <div style={{ textAlign: 'center', padding: '40px' }}>\n          <p>暂无数据</p>\n        </div>\n      );\n    }\n\n    const getTypeName = (itemType: string) => {\n      switch (itemType) {\n        case 'namespace':\n          return '命名空间';\n        case 'node':\n          return '节点';\n        case 'workload':\n          return '工作负载';\n        case 'pod':\n          return 'Pod';\n        default:\n          return itemType;\n      }\n    };\n\n    // 基于效率分判断状态\n    let status: 'healthy' | 'warning' | 'critical' = 'healthy';\n    if (currentDrilldownItem.efficiency < 50) {\n      status = 'critical';\n    } else if (currentDrilldownItem.efficiency < 70) {\n      status = 'warning';\n    }\n\n    return (\n      <>\n        <Card title={`${getTypeName(currentDrilldownItem.type)}: ${currentDrilldownItem.name}`}>\n          <Descriptions column={{ xs: 1, sm: 2, md: 3 }} bordered>\n            <Descriptions.Item label=\"ID\">{currentDrilldownItem.id}</Descriptions.Item>\n            <Descriptions.Item label=\"类型\">\n              {getTypeName(currentDrilldownItem.type)}\n            </Descriptions.Item>\n            <Descriptions.Item label=\"成本 (¥)\">\n              {currentDrilldownItem.cost.toLocaleString()}\n            </Descriptions.Item>\n            <Descriptions.Item label=\"可优化空间 (¥)\">\n              {currentDrilldownItem.optimizableSpace.toLocaleString()}\n            </Descriptions.Item>\n            <Descriptions.Item label=\"效率分\">\n              <Space>\n                <EfficiencyChart\n                  efficiency={currentDrilldownItem.efficiency}\n                  size={40}\n                  showLabel={false}\n                />\n                <span>{currentDrilldownItem.efficiency}%</span>\n              </Space>\n            </Descriptions.Item>\n            <Descriptions.Item label=\"健康状态\">\n              <StatusIndicator status={status} showText={true} />\n            </Descriptions.Item>\n          </Descriptions>\n        </Card>\n\n        {currentDrilldownItem.children && currentDrilldownItem.children.length > 0 && (\n          <Card title=\"子资源\" style={{ marginTop: 16 }}>\n            {currentDrilldownItem.children.map(child => (\n              <Card\n                key={child.id}\n                style={{ marginBottom: 8 }}\n                hoverable\n                onClick={() => {\n                  navigate(`/drilldown?type=${child.type}&id=${child.id}`);\n                }}\n              >\n                <div\n                  style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}\n                >\n                  <div>\n                    <strong>\n                      {getTypeName(child.type)}: {child.name}\n                    </strong>\n                    <div style={{ fontSize: '12px', color: '#666' }}>\n                      成本: ¥{child.cost.toLocaleString()} | 效率: {child.efficiency}%\n                    </div>\n                  </div>\n                  <div>\n                    <StatusIndicator\n                      status={\n                        child.efficiency < 50\n                          ? 'critical'\n                          : child.efficiency < 70\n                            ? 'warning'\n                            : 'healthy'\n                      }\n                    />\n                  </div>\n                </div>\n              </Card>\n            ))}\n          </Card>\n        )}\n      </>\n    );\n  };\n\n  return (\n    <div>\n      <DrilldownNavigator onBack={handleBack} onHome={handleHome} />\n      {renderDrilldownContent()}\n    </div>\n  );\n};\n\nexport default DrilldownPage;\n",
+      "__isJSFile": true,
+      "__absFile": "/root/sean/workspace/lighthouse/lighthouse-src/web/src/pages/DrilldownPage.tsx"
+    },
+    "3": {
+      "path": "/slo",
+      "file": "@/pages/SLODashboard.tsx",
+      "id": "3",
+      "absPath": "/slo",
+      "__content": "import React, { useEffect } from 'react';\nimport { Card, Table, Tag, Statistic, Row, Col, Alert, Spin, Space } from 'antd';\nimport { LoadingOutlined } from '@ant-design/icons';\nimport StatusIndicator from '@/components/StatusIndicator';\nimport { useAppStore } from '@/store';\n\nconst SLODashboard: React.FC = () => {\n  const { sloStatus, loadingSLO, errorSLO, fetchSLOStatus, useMockData } = useAppStore();\n\n  useEffect(() => {\n    fetchSLOStatus();\n  }, [fetchSLOStatus]);\n\n  const getStatusTag = (status: string) => {\n    switch (status) {\n      case 'healthy':\n        return <Tag color=\"success\">健康</Tag>;\n      case 'warning':\n        return <Tag color=\"warning\">警告</Tag>;\n      case 'critical':\n        return <Tag color=\"error\">严重</Tag>;\n      default:\n        return <Tag>未知</Tag>;\n    }\n  };\n\n  const columns = [\n    {\n      title: '服务名称',\n      dataIndex: 'serviceName',\n      key: 'serviceName',\n      render: (text: string) => <strong>{text}</strong>,\n    },\n    {\n      title: '健康状态',\n      dataIndex: 'status',\n      key: 'status',\n      render: (status: string) => (\n        <Space>\n          <StatusIndicator status={status as any} showText={true} />\n          {getStatusTag(status)}\n        </Space>\n      ),\n    },\n    {\n      title: '可用性 (%)',\n      dataIndex: 'uptime',\n      key: 'uptime',\n      render: (value: number) => `${value.toFixed(2)}%`,\n      sorter: (a: any, b: any) => a.uptime - b.uptime,\n    },\n    {\n      title: '响应时间 (ms)',\n      dataIndex: 'responseTime',\n      key: 'responseTime',\n      render: (value: number) => value,\n      sorter: (a: any, b: any) => a.responseTime - b.responseTime,\n    },\n    {\n      title: '错误率 (%)',\n      dataIndex: 'errorRate',\n      key: 'errorRate',\n      render: (value: number) => `${value.toFixed(2)}%`,\n      sorter: (a: any, b: any) => a.errorRate - b.errorRate,\n    },\n  ];\n\n  const renderSummaryStats = () => {\n    if (!sloStatus || sloStatus.length === 0) {\n      return null;\n    }\n\n    const totalServices = sloStatus.length;\n    const healthyServices = sloStatus.filter(s => s.status === 'healthy').length;\n    const warningServices = sloStatus.filter(s => s.status === 'warning').length;\n    const criticalServices = sloStatus.filter(s => s.status === 'critical').length;\n\n    const avgUptime = sloStatus.reduce((sum, s) => sum + s.uptime, 0) / totalServices;\n    const avgResponseTime = sloStatus.reduce((sum, s) => sum + s.responseTime, 0) / totalServices;\n    const avgErrorRate = sloStatus.reduce((sum, s) => sum + s.errorRate, 0) / totalServices;\n\n    return (\n      <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>\n        <Col xs={24} sm={12} md={6}>\n          <Card>\n            <Statistic title=\"总服务数\" value={totalServices} />\n          </Card>\n        </Col>\n        <Col xs={24} sm={12} md={6}>\n          <Card>\n            <Statistic title=\"健康服务\" value={healthyServices} valueStyle={{ color: '#52c41a' }} />\n          </Card>\n        </Col>\n        <Col xs={24} sm={12} md={6}>\n          <Card>\n            <Statistic title=\"警告服务\" value={warningServices} valueStyle={{ color: '#faad14' }} />\n          </Card>\n        </Col>\n        <Col xs={24} sm={12} md={6}>\n          <Card>\n            <Statistic\n              title=\"严重服务\"\n              value={criticalServices}\n              valueStyle={{ color: '#ff4d4f' }}\n            />\n          </Card>\n        </Col>\n        <Col xs={24} sm={12} md={6}>\n          <Card>\n            <Statistic title=\"平均可用性\" value={avgUptime.toFixed(2)} suffix=\"%\" />\n          </Card>\n        </Col>\n        <Col xs={24} sm={12} md={6}>\n          <Card>\n            <Statistic title=\"平均响应时间\" value={Math.round(avgResponseTime)} suffix=\"ms\" />\n          </Card>\n        </Col>\n        <Col xs={24} sm={12} md={6}>\n          <Card>\n            <Statistic title=\"平均错误率\" value={avgErrorRate.toFixed(2)} suffix=\"%\" />\n          </Card>\n        </Col>\n      </Row>\n    );\n  };\n\n  return (\n    <div>\n      <h2>SLO健康监控</h2>\n\n      {useMockData && <Alert message=\"当前使用Mock数据\" type=\"info\" style={{ marginBottom: 16 }} />}\n\n      {loadingSLO ? (\n        <div style={{ textAlign: 'center', padding: '40px' }}>\n          <Spin indicator={<LoadingOutlined spin />} />\n          <p>加载SLO状态中...</p>\n        </div>\n      ) : errorSLO ? (\n        <Alert\n          message=\"加载SLO状态失败\"\n          description={errorSLO}\n          type=\"error\"\n          showIcon\n          style={{ marginBottom: 16 }}\n        />\n      ) : (\n        <>\n          {renderSummaryStats()}\n          <Card title=\"服务SLO详情\">\n            {sloStatus?.length ? (\n              <Table\n                dataSource={sloStatus}\n                columns={columns}\n                rowKey=\"serviceName\"\n                pagination={{\n                  pageSize: 10,\n                  showSizeChanger: true,\n                  pageSizeOptions: ['10', '20', '50'],\n                }}\n              />\n            ) : (\n              <div style={{ textAlign: 'center', padding: '20px' }}>暂无SLO数据</div>\n            )}\n          </Card>\n        </>\n      )}\n    </div>\n  );\n};\n\nexport default SLODashboard;\n",
+      "__isJSFile": true,
+      "__absFile": "/root/sean/workspace/lighthouse/lighthouse-src/web/src/pages/SLODashboard.tsx"
+    },
+    "4": {
+      "path": "/roi",
+      "file": "@/pages/ROIDashboard.tsx",
+      "id": "4",
+      "absPath": "/roi",
+      "__content": "import React, { useEffect } from 'react';\nimport { Card, Statistic, Row, Col, Alert, Spin, Tabs } from 'antd';\nimport { LoadingOutlined } from '@ant-design/icons';\nimport TrendChart from '@/components/TrendChart';\nimport { useAppStore } from '@/store';\n\nconst { TabPane } = Tabs;\n\nconst ROIDashboard: React.FC = () => {\n  const { roiTrends, loadingROI, errorROI, fetchROITrends, useMockData } = useAppStore();\n\n  useEffect(() => {\n    fetchROITrends();\n  }, [fetchROITrends]);\n\n  const renderSummaryStats = () => {\n    if (!roiTrends || roiTrends.length === 0) {\n      return null;\n    }\n\n    const latest = roiTrends[roiTrends.length - 1];\n    const previous = roiTrends.length > 1 ? roiTrends[roiTrends.length - 2] : null;\n\n    const valueChange = previous ? ((latest.value - previous.value) / previous.value) * 100 : 0;\n    const costChange = previous ? ((latest.cost - previous.cost) / previous.cost) * 100 : 0;\n    const efficiencyChange = previous ? latest.efficiency - previous.efficiency : 0;\n\n    return (\n      <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>\n        <Col xs={24} sm={12} md={8}>\n          <Card>\n            <Statistic\n              title=\"当前价值\"\n              value={latest.value}\n              prefix=\"¥\"\n              formatter={value => Number(value).toLocaleString()}\n              valueStyle={{ color: valueChange >= 0 ? '#52c41a' : '#ff4d4f' }}\n              suffix={\n                previous && (\n                  <span\n                    style={{ fontSize: '12px', color: valueChange >= 0 ? '#52c41a' : '#ff4d4f' }}\n                  >\n                    {valueChange >= 0 ? '+' : ''}\n                    {valueChange.toFixed(2)}%\n                  </span>\n                )\n              }\n            />\n          </Card>\n        </Col>\n        <Col xs={24} sm={12} md={8}>\n          <Card>\n            <Statistic\n              title=\"当前成本\"\n              value={latest.cost}\n              prefix=\"¥\"\n              formatter={value => Number(value).toLocaleString()}\n              valueStyle={{ color: costChange <= 0 ? '#52c41a' : '#ff4d4f' }}\n              suffix={\n                previous && (\n                  <span\n                    style={{ fontSize: '12px', color: costChange <= 0 ? '#52c41a' : '#ff4d4f' }}\n                  >\n                    {costChange <= 0 ? '' : '+'}\n                    {costChange.toFixed(2)}%\n                  </span>\n                )\n              }\n            />\n          </Card>\n        </Col>\n        <Col xs={24} sm={12} md={8}>\n          <Card>\n            <Statistic\n              title=\"当前效率分\"\n              value={latest.efficiency}\n              valueStyle={{ color: efficiencyChange >= 0 ? '#52c41a' : '#ff4d4f' }}\n              suffix={\n                <span\n                  style={{ fontSize: '12px', color: efficiencyChange >= 0 ? '#52c41a' : '#ff4d4f' }}\n                >\n                  {efficiencyChange >= 0 ? '+' : ''}\n                  {efficiencyChange.toFixed(2)}%\n                </span>\n              }\n            />\n          </Card>\n        </Col>\n      </Row>\n    );\n  };\n\n  const renderCharts = () => {\n    if (!roiTrends || roiTrends.length === 0) {\n      return (\n        <div style={{ textAlign: 'center', padding: '40px' }}>\n          <p>暂无趋势数据</p>\n        </div>\n      );\n    }\n\n    // 过滤最近30天的数据\n    const thirtyDaysAgo = new Date();\n    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);\n\n    const recentTrends = roiTrends.filter(trend => {\n      const trendDate = new Date(trend.date);\n      return trendDate >= thirtyDaysAgo;\n    });\n\n    return (\n      <Tabs defaultActiveKey=\"1\">\n        <TabPane tab=\"价值与成本趋势\" key=\"1\">\n          <TrendChart data={recentTrends} showEfficiency={false} height={400} />\n        </TabPane>\n        <TabPane tab=\"效率分趋势\" key=\"2\">\n          <TrendChart data={recentTrends} showEfficiency={true} height={400} />\n        </TabPane>\n        <TabPane tab=\"完整趋势\" key=\"3\">\n          <TrendChart data={roiTrends} showEfficiency={true} height={400} />\n        </TabPane>\n      </Tabs>\n    );\n  };\n\n  return (\n    <div>\n      <h2>ROI价值追踪</h2>\n\n      {useMockData && <Alert message=\"当前使用Mock数据\" type=\"info\" style={{ marginBottom: 16 }} />}\n\n      {loadingROI ? (\n        <div style={{ textAlign: 'center', padding: '40px' }}>\n          <Spin indicator={<LoadingOutlined spin />} />\n          <p>加载ROI趋势中...</p>\n        </div>\n      ) : errorROI ? (\n        <Alert\n          message=\"加载ROI趋势失败\"\n          description={errorROI}\n          type=\"error\"\n          showIcon\n          style={{ marginBottom: 16 }}\n        />\n      ) : (\n        <>\n          {renderSummaryStats()}\n          <Card title=\"趋势分析\">{renderCharts()}</Card>\n        </>\n      )}\n    </div>\n  );\n};\n\nexport default ROIDashboard;\n",
+      "__isJSFile": true,
+      "__absFile": "/root/sean/workspace/lighthouse/lighthouse-src/web/src/pages/ROIDashboard.tsx"
+    }
+  },
+  "apiRoutes": {},
+  "hasSrcDir": true,
+  "npmClient": "cnpm",
+  "umi": {
+    "version": "4.6.28",
+    "name": "Umi",
+    "importSource": "umi",
+    "cliName": "umi"
+  },
+  "bundleStatus": {
+    "done": false
+  },
+  "mfsuBundleStatus": {
+    "done": false
+  },
+  "react": {
+    "version": "18.3.1",
+    "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/react"
+  },
+  "react-dom": {
+    "version": "18.3.1",
+    "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/react-dom"
+  },
+  "appJS": {
+    "path": "/root/sean/workspace/lighthouse/lighthouse-src/web/src/app.tsx",
+    "exports": [
+      "rootContainer"
+    ]
+  },
+  "locale": "en-US",
+  "globalCSS": [],
+  "globalJS": [],
+  "overridesCSS": [],
+  "bundler": "webpack",
+  "git": {
+    "originUrl": "https://github.com/myxxhui/lighthouse-src.git"
+  },
+  "framework": "react",
+  "typescript": {
+    "tsVersion": "5.9.3",
+    "tslibVersion": "2.8.1"
+  },
+  "faviconFiles": []
+}

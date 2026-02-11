@@ -1,3 +1,7 @@
+# Lighthouse配置示例文件 - 仅包含非敏感配置模板
+# 敏感信息（密码、令牌等）必须通过环境变量注入
+# 实际部署时使用 lighthouse-deploy 仓库中的环境特定配置覆盖此模板
+
 env: dev # 实际部署时通过 ENV 环境变量覆盖
 
 server:
@@ -5,28 +9,122 @@ server:
   read_timeout: 30s
   write_timeout: 30s
   log_level: debug
+  max_conn: 100
+  grace_period: 30s
 
-database:
+# PostgreSQL控制平面配置
+postgres:
   host: localhost
   port: 5432
-  user: lighthouse_user
-  password: "[SECRET]" # 实际通过 DB_PASSWORD 环境变量注入
-  name: lighthouse_db
+  user: lighthouse_control
+  password: "[SECRET]" # 实际通过 PG_PASSWORD 环境变量注入
+  database: lighthouse_control
   ssl_mode: disable
+  max_open_conns: 10
+  max_idle_conns: 5
+  conn_max_lifetime: 1h
+  migration_path: ./migrations/postgres
 
+# ClickHouse证据平面配置
+clickhouse:
+  host: localhost
+  port: 9000
+  user: lighthouse_evidence
+  password: "[SECRET]" # 实际通过 CH_PASSWORD 环境变量注入
+  database: lighthouse_evidence
+  cluster: default
+  secure: false
+  compression: true
+  max_open_conns: 20
+  max_idle_conns: 10
+
+# Prometheus信号平面配置
 prometheus:
   address: http://prometheus:9090
   query_timeout: 10s
+  max_query_range: 7d
+  step_interval: 15m
+  query_concurrency: 5
+  bearer_token: "[SECRET]" # 实际通过 PROMETHEUS_BEARER_TOKEN 环境变量注入
+  skip_tls_verify: false
 
+# Kubernetes配置
 kubernetes:
   api_server: https://kubernetes.default.svc
+  namespace: lighthouse
+  service_account: lighthouse-sa
+  bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+  in_cluster: true
   rbac:
     enabled: true
+    read_only_access: true
+    namespace_scoped: true
 
+# Analysis Engine配置
+analysis_engine:
+  address: http://analysis-engine:8000
+  timeout: 30s
+  api_key: "[SECRET]" # 实际通过 ANALYSIS_ENGINE_API_KEY 环境变量注入
+  max_retries: 3
+  retry_delay: 1s
+  enable_tracing: true
+
+# 数据保留策略
+retention:
+  postgres:
+    incidents: 90d      # 故障快照元数据保留90天
+    daily_snapshots: 180d # 日报保留180天
+    cost_history: 365d  # 成本历史保留365天
+  clickhouse:
+    error_logs: 14d     # 错误日志保留14天
+    sampled_logs: 3d    # 采样日志保留3天
+    trace_data: 30d     # Trace数据保留30天
+    access_logs: 7d     # 访问日志保留7天
+
+# 业务配置
 business:
   cost_calculation:
     cpu_price_per_core_hour: 0.025
     mem_price_per_gb_hour: 0.01
-  slo_thresholds:
-    availability: 99.9
-    latency: 300
+    calculation_interval: 1h
+    aggregation_levels:
+      - namespace
+      - service
+      - pod
+    efficiency_thresholds:
+      zombie: 10        # <10% 为僵尸
+      over_provisioned: 40 # 10-40% 为过剩
+      healthy: 70       # 40-70% 为健康
+      danger: 90        # >90% 为危险
+  
+  slo:
+    availability_threshold: 99.9
+    latency_p95_threshold: 300
+    snapshot_window: 10m
+    trigger_delay: 5m
+    evidence_collection:
+      user_impact: true
+      change_events: true
+      resource_metrics: true
+  
+  roi:
+    baseline_date: "2025-01-01"
+    tracking_frequency: 24h
+    metrics:
+      - financial_savings
+      - efficiency_gains
+      - risk_reduction
+
+# 安全配置
+security:
+  resource_limits:
+    cpu_limit: "500m"
+    memory_limit: "1Gi"
+    max_connections: 100
+  rate_limiting:
+    prometheus_queries_per_minute: 60
+    k8s_api_calls_per_minute: 120
+    database_queries_per_minute: 300
+  encryption:
+    enable_data_encryption: false
+    encryption_key: "[SECRET]" # 实际通过 SECURITY_ENCRYPTION_KEY 环境变量注入
