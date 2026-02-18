@@ -85,11 +85,34 @@ type MockTransaction struct {
 	committed  bool
 }
 
+// applyDataSizeToInitialCount sets InitialDataCount from DataSize so test expectations (e.g. small 4-6 snapshots) are met.
+func applyDataSizeToInitialCount(config *MockConfig) {
+	if config.InitialDataCount == nil {
+		config.InitialDataCount = make(map[string]int)
+	}
+	var costSnapshots, roiBaselines, dailyNamespaceCosts, hourlyWorkloadStats, metadata int
+	switch config.DataSize {
+	case "small":
+		costSnapshots, roiBaselines, dailyNamespaceCosts, hourlyWorkloadStats, metadata = 5, 2, 10, 30, 5
+	case "large":
+		costSnapshots, roiBaselines, dailyNamespaceCosts, hourlyWorkloadStats, metadata = 50, 10, 60, 200, 20
+	default: // "medium"
+		costSnapshots, roiBaselines, dailyNamespaceCosts, hourlyWorkloadStats, metadata = 20, 5, 30, 100, 10
+	}
+	config.InitialDataCount["cost_snapshots"] = costSnapshots
+	config.InitialDataCount["roi_baselines"] = roiBaselines
+	config.InitialDataCount["daily_namespace_costs"] = dailyNamespaceCosts
+	config.InitialDataCount["hourly_workload_stats"] = hourlyWorkloadStats
+	config.InitialDataCount["metadata"] = metadata
+}
+
 // NewMockRepository creates a new mock PostgreSQL repository with the given configuration.
 func NewMockRepository(config MockConfig) *MockRepository {
 	if config.RandomSeed == 0 {
 		config.RandomSeed = time.Now().UnixNano()
 	}
+	// Apply DataSize to InitialDataCount when using default counts (so tests get expected ranges)
+	applyDataSizeToInitialCount(&config)
 
 	repo := &MockRepository{
 		config:              config,

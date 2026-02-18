@@ -231,6 +231,9 @@ func (m *MockClient) shouldReturnError() bool {
 }
 
 func (m *MockClient) getMetricCount() int {
+	if m.config.Scenario == "empty" {
+		return 0
+	}
 	switch m.config.DataSize {
 	case "small":
 		return 10
@@ -243,9 +246,9 @@ func (m *MockClient) getMetricCount() int {
 
 func (m *MockClient) generateResourceMetric(namespace, workload, pod string, startTime, endTime time.Time, index int) costmodel.ResourceMetric {
 	cpuRequest := m.generateCPURequest("pod")
-	cpuUsage := m.generateCPUUsage("pod")
+	cpuUsage := m.generateCPUUsageForRequest(cpuRequest)
 	memRequest := m.generateMemoryRequest("pod")
-	memUsage := m.generateMemoryUsage("pod")
+	memUsage := m.generateMemoryUsageForRequest(memRequest)
 
 	return costmodel.ResourceMetric{
 		CPURequest:  cpuRequest,
@@ -288,8 +291,14 @@ func (m *MockClient) generateCPURequest(resourceType string) float64 {
 
 func (m *MockClient) generateCPUUsage(resourceType string) float64 {
 	request := m.generateCPURequest(resourceType)
+	return m.generateCPUUsageForRequest(request)
+}
 
-	// Usage as percentage of request, based on scenario
+// generateCPUUsageForRequest returns usage as a ratio of the given request so metric pairs stay consistent.
+func (m *MockClient) generateCPUUsageForRequest(request float64) float64 {
+	if m.config.Scenario == "empty" {
+		return 0.0
+	}
 	var usageRatio float64
 	switch m.config.Scenario {
 	case "standard":
@@ -298,12 +307,9 @@ func (m *MockClient) generateCPUUsage(resourceType string) float64 {
 		usageRatio = 0.05 + m.rand.Float64()*0.1 // 5-15%
 	case "risk":
 		usageRatio = 0.85 + m.rand.Float64()*0.15 // 85-100%
-	case "empty":
-		return 0.0
 	default:
 		usageRatio = 0.5
 	}
-
 	return request * usageRatio
 }
 
@@ -340,8 +346,14 @@ func (m *MockClient) generateMemoryRequest(resourceType string) int64 {
 
 func (m *MockClient) generateMemoryUsage(resourceType string) int64 {
 	request := m.generateMemoryRequest(resourceType)
+	return m.generateMemoryUsageForRequest(request)
+}
 
-	// Usage as percentage of request, similar to CPU
+// generateMemoryUsageForRequest returns usage as a ratio of the given request so metric pairs stay consistent.
+func (m *MockClient) generateMemoryUsageForRequest(request int64) int64 {
+	if m.config.Scenario == "empty" {
+		return 0
+	}
 	var usageRatio float64
 	switch m.config.Scenario {
 	case "standard":
@@ -350,12 +362,9 @@ func (m *MockClient) generateMemoryUsage(resourceType string) int64 {
 		usageRatio = 0.08 + m.rand.Float64()*0.12 // 8-20%
 	case "risk":
 		usageRatio = 0.9 + m.rand.Float64()*0.1 // 90-100%
-	case "empty":
-		return 0
 	default:
 		usageRatio = 0.5
 	}
-
 	return int64(float64(request) * usageRatio)
 }
 
