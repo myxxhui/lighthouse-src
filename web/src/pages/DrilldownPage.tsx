@@ -135,7 +135,7 @@ const DrilldownPage: React.FC = () => {
                 style={{ marginBottom: 8 }}
                 hoverable
                 onClick={() => {
-                  navigate(`/drilldown?type=${child.type}&id=${child.id}`);
+                  navigate(`/DrilldownPage?type=${child.type}&id=${child.id}`);
                 }}
               >
                 <div

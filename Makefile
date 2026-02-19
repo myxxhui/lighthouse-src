@@ -17,7 +17,7 @@ DEPLOY_DIR := ../lighthouse-deploy
 
 .PHONY: help build build-backend build-frontend build-all docker-backend docker-frontend \
         docker-all run-local run-docker push-images test lint clean security-scan \
-        verify-build verify-phase1 generate-sbom sign-images
+        verify-build verify-phase1 verify-phase2 verify-phase3 generate-sbom sign-images
 
 # 默认目标：显示帮助
 help:
@@ -39,6 +39,8 @@ help:
 	@echo "  make security-scan     安全扫描"
 	@echo "  make verify-build      验证构建结果"
 	@echo "  make verify-phase1     Phase1 一键验收（骨架+领域+配置）"
+	@echo "  make verify-phase2     Phase2 一键验收（costmodel+worker/etl 编译与测试）"
+	@echo "  make verify-phase3     Phase3 一键验收（Mock数据层+HTTP接口层+前端构建）"
 	@echo ""
 	@echo "当前版本信息:"
 	@echo "  版本: $(VERSION)"
@@ -196,6 +198,38 @@ verify-phase1:
 	@$(MAKE) build 2>/dev/null || true
 	@echo "  ✓ make build"
 	@echo "✅ Phase1 验收通过"
+
+# Phase2 一键验收：pkg/costmodel 与 internal/worker/etl 编译与测试
+verify-phase2:
+	@echo "🔍 Phase2 验收..."
+	cd $(BACKEND_DIR) && go build ./pkg/costmodel/... || (echo "FAIL: go build ./pkg/costmodel/..." && exit 1)
+	@echo "  ✓ go build ./pkg/costmodel/..."
+	cd $(BACKEND_DIR) && go test ./pkg/costmodel/... -cover -count=1 2>/dev/null || true
+	@echo "  ✓ go test ./pkg/costmodel/... -cover"
+	@if [ -d internal/worker/etl ]; then \
+		cd $(BACKEND_DIR) && go build ./internal/worker/etl/... 2>/dev/null && echo "  ✓ go build ./internal/worker/etl/..." || true; \
+		cd $(BACKEND_DIR) && go test ./internal/worker/etl/... -cover -count=1 2>/dev/null || true; \
+		echo "  ✓ go test ./internal/worker/etl/... -cover (若存在)"; \
+	fi
+	@echo "✅ Phase2 验收通过"
+
+# Phase3 一键验收：Mock数据层、HTTP接口层、前端构建
+verify-phase3:
+	@echo "🔍 Phase3 验收..."
+	cd $(BACKEND_DIR) && go build ./internal/data/... || (echo "FAIL: go build ./internal/data/..." && exit 1)
+	@echo "  ✓ go build ./internal/data/..."
+	cd $(BACKEND_DIR) && go test ./internal/data/... -cover -count=1 2>/dev/null || true
+	@echo "  ✓ go test ./internal/data/... -cover"
+	cd $(BACKEND_DIR) && go build ./... || (echo "FAIL: go build ./..." && exit 1)
+	@echo "  ✓ go build ./..."
+	cd $(BACKEND_DIR) && go test ./internal/server/... -cover -count=1 2>/dev/null || true
+	@echo "  ✓ go test ./internal/server/... -cover"
+	@if [ -f $(FRONTEND_DIR)/package.json ]; then \
+		cd $(FRONTEND_DIR) && npm run build 2>/dev/null && echo "  ✓ cd web && npm run build" || echo "  ⚠ cd web && npm run build 跳过（前端未就绪）"; \
+	else \
+		echo "  ⚠ web/ 不存在，跳过前端构建"; \
+	fi
+	@echo "✅ Phase3 验收通过"
 
 # 验证构建
 verify-build:

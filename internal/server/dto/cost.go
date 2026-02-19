@@ -11,11 +11,22 @@ import (
 // Global Cost DTOs
 // =============================================
 
+// DomainBreakdownItem represents a domain in the cost breakdown pie chart.
+type DomainBreakdownItem struct {
+	Domain          string  `json:"domain"`
+	Cost            float64 `json:"cost"`
+	OptimizableSpace float64 `json:"optimizable_space"`
+	Efficiency      float64 `json:"efficiency"`
+}
+
 // GlobalCostResponse represents the response for global cost overview.
 type GlobalCostResponse struct {
-	TotalCost  float64                `json:"total_cost"`
-	Namespaces []NamespaceCostSummary `json:"namespaces"`
-	Timestamp  time.Time              `json:"timestamp"`
+	TotalCost        float64                 `json:"total_cost"`
+	TotalOptimizable float64                 `json:"total_optimizable"`
+	GlobalEfficiency float64                 `json:"global_efficiency"`
+	DomainBreakdown  []DomainBreakdownItem   `json:"domain_breakdown"`
+	Namespaces       []NamespaceCostSummary  `json:"namespaces"`
+	Timestamp        time.Time               `json:"timestamp"`
 }
 
 // NamespaceCostSummary represents a summary of cost for a namespace.
