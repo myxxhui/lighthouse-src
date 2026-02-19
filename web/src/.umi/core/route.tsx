@@ -4,14 +4,17 @@
 import React from 'react';
 
 export async function getRoutes() {
-  const routes = {"1":{"path":"/","id":"1"},"2":{"path":"/drilldown","id":"2"},"3":{"path":"/slo","id":"3"},"4":{"path":"/roi","id":"4"}} as const;
+  const routes = {"1":{"path":"/","parentId":"@@/global-layout","id":"1"},"2":{"path":"/","redirect":"/CostOverviewPage","parentId":"1","id":"2"},"3":{"path":"/CostOverviewPage","parentId":"1","id":"3"},"4":{"path":"/DrilldownPage","parentId":"1","id":"4"},"5":{"path":"/SLODashboard","parentId":"1","id":"5"},"6":{"path":"/ROIDashboard","parentId":"1","id":"6"},"@@/global-layout":{"id":"@@/global-layout","path":"/","isLayout":true}} as const;
   return {
     routes,
     routeComponents: {
-'1': React.lazy(() => import(/* webpackChunkName: "p__CostOverviewPage" */'@/pages/CostOverviewPage.tsx')),
-'2': React.lazy(() => import(/* webpackChunkName: "p__DrilldownPage" */'@/pages/DrilldownPage.tsx')),
-'3': React.lazy(() => import(/* webpackChunkName: "p__SLODashboard" */'@/pages/SLODashboard.tsx')),
-'4': React.lazy(() => import(/* webpackChunkName: "p__ROIDashboard" */'@/pages/ROIDashboard.tsx')),
+'1': React.lazy(() => import(/* webpackChunkName: "layouts__index" */'@/layouts/index.tsx')),
+'2': React.lazy(() => import('./EmptyRoute')),
+'3': React.lazy(() => import(/* webpackChunkName: "p__CostOverviewPage" */'@/pages/CostOverviewPage.tsx')),
+'4': React.lazy(() => import(/* webpackChunkName: "p__DrilldownPage" */'@/pages/DrilldownPage.tsx')),
+'5': React.lazy(() => import(/* webpackChunkName: "p__SLODashboard" */'@/pages/SLODashboard.tsx')),
+'6': React.lazy(() => import(/* webpackChunkName: "p__ROIDashboard" */'@/pages/ROIDashboard.tsx')),
+'@@/global-layout': React.lazy(() => import(/* webpackChunkName: "layouts__index" */'/root/sean/workspace/lighthouse/lighthouse-src/web/src/layouts/index.tsx')),
 },
   };
 }

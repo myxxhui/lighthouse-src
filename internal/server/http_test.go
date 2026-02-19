@@ -1,12 +1,15 @@
 package server
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/myxxhui/lighthouse-src/internal/config"
+	"github.com/myxxhui/lighthouse-src/internal/data/postgres"
+	"github.com/myxxhui/lighthouse-src/internal/server/service"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -20,7 +23,7 @@ func TestNewHTTPServer(t *testing.T) {
 		},
 	}
 
-	server := NewHTTPServer(cfg)
+	server := NewHTTPServer(cfg, nil)
 	assert.NotNil(t, server)
 	assert.NotNil(t, server.engine)
 }
@@ -35,7 +38,7 @@ func TestHealthCheck(t *testing.T) {
 		},
 	}
 
-	server := NewHTTPServer(cfg)
+	server := NewHTTPServer(cfg, nil)
 	engine := server.Engine()
 
 	w := httptest.NewRecorder()
@@ -56,7 +59,7 @@ func TestGlobalCostRoute(t *testing.T) {
 		},
 	}
 
-	server := NewHTTPServer(cfg)
+	server := NewHTTPServer(cfg, nil)
 	engine := server.Engine()
 
 	w := httptest.NewRecorder()
@@ -77,7 +80,7 @@ func TestNamespaceCostRoute(t *testing.T) {
 		},
 	}
 
-	server := NewHTTPServer(cfg)
+	server := NewHTTPServer(cfg, nil)
 	engine := server.Engine()
 
 	w := httptest.NewRecorder()
@@ -98,7 +101,7 @@ func TestDrilldownCostRoute(t *testing.T) {
 		},
 	}
 
-	server := NewHTTPServer(cfg)
+	server := NewHTTPServer(cfg, nil)
 	engine := server.Engine()
 
 	w := httptest.NewRecorder()
@@ -119,7 +122,7 @@ func TestSLOHealthRoute(t *testing.T) {
 		},
 	}
 
-	server := NewHTTPServer(cfg)
+	server := NewHTTPServer(cfg, nil)
 	engine := server.Engine()
 
 	w := httptest.NewRecorder()
@@ -140,7 +143,7 @@ func TestROIDashboardRoute(t *testing.T) {
 		},
 	}
 
-	server := NewHTTPServer(cfg)
+	server := NewHTTPServer(cfg, nil)
 	engine := server.Engine()
 
 	w := httptest.NewRecorder()
@@ -161,7 +164,7 @@ func TestNotFoundRoute(t *testing.T) {
 		},
 	}
 
-	server := NewHTTPServer(cfg)
+	server := NewHTTPServer(cfg, nil)
 	engine := server.Engine()
 
 	w := httptest.NewRecorder()
@@ -182,7 +185,7 @@ func TestSwaggerRoute(t *testing.T) {
 		},
 	}
 
-	server := NewHTTPServer(cfg)
+	server := NewHTTPServer(cfg, nil)
 	engine := server.Engine()
 
 	w := httptest.NewRecorder()
@@ -211,7 +214,7 @@ func TestMiddlewareRequestID(t *testing.T) {
 		},
 	}
 
-	server := NewHTTPServer(cfg)
+	server := NewHTTPServer(cfg, nil)
 	engine := server.Engine()
 
 	w := httptest.NewRecorder()
@@ -219,4 +222,66 @@ func TestMiddlewareRequestID(t *testing.T) {
 	engine.ServeHTTP(w, req)
 
 	assert.NotEmpty(t, w.Header().Get("X-Request-Id"))
+}
+
+// TestGlobalCostL0Performance asserts GET /api/v1/cost/global responds in <10ms (Phase3 L0 requirement).
+func TestGlobalCostL0Performance(t *testing.T) {
+	mockRepo := postgres.NewMockRepository(postgres.DefaultMockConfig())
+	costSvc := service.NewCostService(mockRepo)
+	cfg := &config.Config{
+		Env: config.EnvDevelopment,
+		Server: config.ServerConfig{
+			Port:         8080,
+			ReadTimeout:  30 * time.Second,
+			WriteTimeout: 30 * time.Second,
+		},
+	}
+	srv := NewHTTPServer(cfg, costSvc)
+	engine := srv.Engine()
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/v1/cost/global", nil)
+	start := time.Now()
+	engine.ServeHTTP(w, req)
+	elapsed := time.Since(start)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Less(t, elapsed.Milliseconds(), int64(10), "L0 GET /api/v1/cost/global must respond in <10ms, got %dms", elapsed.Milliseconds())
+}
+
+// TestGlobalCostL0EqualsL1 asserts L0 total_cost 100% equals sum of L1 (namespaces) costs (data consistency).
+func TestGlobalCostL0EqualsL1(t *testing.T) {
+	mockRepo := postgres.NewMockRepository(postgres.DefaultMockConfig())
+	costSvc := service.NewCostService(mockRepo)
+	cfg := &config.Config{
+		Env: config.EnvDevelopment,
+		Server: config.ServerConfig{
+			Port:         8080,
+			ReadTimeout:  30 * time.Second,
+			WriteTimeout: 30 * time.Second,
+		},
+	}
+	srv := NewHTTPServer(cfg, costSvc)
+	engine := srv.Engine()
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/v1/cost/global", nil)
+	engine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	var resp struct {
+		TotalCost  float64 `json:"total_cost"`
+		Namespaces []struct {
+			Name string  `json:"name"`
+			Cost float64 `json:"cost"`
+		} `json:"namespaces"`
+	}
+	err := json.Unmarshal(w.Body.Bytes(), &resp)
+	assert.NoError(t, err)
+
+	var sumL1 float64
+	for _, ns := range resp.Namespaces {
+		sumL1 += ns.Cost
+	}
+	assert.InDelta(t, resp.TotalCost, sumL1, 0.01, "L0 total_cost must equal sum of L1 namespace costs (100%%), L0=%.2f sumL1=%.2f", resp.TotalCost, sumL1)
 }

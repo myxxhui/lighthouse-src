@@ -13,19 +13,21 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/myxxhui/lighthouse-src/internal/config"
 	"github.com/myxxhui/lighthouse-src/internal/server/middleware"
+	"github.com/myxxhui/lighthouse-src/internal/server/service"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
 // HTTPServer encapsulates the HTTP server with Gin engine and configuration.
 type HTTPServer struct {
-	config *config.Config
-	engine *gin.Engine
-	server *http.Server
+	config      *config.Config
+	engine      *gin.Engine
+	server      *http.Server
+	costService *service.CostService
 }
 
-// NewHTTPServer creates a new HTTP server instance.
-func NewHTTPServer(cfg *config.Config) *HTTPServer {
+// NewHTTPServer creates a new HTTP server instance. Uses Mock data if costService is nil.
+func NewHTTPServer(cfg *config.Config, costService *service.CostService) *HTTPServer {
 	// Set Gin mode based on environment
 	if cfg.Env == config.EnvProduction {
 		gin.SetMode(gin.ReleaseMode)
@@ -42,8 +44,9 @@ func NewHTTPServer(cfg *config.Config) *HTTPServer {
 	engine.Use(middleware.CORS())
 
 	srv := &HTTPServer{
-		config: cfg,
-		engine: engine,
+		config:      cfg,
+		engine:      engine,
+		costService: costService,
 	}
 
 	// Setup routes
@@ -91,6 +94,8 @@ func (s *HTTPServer) setupRoutes() {
 func (s *HTTPServer) registerCostRoutes(group *gin.RouterGroup) {
 	// Global cost overview
 	group.GET("/global", s.globalCost)
+	// Namespace list (aggregated for frontend cost table)
+	group.GET("/namespaces", s.listNamespaces)
 	// Namespace cost
 	group.GET("/namespace/:namespace", s.namespaceCost)
 	// Drilldown
@@ -118,7 +123,15 @@ func (s *HTTPServer) healthCheck(c *gin.Context) {
 
 // globalCost handles GET /api/v1/cost/global
 func (s *HTTPServer) globalCost(c *gin.Context) {
-	// TODO: Integrate with business logic
+	if s.costService != nil {
+		resp, err := s.costService.GetGlobalCost(c.Request.Context())
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, resp)
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"total_cost": 10000.0,
 		"namespaces": []map[string]interface{}{
@@ -130,56 +143,99 @@ func (s *HTTPServer) globalCost(c *gin.Context) {
 	})
 }
 
+// listNamespaces handles GET /api/v1/cost/namespaces
+func (s *HTTPServer) listNamespaces(c *gin.Context) {
+	if s.costService != nil {
+		list, err := s.costService.ListNamespaces(c.Request.Context())
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, list)
+		return
+	}
+	c.JSON(http.StatusOK, []map[string]interface{}{
+		{"name": "default", "cost": 5000.0, "grade": "Healthy", "pod_count": 10, "node_count": 0},
+		{"name": "kube-system", "cost": 3000.0, "grade": "Healthy", "pod_count": 5, "node_count": 0},
+		{"name": "monitoring", "cost": 2000.0, "grade": "Healthy", "pod_count": 3, "node_count": 0},
+	})
+}
+
 // namespaceCost handles GET /api/v1/cost/namespace/:namespace
 func (s *HTTPServer) namespaceCost(c *gin.Context) {
 	namespace := c.Param("namespace")
-	// TODO: Integrate with business logic
+	if s.costService != nil {
+		resp, err := s.costService.GetNamespaceCost(c.Request.Context(), namespace)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, resp)
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"namespace": namespace,
 		"cost":      5000.0,
-		"breakdown": map[string]float64{
-			"cpu":    3000.0,
-			"memory": 2000.0,
-		},
+		"breakdown": map[string]float64{"cpu": 3000.0, "memory": 2000.0},
 		"timestamp": time.Now().UTC(),
 	})
+}
+
+// typeToLevel maps frontend type to backend level: namespace->L1, node->L2, workload->L3, pod->L4
+var typeToLevel = map[string]string{
+	"namespace": "L1", "node": "L2", "workload": "L3", "pod": "L4",
+}
+
+// levelToType maps backend level to frontend type
+var levelToType = map[string]string{
+	"L1": "namespace", "L2": "node", "L3": "workload", "L4": "pod",
 }
 
 // drilldownCost handles GET /api/v1/cost/drilldown/:level/:identifier
+// level 接受 type (namespace/node/workload/pod) 或 L1/L2/L3/L4，契约见 12_API契约表
 func (s *HTTPServer) drilldownCost(c *gin.Context) {
-	level := c.Param("level")
+	levelOrType := c.Param("level")
 	identifier := c.Param("identifier")
-	// TODO: Integrate with business logic
+	level := typeToLevel[levelOrType]
+	if level == "" {
+		level = levelOrType
+	}
+	respType := levelToType[level]
+	if respType == "" {
+		respType = levelOrType
+	}
+	_ = level // reserved for business logic
 	c.JSON(http.StatusOK, gin.H{
-		"level":      level,
-		"identifier": identifier,
-		"cost":       2500.0,
-		"details":    "Drilldown data will be implemented in Phase 2",
-	})
-}
-
-// sloHealth handles GET /api/v1/slo/health
-func (s *HTTPServer) sloHealth(c *gin.Context) {
-	// TODO: Integrate with SLO business logic
-	c.JSON(http.StatusOK, gin.H{
-		"status": "healthy",
-		"metrics": map[string]interface{}{
-			"availability": 99.95,
-			"latency_p95":  150,
-			"error_rate":   0.01,
+		"id":               identifier,
+		"name":             respType + "-" + identifier,
+		"type":             respType,
+		"cost":             2500.0,
+		"optimizableSpace": 750.0,
+		"efficiency":       70,
+		"children": []gin.H{
+			{"id": "node-1", "name": "node-1", "type": "node", "cost": 5000.0, "optimizableSpace": 1500.0, "efficiency": 70, "children": nil},
 		},
-		"timestamp": time.Now().UTC(),
 	})
 }
 
-// roiDashboard handles GET /api/v1/roi/dashboard
+// sloHealth handles GET /api/v1/slo/health - returns SLOStatus[] for frontend
+func (s *HTTPServer) sloHealth(c *gin.Context) {
+	// Mock SLO data matching frontend SLOStatus[] type
+	c.JSON(http.StatusOK, []gin.H{
+		{"serviceName": "api-gateway", "status": "healthy", "uptime": 99.95, "responseTime": 120, "errorRate": 0.01},
+		{"serviceName": "order-service", "status": "healthy", "uptime": 99.90, "responseTime": 85, "errorRate": 0.02},
+		{"serviceName": "payment-service", "status": "warning", "uptime": 99.50, "responseTime": 200, "errorRate": 0.15},
+	})
+}
+
+// roiDashboard handles GET /api/v1/roi/dashboard - returns ROITrend[] for frontend
 func (s *HTTPServer) roiDashboard(c *gin.Context) {
-	// TODO: Integrate with ROI business logic
-	c.JSON(http.StatusOK, gin.H{
-		"roi_percentage": 45.2,
-		"total_savings":  125000.0,
-		"trend":          "improving",
-		"timestamp":      time.Now().UTC(),
+	// Mock ROI trends matching frontend ROITrend[] type
+	c.JSON(http.StatusOK, []gin.H{
+		{"date": "2025-01-15", "value": 1.2, "cost": 100000, "efficiency": 68},
+		{"date": "2025-01-22", "value": 1.35, "cost": 95000, "efficiency": 70},
+		{"date": "2025-02-01", "value": 1.45, "cost": 90000, "efficiency": 72},
+		{"date": "2025-02-15", "value": 1.5, "cost": 85000, "efficiency": 75},
 	})
 }
 

@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { useNavigate } from 'umi';
 import { Card, Row, Col, Statistic, Switch, Space, Alert } from 'antd';
 import { LoadingOutlined } from '@ant-design/icons';
 import CostTable from '@/components/CostTable';
@@ -6,6 +7,7 @@ import EfficiencyChart from '@/components/EfficiencyChart';
 import { useAppStore } from '@/store';
 
 const CostOverviewPage: React.FC = () => {
+  const navigate = useNavigate();
   const {
     globalCostMetrics,
     namespaceCosts,
@@ -25,8 +27,7 @@ const CostOverviewPage: React.FC = () => {
   }, [fetchGlobalCostMetrics, fetchNamespaceCosts]);
 
   const handleRowClick = (record: any) => {
-    // TODO: 导航到钻取页面
-    console.log('Navigate to drilldown for:', record.namespace);
+    navigate(`/DrilldownPage?type=namespace&id=${record.namespace}`);
   };
 
   const renderGlobalMetrics = () => {

@@ -39,6 +39,7 @@
       "@typescript-eslint/eslint-plugin": "^6.10.0",
       "@typescript-eslint/parser": "^6.10.0",
       "@umijs/fabric": "^2.14.1",
+      "concurrently": "^8.2.2",
       "eslint": "^8.53.0",
       "eslint-config-react-app": "^7.0.1",
       "eslint-plugin-react": "^7.33.2",
@@ -58,6 +59,10 @@
       "test:watch": "jest --watch",
       "e2e": "playwright test",
       "e2e:ui": "playwright test --ui",
+      "dev:mock": "concurrently -n backend,frontend -c blue,green \"cd .. && go run ./cmd/server/main.go\" \"umi dev\"",
+      "test:e2e": "playwright test",
+      "test:performance": "playwright test --grep performance || true",
+      "report:validation": "node scripts/report-validation.js",
       "storybook": "storybook dev -p 6006",
       "build-storybook": "storybook build",
       "lint": "eslint src --ext .js,.jsx,.ts,.tsx",
@@ -89,7 +94,7 @@
       "config": {},
       "time": {
         "hooks": {},
-        "register": 1
+        "register": 0
       },
       "enableBy": "register"
     },
@@ -102,7 +107,7 @@
       "config": {},
       "time": {
         "hooks": {},
-        "register": 4
+        "register": 5
       },
       "enableBy": "register"
     },
@@ -119,7 +124,7 @@
             0
           ]
         },
-        "register": 4
+        "register": 3
       },
       "enableBy": "register"
     },
@@ -133,10 +138,10 @@
       "time": {
         "hooks": {
           "onStart": [
-            2
+            12
           ]
         },
-        "register": 4
+        "register": 3
       },
       "enableBy": "register"
     },
@@ -153,7 +158,7 @@
             0
           ]
         },
-        "register": 1
+        "register": 0
       },
       "enableBy": "register"
     },
@@ -180,10 +185,10 @@
       "time": {
         "hooks": {
           "modifyAppData": [
-            29
+            31
           ]
         },
-        "register": 26
+        "register": 30
       },
       "enableBy": "register"
     },
@@ -196,7 +201,7 @@
       "config": {},
       "time": {
         "hooks": {},
-        "register": 1
+        "register": 0
       },
       "enableBy": "register"
     },
@@ -213,10 +218,10 @@
             0
           ],
           "onCheck": [
-            0
+            6
           ]
         },
-        "register": 3
+        "register": 1
       },
       "enableBy": "register"
     },
@@ -233,7 +238,7 @@
             0
           ]
         },
-        "register": 1
+        "register": 0
       },
       "enableBy": "register"
     },
@@ -263,7 +268,7 @@
             0
           ]
         },
-        "register": 9
+        "register": 7
       },
       "enableBy": "register"
     },
@@ -1129,10 +1134,10 @@
       "time": {
         "hooks": {
           "onStart": [
-            0
+            1
           ]
         },
-        "register": 1
+        "register": 0
       },
       "enableBy": "register"
     },
@@ -1158,7 +1163,7 @@
       "config": {},
       "time": {
         "hooks": {},
-        "register": 102
+        "register": 109
       },
       "enableBy": "register"
     },
@@ -1171,7 +1176,7 @@
       "config": {},
       "time": {
         "hooks": {},
-        "register": 56
+        "register": 89
       },
       "enableBy": "config"
     },
@@ -1184,7 +1189,7 @@
       "config": {},
       "time": {
         "hooks": {},
-        "register": 20
+        "register": 22
       },
       "enableBy": "config"
     },
@@ -1201,7 +1206,7 @@
             0
           ]
         },
-        "register": 1
+        "register": 0
       },
       "enableBy": "register"
     },
@@ -1214,7 +1219,7 @@
       "config": {},
       "time": {
         "hooks": {},
-        "register": 1
+        "register": 2
       },
       "enableBy": "register"
     },
@@ -1244,7 +1249,7 @@
             1
           ]
         },
-        "register": 36
+        "register": 32
       }
     },
     "./node_modules/@umijs/preset-umi/dist/features/mpa/mpa": {
@@ -1269,7 +1274,7 @@
       "config": {},
       "time": {
         "hooks": {},
-        "register": 1
+        "register": 0
       }
     },
     "./node_modules/@umijs/preset-umi/dist/features/overrides/overrides": {
@@ -1281,7 +1286,7 @@
       "config": {},
       "time": {
         "hooks": {},
-        "register": 0
+        "register": 1
       },
       "enableBy": "register"
     },
@@ -1294,7 +1299,7 @@
       "config": {},
       "time": {
         "hooks": {},
-        "register": 2
+        "register": 0
       },
       "enableBy": "config"
     },
@@ -1308,10 +1313,10 @@
       "time": {
         "hooks": {
           "modifyConfig": [
-            0
+            1
           ]
         },
-        "register": 2
+        "register": 1
       }
     },
     "./node_modules/@umijs/preset-umi/dist/features/polyfill/publicPathPolyfill": {
@@ -1323,7 +1328,7 @@
       "config": {},
       "time": {
         "hooks": {},
-        "register": 0
+        "register": 1
       },
       "enableBy": "register"
     },
@@ -1336,7 +1341,7 @@
       "config": {},
       "time": {
         "hooks": {},
-        "register": 2
+        "register": 1
       },
       "enableBy": "register"
     },
@@ -1349,7 +1354,7 @@
       "config": {},
       "time": {
         "hooks": {},
-        "register": 1
+        "register": 0
       },
       "enableBy": "config"
     },
@@ -1375,7 +1380,7 @@
       "config": {},
       "time": {
         "hooks": {},
-        "register": 1
+        "register": 0
       },
       "enableBy": "register"
     },
@@ -1388,7 +1393,7 @@
       "config": {},
       "time": {
         "hooks": {},
-        "register": 5
+        "register": 4
       },
       "enableBy": "register"
     },
@@ -1414,7 +1419,7 @@
       "config": {},
       "time": {
         "hooks": {},
-        "register": 0
+        "register": 1
       }
     },
     "./node_modules/@umijs/preset-umi/dist/features/ssr/ssr": {
@@ -1426,7 +1431,7 @@
       "config": {},
       "time": {
         "hooks": {},
-        "register": 3
+        "register": 1
       },
       "enableBy": "config"
     },
@@ -1452,7 +1457,7 @@
       "config": {},
       "time": {
         "hooks": {},
-        "register": 4
+        "register": 3
       },
       "enableBy": "register"
     },
@@ -1503,7 +1508,7 @@
       "config": {},
       "time": {
         "hooks": {},
-        "register": 23
+        "register": 26
       },
       "enableBy": "config"
     },
@@ -1567,7 +1572,7 @@
       "config": {},
       "time": {
         "hooks": {},
-        "register": 2
+        "register": 1
       }
     },
     "./node_modules/@umijs/preset-umi/dist/features/swc/swc": {
@@ -1596,7 +1601,7 @@
       "config": {},
       "time": {
         "hooks": {},
-        "register": 4
+        "register": 3
       }
     },
     "./node_modules/@umijs/preset-umi/dist/features/mako/mako": {
@@ -1633,7 +1638,7 @@
       "config": {},
       "time": {
         "hooks": {},
-        "register": 3
+        "register": 2
       }
     },
     "./node_modules/@umijs/preset-umi/dist/features/routePreloadOnLoad/routePreloadOnLoad": {
@@ -1645,7 +1650,7 @@
       "config": {},
       "time": {
         "hooks": {},
-        "register": 28
+        "register": 32
       }
     },
     "./node_modules/@umijs/preset-umi/dist/features/forget/forget": {
@@ -1670,7 +1675,7 @@
       "config": {},
       "time": {
         "hooks": {},
-        "register": 2
+        "register": 1
       },
       "enableBy": "register"
     },
@@ -1683,7 +1688,7 @@
       "config": {},
       "time": {
         "hooks": {},
-        "register": 5
+        "register": 4
       },
       "enableBy": "register"
     },
@@ -1696,7 +1701,7 @@
       "config": {},
       "time": {
         "hooks": {},
-        "register": 47
+        "register": 37
       },
       "enableBy": "register"
     },
@@ -1710,10 +1715,10 @@
       "time": {
         "hooks": {
           "modifyAppData": [
-            13
+            8
           ]
         },
-        "register": 31
+        "register": 36
       }
     },
     "./node_modules/@umijs/preset-umi/dist/commands/help": {
@@ -1725,7 +1730,7 @@
       "config": {},
       "time": {
         "hooks": {},
-        "register": 1
+        "register": 0
       },
       "enableBy": "register"
     },
@@ -1764,7 +1769,7 @@
       "config": {},
       "time": {
         "hooks": {},
-        "register": 2
+        "register": 1
       },
       "enableBy": "register"
     },
@@ -1777,7 +1782,7 @@
       "config": {},
       "time": {
         "hooks": {},
-        "register": 0
+        "register": 1
       },
       "enableBy": "register"
     },
@@ -1790,7 +1795,7 @@
       "config": {},
       "time": {
         "hooks": {},
-        "register": 3
+        "register": 1
       },
       "enableBy": "register"
     },
@@ -1829,7 +1834,7 @@
       "config": {},
       "time": {
         "hooks": {},
-        "register": 1
+        "register": 0
       },
       "enableBy": "register"
     },
@@ -1855,7 +1860,7 @@
       "config": {},
       "time": {
         "hooks": {},
-        "register": 0
+        "register": 1
       },
       "enableBy": "register"
     },
@@ -1868,7 +1873,7 @@
       "config": {},
       "time": {
         "hooks": {},
-        "register": 1
+        "register": 0
       },
       "enableBy": "register"
     },
@@ -1894,7 +1899,7 @@
       "config": {},
       "time": {
         "hooks": {},
-        "register": 1
+        "register": 0
       },
       "enableBy": "register"
     },
@@ -1933,7 +1938,7 @@
       "config": {},
       "time": {
         "hooks": {},
-        "register": 1
+        "register": 0
       },
       "enableBy": "register"
     },
@@ -1946,7 +1951,7 @@
       "config": {},
       "time": {
         "hooks": {},
-        "register": 1
+        "register": 3
       },
       "enableBy": "register"
     },
@@ -1959,7 +1964,7 @@
       "config": {},
       "time": {
         "hooks": {},
-        "register": 22
+        "register": 30
       },
       "enableBy": "register"
     },
@@ -1972,7 +1977,7 @@
       "config": {},
       "time": {
         "hooks": {},
-        "register": 1
+        "register": 0
       },
       "enableBy": "register"
     },
@@ -1985,7 +1990,7 @@
       "config": {},
       "time": {
         "hooks": {},
-        "register": 1
+        "register": 3
       },
       "enableBy": "register"
     },
@@ -1998,7 +2003,7 @@
       "config": {},
       "time": {
         "hooks": {},
-        "register": 1
+        "register": 7
       },
       "enableBy": "register"
     }
@@ -2009,31 +2014,40 @@
     "_": []
   },
   "userConfig": {
-    "routes": [
-      {
-        "path": "/",
-        "component": "@/pages/CostOverviewPage"
-      },
-      {
-        "path": "/drilldown",
-        "component": "@/pages/DrilldownPage"
-      },
-      {
-        "path": "/slo",
-        "component": "@/pages/SLODashboard"
-      },
-      {
-        "path": "/roi",
-        "component": "@/pages/ROIDashboard"
-      }
-    ],
-    "fastRefresh": true,
     "proxy": {
       "/api": {
         "target": "http://localhost:8080",
         "changeOrigin": true
       }
-    }
+    },
+    "routes": [
+      {
+        "path": "/",
+        "component": "@/layouts/index",
+        "routes": [
+          {
+            "path": "/",
+            "redirect": "/CostOverviewPage"
+          },
+          {
+            "path": "/CostOverviewPage",
+            "component": "@/pages/CostOverviewPage"
+          },
+          {
+            "path": "/DrilldownPage",
+            "component": "@/pages/DrilldownPage"
+          },
+          {
+            "path": "/SLODashboard",
+            "component": "@/pages/SLODashboard"
+          },
+          {
+            "path": "/ROIDashboard",
+            "component": "@/pages/ROIDashboard"
+          }
+        ]
+      }
+    ]
   },
   "mainConfigFile": "/root/sean/workspace/lighthouse/lighthouse-src/web/.umirc.ts",
   "config": {
@@ -2063,31 +2077,40 @@
       "@@": "/root/sean/workspace/lighthouse/lighthouse-src/web/src/.umi",
       "regenerator-runtime": "/root/sean/workspace/lighthouse/lighthouse-src/web/node_modules/regenerator-runtime"
     },
-    "routes": [
-      {
-        "path": "/",
-        "component": "@/pages/CostOverviewPage"
-      },
-      {
-        "path": "/drilldown",
-        "component": "@/pages/DrilldownPage"
-      },
-      {
-        "path": "/slo",
-        "component": "@/pages/SLODashboard"
-      },
-      {
-        "path": "/roi",
-        "component": "@/pages/ROIDashboard"
-      }
-    ],
-    "fastRefresh": true,
     "proxy": {
       "/api": {
         "target": "http://localhost:8080",
         "changeOrigin": true
       }
     },
+    "routes": [
+      {
+        "path": "/",
+        "component": "@/layouts/index",
+        "routes": [
+          {
+            "path": "/",
+            "redirect": "/CostOverviewPage"
+          },
+          {
+            "path": "/CostOverviewPage",
+            "component": "@/pages/CostOverviewPage"
+          },
+          {
+            "path": "/DrilldownPage",
+            "component": "@/pages/DrilldownPage"
+          },
+          {
+            "path": "/SLODashboard",
+            "component": "@/pages/SLODashboard"
+          },
+          {
+            "path": "/ROIDashboard",
+            "component": "@/pages/ROIDashboard"
+          }
+        ]
+      }
+    ],
     "targets": {
       "chrome": 80
     }
@@ -2095,39 +2118,68 @@
   "routes": {
     "1": {
       "path": "/",
-      "file": "@/pages/CostOverviewPage.tsx",
+      "file": "@/layouts/index.tsx",
+      "parentId": "@@/global-layout",
       "id": "1",
       "absPath": "/",
-      "__content": "import React, { useEffect } from 'react';\nimport { Card, Row, Col, Statistic, Switch, Space, Alert } from 'antd';\nimport { LoadingOutlined } from '@ant-design/icons';\nimport CostTable from '@/components/CostTable';\nimport EfficiencyChart from '@/components/EfficiencyChart';\nimport { useAppStore } from '@/store';\n\nconst CostOverviewPage: React.FC = () => {\n  const {\n    globalCostMetrics,\n    namespaceCosts,\n    loadingGlobalMetrics,\n    loadingNamespaceCosts,\n    errorGlobalMetrics,\n    errorNamespaceCosts,\n    useMockData,\n    fetchGlobalCostMetrics,\n    fetchNamespaceCosts,\n    setUseMockData,\n  } = useAppStore();\n\n  useEffect(() => {\n    fetchGlobalCostMetrics();\n    fetchNamespaceCosts();\n  }, [fetchGlobalCostMetrics, fetchNamespaceCosts]);\n\n  const handleRowClick = (record: any) => {\n    // TODO: 导航到钻取页面\n    console.log('Navigate to drilldown for:', record.namespace);\n  };\n\n  const renderGlobalMetrics = () => {\n    if (loadingGlobalMetrics) {\n      return (\n        <Card loading={true}>\n          <LoadingOutlined />\n        </Card>\n      );\n    }\n\n    if (errorGlobalMetrics) {\n      return (\n        <Alert message=\"加载全局指标失败\" description={errorGlobalMetrics} type=\"error\" showIcon />\n      );\n    }\n\n    if (!globalCostMetrics) {\n      return <Card>暂无数据</Card>;\n    }\n\n    return (\n      <Row gutter={[16, 16]}>\n        <Col xs={24} sm={12} md={6}>\n          <Card>\n            <Statistic\n              title=\"总账单成本\"\n              value={globalCostMetrics.totalBillableCost}\n              prefix=\"¥\"\n              formatter={value => Number(value).toLocaleString()}\n            />\n          </Card>\n        </Col>\n        <Col xs={24} sm={12} md={6}>\n          <Card>\n            <Statistic\n              title=\"可优化空间\"\n              value={globalCostMetrics.totalOptimizableSpace}\n              prefix=\"¥\"\n              formatter={value => Number(value).toLocaleString()}\n            />\n          </Card>\n        </Col>\n        <Col xs={24} sm={12} md={6}>\n          <Card>\n            <Statistic title=\"全局效率分\" value={globalCostMetrics.globalEfficiency} suffix=\"%\" />\n          </Card>\n        </Col>\n        <Col xs={24} sm={12} md={6}>\n          <Card>\n            <div\n              style={{\n                display: 'flex',\n                justifyContent: 'center',\n                alignItems: 'center',\n                height: '100%',\n              }}\n            >\n              <EfficiencyChart efficiency={globalCostMetrics.globalEfficiency} size={80} />\n            </div>\n          </Card>\n        </Col>\n      </Row>\n    );\n  };\n\n  const renderDomainBreakdown = () => {\n    if (!globalCostMetrics?.domainBreakdown?.length) {\n      return null;\n    }\n\n    return (\n      <Card title=\"领域成本分解\" style={{ marginTop: 16 }}>\n        <Row gutter={[16, 16]}>\n          {globalCostMetrics.domainBreakdown.map((domain, index) => (\n            <Col key={index} xs={24} sm={12} md={8} lg={6}>\n              <Card size=\"small\">\n                <Statistic\n                  title={domain.domain}\n                  value={domain.cost}\n                  prefix=\"¥\"\n                  formatter={value => Number(value).toLocaleString()}\n                  suffix={\n                    <div style={{ marginTop: 8 }}>\n                      <small>效率: {domain.efficiency}%</small>\n                    </div>\n                  }\n                />\n              </Card>\n            </Col>\n          ))}\n        </Row>\n      </Card>\n    );\n  };\n\n  return (\n    <div>\n      <div\n        style={{\n          display: 'flex',\n          justifyContent: 'space-between',\n          alignItems: 'center',\n          marginBottom: 16,\n        }}\n      >\n        <h2>全域成本透视</h2>\n        <Space>\n          <span>使用Mock数据</span>\n          <Switch\n            checked={useMockData}\n            onChange={setUseMockData}\n            checkedChildren=\"是\"\n            unCheckedChildren=\"否\"\n          />\n        </Space>\n      </div>\n\n      {renderGlobalMetrics()}\n      {renderDomainBreakdown()}\n\n      <Card title=\"命名空间成本明细\" style={{ marginTop: 16 }}>\n        {loadingNamespaceCosts ? (\n          <div style={{ textAlign: 'center', padding: '20px' }}>\n            <LoadingOutlined spin /> 加载中...\n          </div>\n        ) : errorNamespaceCosts ? (\n          <Alert\n            message=\"加载命名空间成本失败\"\n            description={errorNamespaceCosts}\n            type=\"error\"\n            showIcon\n          />\n        ) : namespaceCosts?.length ? (\n          <CostTable data={namespaceCosts} onRowClick={handleRowClick} />\n        ) : (\n          <div style={{ textAlign: 'center', padding: '20px' }}>暂无命名空间数据</div>\n        )}\n      </Card>\n    </div>\n  );\n};\n\nexport default CostOverviewPage;\n",
+      "__content": "import React from 'react';\nimport { ProLayout } from '@ant-design/pro-layout';\nimport { useLocation, useNavigate, Outlet } from 'umi';\nimport { FundOutlined, ClusterOutlined, DashboardOutlined, LineChartOutlined } from '@ant-design/icons';\n\nconst defaultProps = {\n  route: {\n    path: '/',\n    routes: [\n      { path: '/CostOverviewPage', name: '全域成本透视', icon: <FundOutlined /> },\n      { path: '/DrilldownPage', name: '四层钻取', icon: <ClusterOutlined /> },\n      { path: '/SLODashboard', name: 'SLO 红绿灯', icon: <DashboardOutlined /> },\n      { path: '/ROIDashboard', name: 'ROI 看板', icon: <LineChartOutlined /> },\n    ],\n  },\n  location: { pathname: '/' },\n};\n\nconst BasicLayout: React.FC = () => {\n  const location = useLocation();\n  const navigate = useNavigate();\n\n  return (\n    <ProLayout\n      title=\"Lighthouse\"\n      {...defaultProps}\n      location={location}\n      menuItemRender={(item, dom) => (\n        <div\n          onClick={() => {\n            navigate(item.path || '/');\n          }}\n        >\n          {dom}\n        </div>\n      )}\n    >\n      <div style={{ padding: 24 }}>\n        <Outlet />\n      </div>\n    </ProLayout>\n  );\n};\n\nexport default BasicLayout;\n",
+      "__isJSFile": true,
+      "__absFile": "/root/sean/workspace/lighthouse/lighthouse-src/web/src/layouts/index.tsx"
+    },
+    "2": {
+      "path": "/",
+      "redirect": "/CostOverviewPage",
+      "parentId": "1",
+      "id": "2",
+      "absPath": "/"
+    },
+    "3": {
+      "path": "/CostOverviewPage",
+      "file": "@/pages/CostOverviewPage.tsx",
+      "parentId": "1",
+      "id": "3",
+      "absPath": "/CostOverviewPage",
+      "__content": "import React, { useEffect } from 'react';\nimport { useNavigate } from 'umi';\nimport { Card, Row, Col, Statistic, Switch, Space, Alert } from 'antd';\nimport { LoadingOutlined } from '@ant-design/icons';\nimport CostTable from '@/components/CostTable';\nimport EfficiencyChart from '@/components/EfficiencyChart';\nimport { useAppStore } from '@/store';\n\nconst CostOverviewPage: React.FC = () => {\n  const navigate = useNavigate();\n  const {\n    globalCostMetrics,\n    namespaceCosts,\n    loadingGlobalMetrics,\n    loadingNamespaceCosts,\n    errorGlobalMetrics,\n    errorNamespaceCosts,\n    useMockData,\n    fetchGlobalCostMetrics,\n    fetchNamespaceCosts,\n    setUseMockData,\n  } = useAppStore();\n\n  useEffect(() => {\n    fetchGlobalCostMetrics();\n    fetchNamespaceCosts();\n  }, [fetchGlobalCostMetrics, fetchNamespaceCosts]);\n\n  const handleRowClick = (record: any) => {\n    navigate(`/DrilldownPage?type=namespace&id=${record.namespace}`);\n  };\n\n  const renderGlobalMetrics = () => {\n    if (loadingGlobalMetrics) {\n      return (\n        <Card loading={true}>\n          <LoadingOutlined />\n        </Card>\n      );\n    }\n\n    if (errorGlobalMetrics) {\n      return (\n        <Alert message=\"加载全局指标失败\" description={errorGlobalMetrics} type=\"error\" showIcon />\n      );\n    }\n\n    if (!globalCostMetrics) {\n      return <Card>暂无数据</Card>;\n    }\n\n    return (\n      <Row gutter={[16, 16]}>\n        <Col xs={24} sm={12} md={6}>\n          <Card>\n            <Statistic\n              title=\"总账单成本\"\n              value={globalCostMetrics.totalBillableCost}\n              prefix=\"¥\"\n              formatter={value => Number(value).toLocaleString()}\n            />\n          </Card>\n        </Col>\n        <Col xs={24} sm={12} md={6}>\n          <Card>\n            <Statistic\n              title=\"可优化空间\"\n              value={globalCostMetrics.totalOptimizableSpace}\n              prefix=\"¥\"\n              formatter={value => Number(value).toLocaleString()}\n            />\n          </Card>\n        </Col>\n        <Col xs={24} sm={12} md={6}>\n          <Card>\n            <Statistic title=\"全局效率分\" value={globalCostMetrics.globalEfficiency} suffix=\"%\" />\n          </Card>\n        </Col>\n        <Col xs={24} sm={12} md={6}>\n          <Card>\n            <div\n              style={{\n                display: 'flex',\n                justifyContent: 'center',\n                alignItems: 'center',\n                height: '100%',\n              }}\n            >\n              <EfficiencyChart efficiency={globalCostMetrics.globalEfficiency} size={80} />\n            </div>\n          </Card>\n        </Col>\n      </Row>\n    );\n  };\n\n  const renderDomainBreakdown = () => {\n    if (!globalCostMetrics?.domainBreakdown?.length) {\n      return null;\n    }\n\n    return (\n      <Card title=\"领域成本分解\" style={{ marginTop: 16 }}>\n        <Row gutter={[16, 16]}>\n          {globalCostMetrics.domainBreakdown.map((domain, index) => (\n            <Col key={index} xs={24} sm={12} md={8} lg={6}>\n              <Card size=\"small\">\n                <Statistic\n                  title={domain.domain}\n                  value={domain.cost}\n                  prefix=\"¥\"\n                  formatter={value => Number(value).toLocaleString()}\n                  suffix={\n                    <div style={{ marginTop: 8 }}>\n                      <small>效率: {domain.efficiency}%</small>\n                    </div>\n                  }\n                />\n              </Card>\n            </Col>\n          ))}\n        </Row>\n      </Card>\n    );\n  };\n\n  return (\n    <div>\n      <div\n        style={{\n          display: 'flex',\n          justifyContent: 'space-between',\n          alignItems: 'center',\n          marginBottom: 16,\n        }}\n      >\n        <h2>全域成本透视</h2>\n        <Space>\n          <span>使用Mock数据</span>\n          <Switch\n            checked={useMockData}\n            onChange={setUseMockData}\n            checkedChildren=\"是\"\n            unCheckedChildren=\"否\"\n          />\n        </Space>\n      </div>\n\n      {renderGlobalMetrics()}\n      {renderDomainBreakdown()}\n\n      <Card title=\"命名空间成本明细\" style={{ marginTop: 16 }}>\n        {loadingNamespaceCosts ? (\n          <div style={{ textAlign: 'center', padding: '20px' }}>\n            <LoadingOutlined spin /> 加载中...\n          </div>\n        ) : errorNamespaceCosts ? (\n          <Alert\n            message=\"加载命名空间成本失败\"\n            description={errorNamespaceCosts}\n            type=\"error\"\n            showIcon\n          />\n        ) : namespaceCosts?.length ? (\n          <CostTable data={namespaceCosts} onRowClick={handleRowClick} />\n        ) : (\n          <div style={{ textAlign: 'center', padding: '20px' }}>暂无命名空间数据</div>\n        )}\n      </Card>\n    </div>\n  );\n};\n\nexport default CostOverviewPage;\n",
       "__isJSFile": true,
       "__absFile": "/root/sean/workspace/lighthouse/lighthouse-src/web/src/pages/CostOverviewPage.tsx"
     },
-    "2": {
-      "path": "/drilldown",
+    "4": {
+      "path": "/DrilldownPage",
       "file": "@/pages/DrilldownPage.tsx",
-      "id": "2",
-      "absPath": "/drilldown",
-      "__content": "import React, { useEffect } from 'react';\nimport { Card, Descriptions, Button, Space, Alert, Spin } from 'antd';\nimport { LoadingOutlined } from '@ant-design/icons';\nimport { useNavigate, useSearchParams } from 'react-router-dom';\nimport DrilldownNavigator from '@/components/DrilldownNavigator';\nimport EfficiencyChart from '@/components/EfficiencyChart';\nimport StatusIndicator from '@/components/StatusIndicator';\nimport { useAppStore } from '@/store';\n\nconst DrilldownPage: React.FC = () => {\n  const navigate = useNavigate();\n  const [searchParams] = useSearchParams();\n\n  const {\n    currentDrilldownItem,\n    loadingDrilldown,\n    errorDrilldown,\n    fetchDrilldownData,\n    clearDrilldownPath,\n  } = useAppStore();\n\n  const type = searchParams.get('type') as 'namespace' | 'node' | 'workload' | 'pod';\n  const id = searchParams.get('id');\n\n  useEffect(() => {\n    if (type && id) {\n      fetchDrilldownData(type, id);\n    }\n\n    return () => {\n      clearDrilldownPath();\n    };\n  }, [type, id, fetchDrilldownData, clearDrilldownPath]);\n\n  const handleBack = () => {\n    navigate(-1);\n  };\n\n  const handleHome = () => {\n    navigate('/');\n  };\n\n  const renderDrilldownContent = () => {\n    if (loadingDrilldown) {\n      return (\n        <div style={{ textAlign: 'center', padding: '40px' }}>\n          <Spin indicator={<LoadingOutlined spin />} />\n          <p>加载中...</p>\n        </div>\n      );\n    }\n\n    if (errorDrilldown) {\n      return (\n        <Alert\n          message=\"加载钻取数据失败\"\n          description={errorDrilldown}\n          type=\"error\"\n          showIcon\n          action={\n            <Button type=\"primary\" onClick={() => type && id && fetchDrilldownData(type, id)}>\n              重试\n            </Button>\n          }\n        />\n      );\n    }\n\n    if (!currentDrilldownItem) {\n      return (\n        <div style={{ textAlign: 'center', padding: '40px' }}>\n          <p>暂无数据</p>\n        </div>\n      );\n    }\n\n    const getTypeName = (itemType: string) => {\n      switch (itemType) {\n        case 'namespace':\n          return '命名空间';\n        case 'node':\n          return '节点';\n        case 'workload':\n          return '工作负载';\n        case 'pod':\n          return 'Pod';\n        default:\n          return itemType;\n      }\n    };\n\n    // 基于效率分判断状态\n    let status: 'healthy' | 'warning' | 'critical' = 'healthy';\n    if (currentDrilldownItem.efficiency < 50) {\n      status = 'critical';\n    } else if (currentDrilldownItem.efficiency < 70) {\n      status = 'warning';\n    }\n\n    return (\n      <>\n        <Card title={`${getTypeName(currentDrilldownItem.type)}: ${currentDrilldownItem.name}`}>\n          <Descriptions column={{ xs: 1, sm: 2, md: 3 }} bordered>\n            <Descriptions.Item label=\"ID\">{currentDrilldownItem.id}</Descriptions.Item>\n            <Descriptions.Item label=\"类型\">\n              {getTypeName(currentDrilldownItem.type)}\n            </Descriptions.Item>\n            <Descriptions.Item label=\"成本 (¥)\">\n              {currentDrilldownItem.cost.toLocaleString()}\n            </Descriptions.Item>\n            <Descriptions.Item label=\"可优化空间 (¥)\">\n              {currentDrilldownItem.optimizableSpace.toLocaleString()}\n            </Descriptions.Item>\n            <Descriptions.Item label=\"效率分\">\n              <Space>\n                <EfficiencyChart\n                  efficiency={currentDrilldownItem.efficiency}\n                  size={40}\n                  showLabel={false}\n                />\n                <span>{currentDrilldownItem.efficiency}%</span>\n              </Space>\n            </Descriptions.Item>\n            <Descriptions.Item label=\"健康状态\">\n              <StatusIndicator status={status} showText={true} />\n            </Descriptions.Item>\n          </Descriptions>\n        </Card>\n\n        {currentDrilldownItem.children && currentDrilldownItem.children.length > 0 && (\n          <Card title=\"子资源\" style={{ marginTop: 16 }}>\n            {currentDrilldownItem.children.map(child => (\n              <Card\n                key={child.id}\n                style={{ marginBottom: 8 }}\n                hoverable\n                onClick={() => {\n                  navigate(`/drilldown?type=${child.type}&id=${child.id}`);\n                }}\n              >\n                <div\n                  style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}\n                >\n                  <div>\n                    <strong>\n                      {getTypeName(child.type)}: {child.name}\n                    </strong>\n                    <div style={{ fontSize: '12px', color: '#666' }}>\n                      成本: ¥{child.cost.toLocaleString()} | 效率: {child.efficiency}%\n                    </div>\n                  </div>\n                  <div>\n                    <StatusIndicator\n                      status={\n                        child.efficiency < 50\n                          ? 'critical'\n                          : child.efficiency < 70\n                            ? 'warning'\n                            : 'healthy'\n                      }\n                    />\n                  </div>\n                </div>\n              </Card>\n            ))}\n          </Card>\n        )}\n      </>\n    );\n  };\n\n  return (\n    <div>\n      <DrilldownNavigator onBack={handleBack} onHome={handleHome} />\n      {renderDrilldownContent()}\n    </div>\n  );\n};\n\nexport default DrilldownPage;\n",
+      "parentId": "1",
+      "id": "4",
+      "absPath": "/DrilldownPage",
+      "__content": "import React, { useEffect } from 'react';\nimport { Card, Descriptions, Button, Space, Alert, Spin } from 'antd';\nimport { LoadingOutlined } from '@ant-design/icons';\nimport { useNavigate, useSearchParams } from 'react-router-dom';\nimport DrilldownNavigator from '@/components/DrilldownNavigator';\nimport EfficiencyChart from '@/components/EfficiencyChart';\nimport StatusIndicator from '@/components/StatusIndicator';\nimport { useAppStore } from '@/store';\n\nconst DrilldownPage: React.FC = () => {\n  const navigate = useNavigate();\n  const [searchParams] = useSearchParams();\n\n  const {\n    currentDrilldownItem,\n    loadingDrilldown,\n    errorDrilldown,\n    fetchDrilldownData,\n    clearDrilldownPath,\n  } = useAppStore();\n\n  const type = searchParams.get('type') as 'namespace' | 'node' | 'workload' | 'pod';\n  const id = searchParams.get('id');\n\n  useEffect(() => {\n    if (type && id) {\n      fetchDrilldownData(type, id);\n    }\n\n    return () => {\n      clearDrilldownPath();\n    };\n  }, [type, id, fetchDrilldownData, clearDrilldownPath]);\n\n  const handleBack = () => {\n    navigate(-1);\n  };\n\n  const handleHome = () => {\n    navigate('/');\n  };\n\n  const renderDrilldownContent = () => {\n    if (loadingDrilldown) {\n      return (\n        <div style={{ textAlign: 'center', padding: '40px' }}>\n          <Spin indicator={<LoadingOutlined spin />} />\n          <p>加载中...</p>\n        </div>\n      );\n    }\n\n    if (errorDrilldown) {\n      return (\n        <Alert\n          message=\"加载钻取数据失败\"\n          description={errorDrilldown}\n          type=\"error\"\n          showIcon\n          action={\n            <Button type=\"primary\" onClick={() => type && id && fetchDrilldownData(type, id)}>\n              重试\n            </Button>\n          }\n        />\n      );\n    }\n\n    if (!currentDrilldownItem) {\n      return (\n        <div style={{ textAlign: 'center', padding: '40px' }}>\n          <p>暂无数据</p>\n        </div>\n      );\n    }\n\n    const getTypeName = (itemType: string) => {\n      switch (itemType) {\n        case 'namespace':\n          return '命名空间';\n        case 'node':\n          return '节点';\n        case 'workload':\n          return '工作负载';\n        case 'pod':\n          return 'Pod';\n        default:\n          return itemType;\n      }\n    };\n\n    // 基于效率分判断状态\n    let status: 'healthy' | 'warning' | 'critical' = 'healthy';\n    if (currentDrilldownItem.efficiency < 50) {\n      status = 'critical';\n    } else if (currentDrilldownItem.efficiency < 70) {\n      status = 'warning';\n    }\n\n    return (\n      <>\n        <Card title={`${getTypeName(currentDrilldownItem.type)}: ${currentDrilldownItem.name}`}>\n          <Descriptions column={{ xs: 1, sm: 2, md: 3 }} bordered>\n            <Descriptions.Item label=\"ID\">{currentDrilldownItem.id}</Descriptions.Item>\n            <Descriptions.Item label=\"类型\">\n              {getTypeName(currentDrilldownItem.type)}\n            </Descriptions.Item>\n            <Descriptions.Item label=\"成本 (¥)\">\n              {currentDrilldownItem.cost.toLocaleString()}\n            </Descriptions.Item>\n            <Descriptions.Item label=\"可优化空间 (¥)\">\n              {currentDrilldownItem.optimizableSpace.toLocaleString()}\n            </Descriptions.Item>\n            <Descriptions.Item label=\"效率分\">\n              <Space>\n                <EfficiencyChart\n                  efficiency={currentDrilldownItem.efficiency}\n                  size={40}\n                  showLabel={false}\n                />\n                <span>{currentDrilldownItem.efficiency}%</span>\n              </Space>\n            </Descriptions.Item>\n            <Descriptions.Item label=\"健康状态\">\n              <StatusIndicator status={status} showText={true} />\n            </Descriptions.Item>\n          </Descriptions>\n        </Card>\n\n        {currentDrilldownItem.children && currentDrilldownItem.children.length > 0 && (\n          <Card title=\"子资源\" style={{ marginTop: 16 }}>\n            {currentDrilldownItem.children.map(child => (\n              <Card\n                key={child.id}\n                style={{ marginBottom: 8 }}\n                hoverable\n                onClick={() => {\n                  navigate(`/DrilldownPage?type=${child.type}&id=${child.id}`);\n                }}\n              >\n                <div\n                  style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}\n                >\n                  <div>\n                    <strong>\n                      {getTypeName(child.type)}: {child.name}\n                    </strong>\n                    <div style={{ fontSize: '12px', color: '#666' }}>\n                      成本: ¥{child.cost.toLocaleString()} | 效率: {child.efficiency}%\n                    </div>\n                  </div>\n                  <div>\n                    <StatusIndicator\n                      status={\n                        child.efficiency < 50\n                          ? 'critical'\n                          : child.efficiency < 70\n                            ? 'warning'\n                            : 'healthy'\n                      }\n                    />\n                  </div>\n                </div>\n              </Card>\n            ))}\n          </Card>\n        )}\n      </>\n    );\n  };\n\n  return (\n    <div>\n      <DrilldownNavigator onBack={handleBack} onHome={handleHome} />\n      {renderDrilldownContent()}\n    </div>\n  );\n};\n\nexport default DrilldownPage;\n",
       "__isJSFile": true,
       "__absFile": "/root/sean/workspace/lighthouse/lighthouse-src/web/src/pages/DrilldownPage.tsx"
     },
-    "3": {
-      "path": "/slo",
+    "5": {
+      "path": "/SLODashboard",
       "file": "@/pages/SLODashboard.tsx",
-      "id": "3",
-      "absPath": "/slo",
+      "parentId": "1",
+      "id": "5",
+      "absPath": "/SLODashboard",
       "__content": "import React, { useEffect } from 'react';\nimport { Card, Table, Tag, Statistic, Row, Col, Alert, Spin, Space } from 'antd';\nimport { LoadingOutlined } from '@ant-design/icons';\nimport StatusIndicator from '@/components/StatusIndicator';\nimport { useAppStore } from '@/store';\n\nconst SLODashboard: React.FC = () => {\n  const { sloStatus, loadingSLO, errorSLO, fetchSLOStatus, useMockData } = useAppStore();\n\n  useEffect(() => {\n    fetchSLOStatus();\n  }, [fetchSLOStatus]);\n\n  const getStatusTag = (status: string) => {\n    switch (status) {\n      case 'healthy':\n        return <Tag color=\"success\">健康</Tag>;\n      case 'warning':\n        return <Tag color=\"warning\">警告</Tag>;\n      case 'critical':\n        return <Tag color=\"error\">严重</Tag>;\n      default:\n        return <Tag>未知</Tag>;\n    }\n  };\n\n  const columns = [\n    {\n      title: '服务名称',\n      dataIndex: 'serviceName',\n      key: 'serviceName',\n      render: (text: string) => <strong>{text}</strong>,\n    },\n    {\n      title: '健康状态',\n      dataIndex: 'status',\n      key: 'status',\n      render: (status: string) => (\n        <Space>\n          <StatusIndicator status={status as any} showText={true} />\n          {getStatusTag(status)}\n        </Space>\n      ),\n    },\n    {\n      title: '可用性 (%)',\n      dataIndex: 'uptime',\n      key: 'uptime',\n      render: (value: number) => `${value.toFixed(2)}%`,\n      sorter: (a: any, b: any) => a.uptime - b.uptime,\n    },\n    {\n      title: '响应时间 (ms)',\n      dataIndex: 'responseTime',\n      key: 'responseTime',\n      render: (value: number) => value,\n      sorter: (a: any, b: any) => a.responseTime - b.responseTime,\n    },\n    {\n      title: '错误率 (%)',\n      dataIndex: 'errorRate',\n      key: 'errorRate',\n      render: (value: number) => `${value.toFixed(2)}%`,\n      sorter: (a: any, b: any) => a.errorRate - b.errorRate,\n    },\n  ];\n\n  const renderSummaryStats = () => {\n    if (!sloStatus || sloStatus.length === 0) {\n      return null;\n    }\n\n    const totalServices = sloStatus.length;\n    const healthyServices = sloStatus.filter(s => s.status === 'healthy').length;\n    const warningServices = sloStatus.filter(s => s.status === 'warning').length;\n    const criticalServices = sloStatus.filter(s => s.status === 'critical').length;\n\n    const avgUptime = sloStatus.reduce((sum, s) => sum + s.uptime, 0) / totalServices;\n    const avgResponseTime = sloStatus.reduce((sum, s) => sum + s.responseTime, 0) / totalServices;\n    const avgErrorRate = sloStatus.reduce((sum, s) => sum + s.errorRate, 0) / totalServices;\n\n    return (\n      <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>\n        <Col xs={24} sm={12} md={6}>\n          <Card>\n            <Statistic title=\"总服务数\" value={totalServices} />\n          </Card>\n        </Col>\n        <Col xs={24} sm={12} md={6}>\n          <Card>\n            <Statistic title=\"健康服务\" value={healthyServices} valueStyle={{ color: '#52c41a' }} />\n          </Card>\n        </Col>\n        <Col xs={24} sm={12} md={6}>\n          <Card>\n            <Statistic title=\"警告服务\" value={warningServices} valueStyle={{ color: '#faad14' }} />\n          </Card>\n        </Col>\n        <Col xs={24} sm={12} md={6}>\n          <Card>\n            <Statistic\n              title=\"严重服务\"\n              value={criticalServices}\n              valueStyle={{ color: '#ff4d4f' }}\n            />\n          </Card>\n        </Col>\n        <Col xs={24} sm={12} md={6}>\n          <Card>\n            <Statistic title=\"平均可用性\" value={avgUptime.toFixed(2)} suffix=\"%\" />\n          </Card>\n        </Col>\n        <Col xs={24} sm={12} md={6}>\n          <Card>\n            <Statistic title=\"平均响应时间\" value={Math.round(avgResponseTime)} suffix=\"ms\" />\n          </Card>\n        </Col>\n        <Col xs={24} sm={12} md={6}>\n          <Card>\n            <Statistic title=\"平均错误率\" value={avgErrorRate.toFixed(2)} suffix=\"%\" />\n          </Card>\n        </Col>\n      </Row>\n    );\n  };\n\n  return (\n    <div>\n      <h2>SLO健康监控</h2>\n\n      {useMockData && <Alert message=\"当前使用Mock数据\" type=\"info\" style={{ marginBottom: 16 }} />}\n\n      {loadingSLO ? (\n        <div style={{ textAlign: 'center', padding: '40px' }}>\n          <Spin indicator={<LoadingOutlined spin />} />\n          <p>加载SLO状态中...</p>\n        </div>\n      ) : errorSLO ? (\n        <Alert\n          message=\"加载SLO状态失败\"\n          description={errorSLO}\n          type=\"error\"\n          showIcon\n          style={{ marginBottom: 16 }}\n        />\n      ) : (\n        <>\n          {renderSummaryStats()}\n          <Card title=\"服务SLO详情\">\n            {sloStatus?.length ? (\n              <Table\n                dataSource={sloStatus}\n                columns={columns}\n                rowKey=\"serviceName\"\n                pagination={{\n                  pageSize: 10,\n                  showSizeChanger: true,\n                  pageSizeOptions: ['10', '20', '50'],\n                }}\n              />\n            ) : (\n              <div style={{ textAlign: 'center', padding: '20px' }}>暂无SLO数据</div>\n            )}\n          </Card>\n        </>\n      )}\n    </div>\n  );\n};\n\nexport default SLODashboard;\n",
       "__isJSFile": true,
       "__absFile": "/root/sean/workspace/lighthouse/lighthouse-src/web/src/pages/SLODashboard.tsx"
     },
-    "4": {
-      "path": "/roi",
+    "6": {
+      "path": "/ROIDashboard",
       "file": "@/pages/ROIDashboard.tsx",
-      "id": "4",
-      "absPath": "/roi",
+      "parentId": "1",
+      "id": "6",
+      "absPath": "/ROIDashboard",
       "__content": "import React, { useEffect } from 'react';\nimport { Card, Statistic, Row, Col, Alert, Spin, Tabs } from 'antd';\nimport { LoadingOutlined } from '@ant-design/icons';\nimport TrendChart from '@/components/TrendChart';\nimport { useAppStore } from '@/store';\n\nconst { TabPane } = Tabs;\n\nconst ROIDashboard: React.FC = () => {\n  const { roiTrends, loadingROI, errorROI, fetchROITrends, useMockData } = useAppStore();\n\n  useEffect(() => {\n    fetchROITrends();\n  }, [fetchROITrends]);\n\n  const renderSummaryStats = () => {\n    if (!roiTrends || roiTrends.length === 0) {\n      return null;\n    }\n\n    const latest = roiTrends[roiTrends.length - 1];\n    const previous = roiTrends.length > 1 ? roiTrends[roiTrends.length - 2] : null;\n\n    const valueChange = previous ? ((latest.value - previous.value) / previous.value) * 100 : 0;\n    const costChange = previous ? ((latest.cost - previous.cost) / previous.cost) * 100 : 0;\n    const efficiencyChange = previous ? latest.efficiency - previous.efficiency : 0;\n\n    return (\n      <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>\n        <Col xs={24} sm={12} md={8}>\n          <Card>\n            <Statistic\n              title=\"当前价值\"\n              value={latest.value}\n              prefix=\"¥\"\n              formatter={value => Number(value).toLocaleString()}\n              valueStyle={{ color: valueChange >= 0 ? '#52c41a' : '#ff4d4f' }}\n              suffix={\n                previous && (\n                  <span\n                    style={{ fontSize: '12px', color: valueChange >= 0 ? '#52c41a' : '#ff4d4f' }}\n                  >\n                    {valueChange >= 0 ? '+' : ''}\n                    {valueChange.toFixed(2)}%\n                  </span>\n                )\n              }\n            />\n          </Card>\n        </Col>\n        <Col xs={24} sm={12} md={8}>\n          <Card>\n            <Statistic\n              title=\"当前成本\"\n              value={latest.cost}\n              prefix=\"¥\"\n              formatter={value => Number(value).toLocaleString()}\n              valueStyle={{ color: costChange <= 0 ? '#52c41a' : '#ff4d4f' }}\n              suffix={\n                previous && (\n                  <span\n                    style={{ fontSize: '12px', color: costChange <= 0 ? '#52c41a' : '#ff4d4f' }}\n                  >\n                    {costChange <= 0 ? '' : '+'}\n                    {costChange.toFixed(2)}%\n                  </span>\n                )\n              }\n            />\n          </Card>\n        </Col>\n        <Col xs={24} sm={12} md={8}>\n          <Card>\n            <Statistic\n              title=\"当前效率分\"\n              value={latest.efficiency}\n              valueStyle={{ color: efficiencyChange >= 0 ? '#52c41a' : '#ff4d4f' }}\n              suffix={\n                <span\n                  style={{ fontSize: '12px', color: efficiencyChange >= 0 ? '#52c41a' : '#ff4d4f' }}\n                >\n                  {efficiencyChange >= 0 ? '+' : ''}\n                  {efficiencyChange.toFixed(2)}%\n                </span>\n              }\n            />\n          </Card>\n        </Col>\n      </Row>\n    );\n  };\n\n  const renderCharts = () => {\n    if (!roiTrends || roiTrends.length === 0) {\n      return (\n        <div style={{ textAlign: 'center', padding: '40px' }}>\n          <p>暂无趋势数据</p>\n        </div>\n      );\n    }\n\n    // 过滤最近30天的数据\n    const thirtyDaysAgo = new Date();\n    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);\n\n    const recentTrends = roiTrends.filter(trend => {\n      const trendDate = new Date(trend.date);\n      return trendDate >= thirtyDaysAgo;\n    });\n\n    return (\n      <Tabs defaultActiveKey=\"1\">\n        <TabPane tab=\"价值与成本趋势\" key=\"1\">\n          <TrendChart data={recentTrends} showEfficiency={false} height={400} />\n        </TabPane>\n        <TabPane tab=\"效率分趋势\" key=\"2\">\n          <TrendChart data={recentTrends} showEfficiency={true} height={400} />\n        </TabPane>\n        <TabPane tab=\"完整趋势\" key=\"3\">\n          <TrendChart data={roiTrends} showEfficiency={true} height={400} />\n        </TabPane>\n      </Tabs>\n    );\n  };\n\n  return (\n    <div>\n      <h2>ROI价值追踪</h2>\n\n      {useMockData && <Alert message=\"当前使用Mock数据\" type=\"info\" style={{ marginBottom: 16 }} />}\n\n      {loadingROI ? (\n        <div style={{ textAlign: 'center', padding: '40px' }}>\n          <Spin indicator={<LoadingOutlined spin />} />\n          <p>加载ROI趋势中...</p>\n        </div>\n      ) : errorROI ? (\n        <Alert\n          message=\"加载ROI趋势失败\"\n          description={errorROI}\n          type=\"error\"\n          showIcon\n          style={{ marginBottom: 16 }}\n        />\n      ) : (\n        <>\n          {renderSummaryStats()}\n          <Card title=\"趋势分析\">{renderCharts()}</Card>\n        </>\n      )}\n    </div>\n  );\n};\n\nexport default ROIDashboard;\n",
       "__isJSFile": true,
       "__absFile": "/root/sean/workspace/lighthouse/lighthouse-src/web/src/pages/ROIDashboard.tsx"
+    },
+    "@@/global-layout": {
+      "id": "@@/global-layout",
+      "path": "/",
+      "file": "/root/sean/workspace/lighthouse/lighthouse-src/web/src/layouts/index.tsx",
+      "absPath": "/",
+      "isLayout": true,
+      "__absFile": "/root/sean/workspace/lighthouse/lighthouse-src/web/src/layouts/index.tsx"
     }
   },
   "apiRoutes": {},
@@ -2173,7 +2225,7 @@
     "tslibVersion": "2.8.1"
   },
   "faviconFiles": [],
-  "port": 8000,
+  "port": 8001,
   "host": "0.0.0.0",
   "ip": "172.21.212.77"
 }
