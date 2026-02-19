@@ -28,14 +28,50 @@ const CostTable: React.FC<CostTableProps> = ({
       title: '成本 (¥)',
       dataIndex: 'cost',
       key: 'cost',
-      render: (value: number) => value.toLocaleString(),
+      render: (value: number, record: NamespaceCost) => (
+        <span
+          role="button"
+          tabIndex={0}
+          style={{ cursor: 'pointer', color: '#1890ff', textDecoration: 'underline' }}
+          onClick={e => {
+            e.stopPropagation();
+            onRowClick?.(record);
+          }}
+          onKeyDown={e => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.stopPropagation();
+              onRowClick?.(record);
+            }
+          }}
+        >
+          {value.toLocaleString()}
+        </span>
+      ),
       sorter: (a: NamespaceCost, b: NamespaceCost) => a.cost - b.cost,
     },
     {
       title: '可优化空间 (¥)',
       dataIndex: 'optimizableSpace',
       key: 'optimizableSpace',
-      render: (value: number) => <Tag color="warning">{value.toLocaleString()}</Tag>,
+      render: (value: number, record: NamespaceCost) => (
+        <span
+          role="button"
+          tabIndex={0}
+          style={{ cursor: 'pointer' }}
+          onClick={e => {
+            e.stopPropagation();
+            onRowClick?.(record);
+          }}
+          onKeyDown={e => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.stopPropagation();
+              onRowClick?.(record);
+            }
+          }}
+        >
+          <Tag color="warning">{value.toLocaleString()}</Tag>
+        </span>
+      ),
       sorter: (a: NamespaceCost, b: NamespaceCost) => a.optimizableSpace - b.optimizableSpace,
     },
     {

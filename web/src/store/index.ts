@@ -1,6 +1,16 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { CostMetrics, NamespaceCost, DrilldownItem, SLOStatus, ROITrend } from '@/types';
+import {
+  CostMetrics,
+  NamespaceCost,
+  DrilldownItem,
+  SLOStatus,
+  ROITrend,
+  SLOScope,
+  CostTimeRange,
+  CostCompareMode,
+  ResourceDimension,
+} from '@/types';
 import { costService } from '@/services/costService';
 import { mockApi } from '@/services/mockApi';
 
@@ -31,8 +41,14 @@ interface AppState {
   loadingROI: boolean;
   errorROI: string | null;
 
+  // 成本透视时间与对比
+  costTimeRange: CostTimeRange;
+  costCompareMode: CostCompareMode;
+
   // 应用状态
   useMockData: boolean;
+  /** 当前钻取资源维度：算力 / 存储 / 网络 */
+  selectedDimension: ResourceDimension;
   selectedNamespace: string | null;
   selectedNode: string | null;
   selectedWorkload: string | null;
@@ -42,11 +58,15 @@ interface AppState {
   fetchGlobalCostMetrics: () => Promise<void>;
   fetchNamespaceCosts: () => Promise<void>;
   fetchDrilldownData: (
-    type: 'namespace' | 'node' | 'workload' | 'pod',
+    type: string,
     id: string,
+    dimension?: ResourceDimension,
   ) => Promise<void>;
-  fetchSLOStatus: () => Promise<void>;
+  setSelectedDimension: (dimension: ResourceDimension) => void;
+  fetchSLOStatus: (scope?: SLOScope) => Promise<void>;
   fetchROITrends: () => Promise<void>;
+  setCostTimeRange: (range: CostTimeRange) => void;
+  setCostCompareMode: (mode: CostCompareMode) => void;
   setUseMockData: (useMock: boolean) => void;
   setSelectedNamespace: (namespace: string | null) => void;
   setSelectedNode: (node: string | null) => void;
@@ -81,7 +101,10 @@ export const useAppStore = create<AppState>()(
       loadingROI: false,
       errorROI: null,
 
+      costTimeRange: '30d',
+      costCompareMode: 'none',
       useMockData: true,
+      selectedDimension: 'compute',
       selectedNamespace: null,
       selectedNode: null,
       selectedWorkload: null,
@@ -89,13 +112,13 @@ export const useAppStore = create<AppState>()(
 
       // Actions
       fetchGlobalCostMetrics: async () => {
-        const { useMockData } = get();
+        const { useMockData, costTimeRange, costCompareMode } = get();
         set({ loadingGlobalMetrics: true, errorGlobalMetrics: null });
 
         try {
           const data = useMockData
-            ? await mockApi.getGlobalCostMetrics()
-            : await costService.getGlobalCostMetrics();
+            ? await mockApi.getGlobalCostMetrics({ period: costTimeRange, compareMode: costCompareMode })
+            : await costService.getGlobalCostMetrics({ period: costTimeRange, compareMode: costCompareMode });
           set({ globalCostMetrics: data, loadingGlobalMetrics: false });
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : '获取全局成本指标失败';
@@ -104,13 +127,13 @@ export const useAppStore = create<AppState>()(
       },
 
       fetchNamespaceCosts: async () => {
-        const { useMockData } = get();
+        const { useMockData, costTimeRange } = get();
         set({ loadingNamespaceCosts: true, errorNamespaceCosts: null });
 
         try {
           const data = useMockData
-            ? await mockApi.getNamespaceCosts()
-            : await costService.getNamespaceCosts();
+            ? await mockApi.getNamespaceCosts({ period: costTimeRange })
+            : await costService.getNamespaceCosts({ period: costTimeRange });
           set({ namespaceCosts: data, loadingNamespaceCosts: false });
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : '获取命名空间成本失败';
@@ -118,14 +141,15 @@ export const useAppStore = create<AppState>()(
         }
       },
 
-      fetchDrilldownData: async (type, id) => {
-        const { useMockData, drilldownPath } = get();
+      fetchDrilldownData: async (type, id, dimension) => {
+        const { useMockData, drilldownPath, selectedDimension } = get();
+        const dim = dimension ?? selectedDimension;
         set({ loadingDrilldown: true, errorDrilldown: null });
 
         try {
           const data = useMockData
-            ? await mockApi.getDrilldownData(type, id)
-            : await costService.getDrilldownData(type, id);
+            ? await mockApi.getDrilldownData(type, id, dim)
+            : await costService.getDrilldownData(type, id, dim);
 
           const newPath = [...drilldownPath, `${type}:${id}`];
           set({
@@ -134,7 +158,7 @@ export const useAppStore = create<AppState>()(
             loadingDrilldown: false,
           });
 
-          // 更新选中状态
+          // 更新选中状态（算力维度）
           if (type === 'namespace') {
             set({
               selectedNamespace: id,
@@ -155,14 +179,18 @@ export const useAppStore = create<AppState>()(
         }
       },
 
-      fetchSLOStatus: async () => {
+      setSelectedDimension: dimension => {
+        set({ selectedDimension: dimension });
+      },
+
+      fetchSLOStatus: async (scope?: SLOScope) => {
         const { useMockData } = get();
         set({ loadingSLO: true, errorSLO: null });
 
         try {
           const data = useMockData
-            ? await mockApi.getSLOStatus()
-            : await costService.getSLOStatus();
+            ? await mockApi.getSLOStatus(scope)
+            : await costService.getSLOStatus(scope);
           set({ sloStatus: data, loadingSLO: false });
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : '获取SLO状态失败';
@@ -183,6 +211,14 @@ export const useAppStore = create<AppState>()(
           const errorMessage = error instanceof Error ? error.message : '获取ROI趋势失败';
           set({ errorROI: errorMessage, loadingROI: false });
         }
+      },
+
+      setCostTimeRange: range => {
+        set({ costTimeRange: range });
+      },
+
+      setCostCompareMode: mode => {
+        set({ costCompareMode: mode });
       },
 
       setUseMockData: useMock => {
@@ -229,7 +265,10 @@ export const useAppStore = create<AppState>()(
     {
       name: 'lighthouse-storage',
       partialize: state => ({
+        costTimeRange: state.costTimeRange,
+        costCompareMode: state.costCompareMode,
         useMockData: state.useMockData,
+        selectedDimension: state.selectedDimension,
         selectedNamespace: state.selectedNamespace,
         selectedNode: state.selectedNode,
         selectedWorkload: state.selectedWorkload,

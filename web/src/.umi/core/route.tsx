@@ -4,7 +4,7 @@
 import React from 'react';
 
 export async function getRoutes() {
-  const routes = {"1":{"path":"/","parentId":"@@/global-layout","id":"1"},"2":{"path":"/","redirect":"/CostOverviewPage","parentId":"1","id":"2"},"3":{"path":"/CostOverviewPage","parentId":"1","id":"3"},"4":{"path":"/DrilldownPage","parentId":"1","id":"4"},"5":{"path":"/SLODashboard","parentId":"1","id":"5"},"6":{"path":"/ROIDashboard","parentId":"1","id":"6"},"@@/global-layout":{"id":"@@/global-layout","path":"/","isLayout":true}} as const;
+  const routes = {"1":{"path":"/","parentId":"@@/global-layout","id":"1"},"2":{"path":"/","redirect":"/CostOverviewPage","parentId":"1","id":"2"},"3":{"path":"/CostOverviewPage","parentId":"1","id":"3"},"4":{"path":"/DrilldownPage","parentId":"1","id":"4"},"5":{"path":"/SLODashboard","parentId":"1","id":"5"},"6":{"path":"/ROIDashboard","redirect":"/CostOverviewPage?tab=roi","parentId":"1","id":"6"},"7":{"path":"/PreventionPage","parentId":"1","id":"7"},"8":{"path":"/FaultHandlingPage","parentId":"1","id":"8"},"@@/global-layout":{"id":"@@/global-layout","path":"/","isLayout":true}} as const;
   return {
     routes,
     routeComponents: {
@@ -13,8 +13,10 @@ export async function getRoutes() {
 '3': React.lazy(() => import(/* webpackChunkName: "p__CostOverviewPage" */'@/pages/CostOverviewPage.tsx')),
 '4': React.lazy(() => import(/* webpackChunkName: "p__DrilldownPage" */'@/pages/DrilldownPage.tsx')),
 '5': React.lazy(() => import(/* webpackChunkName: "p__SLODashboard" */'@/pages/SLODashboard.tsx')),
-'6': React.lazy(() => import(/* webpackChunkName: "p__ROIDashboard" */'@/pages/ROIDashboard.tsx')),
-'@@/global-layout': React.lazy(() => import(/* webpackChunkName: "layouts__index" */'/root/sean/workspace/lighthouse/lighthouse-src/web/src/layouts/index.tsx')),
+'6': React.lazy(() => import('./EmptyRoute')),
+'7': React.lazy(() => import(/* webpackChunkName: "p__PreventionPage" */'@/pages/PreventionPage.tsx')),
+'8': React.lazy(() => import(/* webpackChunkName: "p__FaultHandlingPage" */'@/pages/FaultHandlingPage.tsx')),
+'@@/global-layout': React.lazy(() => import(/* webpackChunkName: "layouts__index" */'/root/sean/workspace/.lighthouse/lighthouse-src/web/src/layouts/index.tsx')),
 },
   };
 }

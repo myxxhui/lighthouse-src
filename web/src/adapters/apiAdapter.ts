@@ -1,4 +1,10 @@
-import { CostMetrics, NamespaceCost, DomainBreakdown } from '@/types';
+import {
+  CostMetrics,
+  NamespaceCost,
+  DomainBreakdown,
+  DrilldownItem,
+  DrilldownCostBreakdown,
+} from '@/types';
 
 /**
  * 后端 API 响应类型（与 backend dto 一致）
@@ -74,6 +80,39 @@ export function adaptNamespacesToNamespaceCosts(
       recommendations: [],
     };
   });
+}
+
+/** 钻取 API 响应（可能带 snake_case cost_breakdown） */
+export interface DrilldownApiResponse {
+  id: string;
+  name: string;
+  type: string;
+  cost: number;
+  optimizableSpace: number;
+  efficiency: number;
+  cost_breakdown?: DrilldownCostBreakdown;
+  costBreakdown?: DrilldownCostBreakdown;
+  children?: DrilldownApiResponse[];
+}
+
+/**
+ * 将 API 钻取响应规范为前端 DrilldownItem（统一 costBreakdown、递归 children）
+ */
+export function adaptDrilldownResponse(res: DrilldownApiResponse): DrilldownItem {
+  const costBreakdown =
+    res.costBreakdown ?? res.cost_breakdown;
+  const children = res.children?.map((c) => adaptDrilldownResponse(c));
+  const item: DrilldownItem = {
+    id: res.id,
+    name: res.name,
+    type: res.type as DrilldownItem['type'],
+    cost: res.cost,
+    optimizableSpace: res.optimizableSpace,
+    efficiency: res.efficiency,
+    ...(costBreakdown && { costBreakdown }),
+    ...(children && children.length > 0 && { children }),
+  };
+  return item;
 }
 
 function gradeToEfficiency(grade: string): number {
