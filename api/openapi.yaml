@@ -143,7 +143,9 @@ paths:
           required: false
           schema:
             type: string
-          description: Optional dimension filter
+            enum: [compute, storage, network]
+            default: compute
+          description: Resource dimension for drilldown (compute=算力, storage=存储, network=网络). Default compute.
         - name: start_time
           in: query
           required: false
@@ -548,6 +550,7 @@ components:
 
     DrilldownResponse:
       type: object
+      description: Drilldown item (frontend-facing shape may use id/name/type/cost/optimizableSpace/efficiency/cost_breakdown/children)
       properties:
         level:
           type: string
@@ -555,6 +558,14 @@ components:
           type: string
         cost:
           $ref: '#/components/schemas/CostBreakdown'
+        cost_breakdown:
+          type: object
+          description: Per-resource cost breakdown (cpu, memory, storage, network) for this node
+          properties:
+            cpu: { type: number, format: float }
+            memory: { type: number, format: float }
+            storage: { type: number, format: float }
+            network: { type: number, format: float }
         children:
           type: array
           items:

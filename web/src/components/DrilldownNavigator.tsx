@@ -3,13 +3,22 @@ import { Breadcrumb, Button, Space } from 'antd';
 import { HomeOutlined, ArrowLeftOutlined } from '@ant-design/icons';
 import { useAppStore } from '@/store';
 
+const DIMENSION_LABELS: Record<string, string> = {
+  compute: '算力',
+  storage: '存储',
+  network: '网络',
+};
+
 interface DrilldownNavigatorProps {
   onBack?: () => void;
   onHome?: () => void;
+  /** 当前资源维度，用于面包屑首项 */
+  dimension?: string;
 }
 
-const DrilldownNavigator: React.FC<DrilldownNavigatorProps> = ({ onBack, onHome }) => {
-  const { drilldownPath, clearDrilldownPath } = useAppStore();
+const DrilldownNavigator: React.FC<DrilldownNavigatorProps> = ({ onBack, onHome, dimension }) => {
+  const { drilldownPath, clearDrilldownPath, selectedDimension } = useAppStore();
+  const dim = dimension ?? selectedDimension;
 
   const handleBack = () => {
     if (onBack) {
@@ -27,21 +36,31 @@ const DrilldownNavigator: React.FC<DrilldownNavigatorProps> = ({ onBack, onHome 
     }
   };
 
-  const breadcrumbItems = drilldownPath.map((pathItem, index) => {
-    const [type, id] = pathItem.split(':');
-    const typeName =
-      type === 'namespace'
-        ? '命名空间'
-        : type === 'node'
-          ? '节点'
-          : type === 'workload'
-            ? '工作负载'
-            : 'Pod';
-    return {
-      title: `${typeName}: ${id}`,
-      key: index,
-    };
-  });
+  const typeNameMap: Record<string, string> = {
+    namespace: '命名空间',
+    node: '节点',
+    workload: '工作负载',
+    pod: 'Pod',
+    storage_class: '存储类',
+    pvc: 'PVC',
+    volume: '卷',
+    service: '服务',
+    ingress: 'Ingress',
+    lb: '负载均衡',
+    traffic_type: '流量类型',
+  };
+
+  const breadcrumbItems = [
+    ...(dim ? [{ title: DIMENSION_LABELS[dim] ?? dim, key: 'dim' }] : []),
+    ...drilldownPath.map((pathItem, index) => {
+      const [type, id] = pathItem.split(':');
+      const typeName = typeNameMap[type] ?? type;
+      return {
+        title: `${typeName}: ${id}`,
+        key: `path-${index}`,
+      };
+    }),
+  ];
 
   return (
     <Space size="middle" style={{ marginBottom: 16 }}>
@@ -55,7 +74,7 @@ const DrilldownNavigator: React.FC<DrilldownNavigatorProps> = ({ onBack, onHome 
       <Button icon={<HomeOutlined />} onClick={handleHome}>
         首页
       </Button>
-      {drilldownPath.length > 0 && <Breadcrumb items={breadcrumbItems} />}
+      {breadcrumbItems.length > 0 && <Breadcrumb items={breadcrumbItems} />}
     </Space>
   );
 };

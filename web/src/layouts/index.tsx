@@ -1,16 +1,23 @@
 import React from 'react';
 import { ProLayout } from '@ant-design/pro-layout';
 import { useLocation, useNavigate, Outlet } from 'umi';
-import { FundOutlined, ClusterOutlined, DashboardOutlined, LineChartOutlined } from '@ant-design/icons';
+import {
+  FundOutlined,
+  ClusterOutlined,
+  DashboardOutlined,
+  SafetyCertificateOutlined,
+  ToolOutlined,
+} from '@ant-design/icons';
 
 const defaultProps = {
   route: {
     path: '/',
     routes: [
       { path: '/CostOverviewPage', name: '全域成本透视', icon: <FundOutlined /> },
-      { path: '/DrilldownPage', name: '四层钻取', icon: <ClusterOutlined /> },
+      { path: '/DrilldownPage', name: '成本钻取', icon: <ClusterOutlined /> },
       { path: '/SLODashboard', name: 'SLO 红绿灯', icon: <DashboardOutlined /> },
-      { path: '/ROIDashboard', name: 'ROI 看板', icon: <LineChartOutlined /> },
+      { path: '/PreventionPage', name: '智能预防', icon: <SafetyCertificateOutlined /> },
+      { path: '/FaultHandlingPage', name: '智能故障处理', icon: <ToolOutlined /> },
     ],
   },
   location: { pathname: '/' },

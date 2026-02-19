@@ -1,15 +1,24 @@
-import React, { useEffect } from 'react';
-import { Card, Table, Tag, Statistic, Row, Col, Alert, Spin, Space } from 'antd';
+import React, { useEffect, useState } from 'react';
+import { Card, Table, Tag, Statistic, Row, Col, Alert, Spin, Space, Segmented } from 'antd';
 import { LoadingOutlined } from '@ant-design/icons';
 import StatusIndicator from '@/components/StatusIndicator';
 import { useAppStore } from '@/store';
+import type { SLOScope } from '@/types';
+
+const SCOPE_LABELS: Record<SLOScope, string> = {
+  global: '全域',
+  domain: '域',
+  service: '服务',
+  pod: 'Pod',
+};
 
 const SLODashboard: React.FC = () => {
   const { sloStatus, loadingSLO, errorSLO, fetchSLOStatus, useMockData } = useAppStore();
+  const [scope, setScope] = useState<SLOScope>('service');
 
   useEffect(() => {
-    fetchSLOStatus();
-  }, [fetchSLOStatus]);
+    fetchSLOStatus(scope);
+  }, [scope, fetchSLOStatus]);
 
   const getStatusTag = (status: string) => {
     switch (status) {
@@ -26,10 +35,11 @@ const SLODashboard: React.FC = () => {
 
   const columns = [
     {
-      title: '服务名称',
-      dataIndex: 'serviceName',
-      key: 'serviceName',
-      render: (text: string) => <strong>{text}</strong>,
+      title: '名称',
+      key: 'name',
+      render: (_: unknown, record: { scopeName?: string; serviceName: string }) => (
+        <strong>{record.scopeName ?? record.serviceName}</strong>
+      ),
     },
     {
       title: '健康状态',
@@ -65,42 +75,49 @@ const SLODashboard: React.FC = () => {
     },
   ];
 
+  const drillDownScope = (current: SLOScope): SLOScope | null => {
+    if (current === 'global') return 'domain';
+    if (current === 'domain') return 'service';
+    if (current === 'service') return 'pod';
+    return null;
+  };
+
   const renderSummaryStats = () => {
     if (!sloStatus || sloStatus.length === 0) {
       return null;
     }
 
-    const totalServices = sloStatus.length;
-    const healthyServices = sloStatus.filter(s => s.status === 'healthy').length;
-    const warningServices = sloStatus.filter(s => s.status === 'warning').length;
-    const criticalServices = sloStatus.filter(s => s.status === 'critical').length;
+    const totalItems = sloStatus.length;
+    const healthyCount = sloStatus.filter(s => s.status === 'healthy').length;
+    const warningCount = sloStatus.filter(s => s.status === 'warning').length;
+    const criticalCount = sloStatus.filter(s => s.status === 'critical').length;
 
-    const avgUptime = sloStatus.reduce((sum, s) => sum + s.uptime, 0) / totalServices;
-    const avgResponseTime = sloStatus.reduce((sum, s) => sum + s.responseTime, 0) / totalServices;
-    const avgErrorRate = sloStatus.reduce((sum, s) => sum + s.errorRate, 0) / totalServices;
+    const avgUptime = sloStatus.reduce((sum, s) => sum + s.uptime, 0) / totalItems;
+    const avgResponseTime = sloStatus.reduce((sum, s) => sum + s.responseTime, 0) / totalItems;
+    const avgErrorRate = sloStatus.reduce((sum, s) => sum + s.errorRate, 0) / totalItems;
 
     return (
       <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
         <Col xs={24} sm={12} md={6}>
           <Card>
-            <Statistic title="总服务数" value={totalServices} />
+            <Statistic title={`总${SCOPE_LABELS[scope]}数`} value={totalItems} />
           </Card>
         </Col>
         <Col xs={24} sm={12} md={6}>
           <Card>
-            <Statistic title="健康服务" value={healthyServices} valueStyle={{ color: '#52c41a' }} />
+            <Statistic title={`健康${SCOPE_LABELS[scope]}`} value={healthyCount} valueStyle={{ color: '#52c41a' }} />
           </Card>
         </Col>
         <Col xs={24} sm={12} md={6}>
           <Card>
-            <Statistic title="警告服务" value={warningServices} valueStyle={{ color: '#faad14' }} />
+            <Statistic title={`警告${SCOPE_LABELS[scope]}`} value={warningCount} valueStyle={{ color: '#faad14' }} />
           </Card>
         </Col>
         <Col xs={24} sm={12} md={6}>
           <Card>
             <Statistic
-              title="严重服务"
-              value={criticalServices}
+              title={`严重${SCOPE_LABELS[scope]}`}
+              value={criticalCount}
               valueStyle={{ color: '#ff4d4f' }}
             />
           </Card>
@@ -145,13 +162,35 @@ const SLODashboard: React.FC = () => {
         />
       ) : (
         <>
+          <div style={{ marginBottom: 16 }}>
+            <Space align="center">
+              <span>层级：</span>
+              <Segmented
+                value={scope}
+                onChange={v => setScope(v as SLOScope)}
+                options={[
+                  { label: '全域', value: 'global' },
+                  { label: '域', value: 'domain' },
+                  { label: '服务', value: 'service' },
+                  { label: 'Pod', value: 'pod' },
+                ]}
+              />
+            </Space>
+          </div>
           {renderSummaryStats()}
-          <Card title="服务SLO详情">
+          <Card title={`${SCOPE_LABELS[scope]} SLO 详情`}>
             {sloStatus?.length ? (
               <Table
                 dataSource={sloStatus}
                 columns={columns}
-                rowKey="serviceName"
+                rowKey={(r) => r.scopeId ?? r.serviceName}
+                onRow={(record) => {
+                  const next = drillDownScope(scope);
+                  return {
+                    style: next ? { cursor: 'pointer' } : undefined,
+                    onClick: () => next && setScope(next),
+                  };
+                }}
                 pagination={{
                   pageSize: 10,
                   showSizeChanger: true,

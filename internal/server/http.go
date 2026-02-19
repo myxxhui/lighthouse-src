@@ -192,10 +192,14 @@ var levelToType = map[string]string{
 }
 
 // drilldownCost handles GET /api/v1/cost/drilldown/:level/:identifier
-// level 接受 type (namespace/node/workload/pod) 或 L1/L2/L3/L4，契约见 12_API契约表
+// level 接受 type (namespace/node/workload/pod) 或 L1/L2/L3/L4；query dimension=compute|storage|network，默认 compute
 func (s *HTTPServer) drilldownCost(c *gin.Context) {
 	levelOrType := c.Param("level")
 	identifier := c.Param("identifier")
+	dimension := c.Query("dimension")
+	if dimension == "" {
+		dimension = "compute"
+	}
 	level := typeToLevel[levelOrType]
 	if level == "" {
 		level = levelOrType
@@ -204,7 +208,15 @@ func (s *HTTPServer) drilldownCost(c *gin.Context) {
 	if respType == "" {
 		respType = levelOrType
 	}
-	_ = level // reserved for business logic
+	_ = level
+	_ = dimension // reserved for storage/network branch
+	// 成本分解：与 CostBreakdown 对齐，算力钻取每层返回
+	costBreakdown := gin.H{
+		"cpu":    1250.0,
+		"memory": 875.0,
+		"storage": 250.0,
+		"network": 125.0,
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"id":               identifier,
 		"name":             respType + "-" + identifier,
@@ -212,8 +224,18 @@ func (s *HTTPServer) drilldownCost(c *gin.Context) {
 		"cost":             2500.0,
 		"optimizableSpace": 750.0,
 		"efficiency":       70,
+		"cost_breakdown":   costBreakdown,
 		"children": []gin.H{
-			{"id": "node-1", "name": "node-1", "type": "node", "cost": 5000.0, "optimizableSpace": 1500.0, "efficiency": 70, "children": nil},
+			{
+				"id":               "node-1",
+				"name":             "node-1",
+				"type":             "node",
+				"cost":             5000.0,
+				"optimizableSpace": 1500.0,
+				"efficiency":       70,
+				"cost_breakdown":   gin.H{"cpu": 2750.0, "memory": 1750.0, "storage": 350.0, "network": 150.0},
+				"children":         nil,
+			},
 		},
 	})
 }
