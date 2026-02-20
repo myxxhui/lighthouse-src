@@ -14,7 +14,50 @@ const docTemplate = `{
     },
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
-    "paths": {}
+    "paths": {
+        "/cost/global": {
+            "get": {
+                "tags": ["Cost"],
+                "summary": "Global cost overview",
+                "description": "Returns L0 global cost. Response <10ms. L0 = sum of L1.",
+                "operationId": "getGlobalCost",
+                "responses": { "200": { "description": "OK" }, "500": { "description": "Internal Server Error" } }
+            }
+        },
+        "/cost/namespaces": {
+            "get": {
+                "tags": ["Cost"],
+                "summary": "List namespaces with cost summary",
+                "description": "Returns namespaces with cost summary (L1 aggregated)",
+                "operationId": "listNamespaces",
+                "responses": { "200": { "description": "OK" }, "500": { "description": "Internal Server Error" } }
+            }
+        },
+        "/cost/namespace/{namespace}": {
+            "get": {
+                "tags": ["Cost"],
+                "summary": "Namespace cost details",
+                "description": "Returns cost breakdown for a namespace",
+                "operationId": "getNamespaceCost",
+                "parameters": [{ "name": "namespace", "in": "path", "required": true, "type": "string" }],
+                "responses": { "200": { "description": "OK" }, "404": { "description": "Not Found" }, "500": { "description": "Internal Server Error" } }
+            }
+        },
+        "/cost/drilldown/{level}/{identifier}": {
+            "get": {
+                "tags": ["Cost"],
+                "summary": "Cost drilldown",
+                "description": "Drill down by level (L1-L4). Query dimension=compute|storage|network",
+                "operationId": "getDrilldownCost",
+                "parameters": [
+                    { "name": "level", "in": "path", "required": true, "type": "string" },
+                    { "name": "identifier", "in": "path", "required": true, "type": "string" },
+                    { "name": "dimension", "in": "query", "required": false, "type": "string", "enum": ["compute", "storage", "network"] }
+                ],
+                "responses": { "200": { "description": "OK" }, "400": { "description": "Bad Request" }, "500": { "description": "Internal Server Error" } }
+            }
+        }
+    }
 }`
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it

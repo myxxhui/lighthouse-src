@@ -370,6 +370,44 @@ func TestMockRepository_HourlyWorkloadStatOperations(t *testing.T) {
 	}
 }
 
+// TestMockRepository_BillAccountSummary 验证总账单表 cost_bill_account_summary Mock 读写（Phase3 必做）。
+func TestMockRepository_BillAccountSummary(t *testing.T) {
+	ctx := context.Background()
+	repo := NewMockRepository(DefaultMockConfig())
+
+	periodStart := time.Now().Truncate(24 * time.Hour)
+	periodEnd := periodStart.Add(24 * time.Hour)
+	summary := BillAccountSummary{
+		AccountID:   "test-account",
+		PeriodType:  "day",
+		PeriodStart: periodStart,
+		PeriodEnd:   periodEnd,
+		TotalAmount: 10000.50,
+		Currency:    "CNY",
+		ByCategory:  map[string]float64{"compute": 6000, "storage": 2000, "network": 1000, "other": 1000.50},
+	}
+
+	if err := repo.SaveBillAccountSummary(ctx, summary); err != nil {
+		t.Fatalf("SaveBillAccountSummary failed: %v", err)
+	}
+
+	got, err := repo.GetBillAccountSummary(ctx, summary.AccountID, summary.PeriodType, summary.PeriodStart)
+	if err != nil {
+		t.Fatalf("GetBillAccountSummary failed: %v", err)
+	}
+	if got.TotalAmount != summary.TotalAmount || got.Currency != summary.Currency {
+		t.Errorf("GetBillAccountSummary: got TotalAmount=%v Currency=%s, want %v %s", got.TotalAmount, got.Currency, summary.TotalAmount, summary.Currency)
+	}
+
+	list, err := repo.ListBillAccountSummaries(ctx, summary.AccountID)
+	if err != nil {
+		t.Fatalf("ListBillAccountSummaries failed: %v", err)
+	}
+	if len(list) < 1 {
+		t.Error("ListBillAccountSummaries: expected at least one record")
+	}
+}
+
 func TestMockRepository_MetadataOperations(t *testing.T) {
 	ctx := context.Background()
 	repo := NewMockRepository(DefaultMockConfig())

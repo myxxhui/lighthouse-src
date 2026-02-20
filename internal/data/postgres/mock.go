@@ -72,6 +72,10 @@ type MockRepository struct {
 	dailyNamespaceCosts map[string]DailyNamespaceCost // key: namespace-date
 	hourlyWorkloadStats map[string]HourlyWorkloadStat // key: namespace-workload-timestamp
 	metadata            map[string]Metadata
+	// Phase3 必做：总账单、存储/网络表 Mock 占位（schema 见 schema.sql）
+	billAccountSummaries map[string]BillAccountSummary // key: account_id-period_type-period_start
+	dailyStorageCosts     map[string]DailyStorageCost   // key: day-namespace-pvc_name
+	dailyNetworkCosts     map[string]DailyNetworkCost   // key: day-namespace-resource_id
 }
 
 // MockTransaction is a mock implementation of the Transaction interface.
@@ -115,13 +119,16 @@ func NewMockRepository(config MockConfig) *MockRepository {
 	applyDataSizeToInitialCount(&config)
 
 	repo := &MockRepository{
-		config:              config,
-		rand:                rand.New(rand.NewSource(config.RandomSeed)),
-		costSnapshots:       make(map[string]CostSnapshot),
-		roiBaselines:        make(map[string]ROIBaseline),
-		dailyNamespaceCosts: make(map[string]DailyNamespaceCost),
-		hourlyWorkloadStats: make(map[string]HourlyWorkloadStat),
-		metadata:            make(map[string]Metadata),
+		config:                config,
+		rand:                  rand.New(rand.NewSource(config.RandomSeed)),
+		costSnapshots:         make(map[string]CostSnapshot),
+		roiBaselines:          make(map[string]ROIBaseline),
+		dailyNamespaceCosts:   make(map[string]DailyNamespaceCost),
+		hourlyWorkloadStats:   make(map[string]HourlyWorkloadStat),
+		metadata:              make(map[string]Metadata),
+		billAccountSummaries: make(map[string]BillAccountSummary),
+		dailyStorageCosts:    make(map[string]DailyStorageCost),
+		dailyNetworkCosts:    make(map[string]DailyNetworkCost),
 	}
 
 	// Pre-populate with initial data
@@ -758,6 +765,114 @@ func (m *MockRepository) DeleteMetadata(ctx context.Context, key string) error {
 
 	delete(m.metadata, key)
 	return nil
+}
+
+// --- Phase3 必做：总账单、存储/网络表 Mock 占位（cost_bill_account_summary / cost_daily_storage / cost_daily_network）---
+
+func billAccountSummaryKey(accountID, periodType string, periodStart time.Time) string {
+	return fmt.Sprintf("%s-%s-%s", accountID, periodType, periodStart.Format("2006-01-02"))
+}
+
+// SaveBillAccountSummary 保存总账单汇总（Mock 占位）。
+func (m *MockRepository) SaveBillAccountSummary(ctx context.Context, s BillAccountSummary) error {
+	if m.shouldReturnError() {
+		return fmt.Errorf("mock PostgreSQL error: cannot save bill account summary")
+	}
+	if s.CreatedAt.IsZero() {
+		s.CreatedAt = time.Now()
+	}
+	key := billAccountSummaryKey(s.AccountID, s.PeriodType, s.PeriodStart)
+	m.billAccountSummaries[key] = s
+	return nil
+}
+
+// GetBillAccountSummary 按账户+账期查询总账单（Mock 占位）。
+func (m *MockRepository) GetBillAccountSummary(ctx context.Context, accountID, periodType string, periodStart time.Time) (*BillAccountSummary, error) {
+	if m.shouldReturnError() {
+		return nil, fmt.Errorf("mock PostgreSQL error: cannot get bill account summary")
+	}
+	key := billAccountSummaryKey(accountID, periodType, periodStart)
+	s, ok := m.billAccountSummaries[key]
+	if !ok {
+		return nil, fmt.Errorf("bill account summary not found: %s", key)
+	}
+	return &s, nil
+}
+
+// ListBillAccountSummaries 列出总账单（Mock 占位）。
+func (m *MockRepository) ListBillAccountSummaries(ctx context.Context, accountID string) ([]BillAccountSummary, error) {
+	if m.shouldReturnError() {
+		return nil, fmt.Errorf("mock PostgreSQL error: cannot list bill account summaries")
+	}
+	var out []BillAccountSummary
+	for _, s := range m.billAccountSummaries {
+		if accountID != "" && s.AccountID != accountID {
+			continue
+		}
+		out = append(out, s)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].PeriodStart.After(out[j].PeriodStart) })
+	return out, nil
+}
+
+func dailyStorageCostKey(day time.Time, namespace, pvcName string) string {
+	return fmt.Sprintf("%s-%s-%s", day.Format("2006-01-02"), namespace, pvcName)
+}
+
+// SaveDailyStorageCost 保存存储维度日成本（Mock 占位）。
+func (m *MockRepository) SaveDailyStorageCost(ctx context.Context, c DailyStorageCost) error {
+	if m.shouldReturnError() {
+		return fmt.Errorf("mock PostgreSQL error: cannot save daily storage cost")
+	}
+	if c.CreatedAt.IsZero() {
+		c.CreatedAt = time.Now()
+	}
+	key := dailyStorageCostKey(c.Day, c.Namespace, c.PVCName)
+	m.dailyStorageCosts[key] = c
+	return nil
+}
+
+// GetDailyStorageCost 查询存储维度日成本（Mock 占位）。
+func (m *MockRepository) GetDailyStorageCost(ctx context.Context, day time.Time, namespace, pvcName string) (*DailyStorageCost, error) {
+	if m.shouldReturnError() {
+		return nil, fmt.Errorf("mock PostgreSQL error: cannot get daily storage cost")
+	}
+	key := dailyStorageCostKey(day, namespace, pvcName)
+	c, ok := m.dailyStorageCosts[key]
+	if !ok {
+		return nil, fmt.Errorf("daily storage cost not found: %s", key)
+	}
+	return &c, nil
+}
+
+func dailyNetworkCostKey(day time.Time, namespace, resourceID string) string {
+	return fmt.Sprintf("%s-%s-%s", day.Format("2006-01-02"), namespace, resourceID)
+}
+
+// SaveDailyNetworkCost 保存网络维度日成本（Mock 占位）。
+func (m *MockRepository) SaveDailyNetworkCost(ctx context.Context, c DailyNetworkCost) error {
+	if m.shouldReturnError() {
+		return fmt.Errorf("mock PostgreSQL error: cannot save daily network cost")
+	}
+	if c.CreatedAt.IsZero() {
+		c.CreatedAt = time.Now()
+	}
+	key := dailyNetworkCostKey(c.Day, c.Namespace, c.ResourceID)
+	m.dailyNetworkCosts[key] = c
+	return nil
+}
+
+// GetDailyNetworkCost 查询网络维度日成本（Mock 占位）。
+func (m *MockRepository) GetDailyNetworkCost(ctx context.Context, day time.Time, namespace, resourceID string) (*DailyNetworkCost, error) {
+	if m.shouldReturnError() {
+		return nil, fmt.Errorf("mock PostgreSQL error: cannot get daily network cost")
+	}
+	key := dailyNetworkCostKey(day, namespace, resourceID)
+	c, ok := m.dailyNetworkCosts[key]
+	if !ok {
+		return nil, fmt.Errorf("daily network cost not found: %s", key)
+	}
+	return &c, nil
 }
 
 // HealthCheck always returns nil (healthy) for mock repository.

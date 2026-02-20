@@ -1,0 +1,990 @@
+{
+  "config": {
+    "scenario": "standard",
+    "data_size": "medium",
+    "namespaces": [
+      "default",
+      "kube-system",
+      "monitoring",
+      "app-prod",
+      "app-staging"
+    ],
+    "nodes": [
+      "node-1",
+      "node-2",
+      "node-3",
+      "node-4"
+    ],
+    "deployments_per_namespace": 3,
+    "pods_per_deployment": 2,
+    "events_per_resource": 5,
+    "random_seed": 42,
+    "error_rate": 0,
+    "latency_ms": 0
+  },
+  "deployments": [
+    {
+      "name": "default-deployment-1",
+      "namespace": "default",
+      "replicas": 4,
+      "available_replicas": 4,
+      "labels": {
+        "app": "default-deployment-1",
+        "component": "web",
+        "version": "v3"
+      },
+      "annotations": {
+        "created-by": "mock-k8s-client",
+        "description": "Mock deployment for testing",
+        "timestamp": "2026-02-20T16:27:39+08:00"
+      },
+      "creation_timestamp": "2026-02-15T16:27:39.262015803+08:00",
+      "strategy_type": "RollingUpdate"
+    },
+    {
+      "name": "default-deployment-2",
+      "namespace": "default",
+      "replicas": 5,
+      "available_replicas": 5,
+      "labels": {
+        "app": "default-deployment-2",
+        "component": "worker",
+        "version": "v2"
+      },
+      "annotations": {
+        "created-by": "mock-k8s-client",
+        "description": "Mock deployment for testing",
+        "timestamp": "2026-02-20T16:27:39+08:00"
+      },
+      "creation_timestamp": "2026-02-16T16:27:39.262017255+08:00",
+      "strategy_type": "RollingUpdate"
+    },
+    {
+      "name": "default-deployment-3",
+      "namespace": "default",
+      "replicas": 1,
+      "available_replicas": 1,
+      "labels": {
+        "app": "default-deployment-3",
+        "component": "web",
+        "version": "v2"
+      },
+      "annotations": {
+        "created-by": "mock-k8s-client",
+        "description": "Mock deployment for testing",
+        "timestamp": "2026-02-20T16:27:39+08:00"
+      },
+      "creation_timestamp": "2026-02-18T16:27:39.262018583+08:00",
+      "strategy_type": "RollingUpdate"
+    },
+    {
+      "name": "default-deployment-4",
+      "namespace": "default",
+      "replicas": 5,
+      "available_replicas": 5,
+      "labels": {
+        "app": "default-deployment-4",
+        "component": "database",
+        "version": "v2"
+      },
+      "annotations": {
+        "created-by": "mock-k8s-client",
+        "description": "Mock deployment for testing",
+        "timestamp": "2026-02-20T16:27:39+08:00"
+      },
+      "creation_timestamp": "2026-02-08T16:27:39.262019883+08:00",
+      "strategy_type": "RollingUpdate"
+    },
+    {
+      "name": "default-deployment-5",
+      "namespace": "default",
+      "replicas": 3,
+      "available_replicas": 3,
+      "labels": {
+        "app": "default-deployment-5",
+        "component": "worker",
+        "version": "v2"
+      },
+      "annotations": {
+        "created-by": "mock-k8s-client",
+        "description": "Mock deployment for testing",
+        "timestamp": "2026-02-20T16:27:39+08:00"
+      },
+      "creation_timestamp": "2026-01-22T16:27:39.262021049+08:00",
+      "strategy_type": "RollingUpdate"
+    }
+  ],
+  "events": [
+    {
+      "name": "sample-pod-event-1",
+      "namespace": "default",
+      "type": "Normal",
+      "reason": "Scheduled",
+      "message": "Successfully assigned pod to node",
+      "source_component": "kube-scheduler",
+      "source_host": "node-1",
+      "count": 3,
+      "first_timestamp": "2026-02-20T15:31:39.262086665+08:00",
+      "last_timestamp": "2026-02-20T16:25:39.262086743+08:00",
+      "involved_object": {
+        "kind": "Pod",
+        "namespace": "default",
+        "name": "sample-pod",
+        "uid": "uid-sample-pod-1"
+      }
+    },
+    {
+      "name": "sample-pod-event-2",
+      "namespace": "default",
+      "type": "Normal",
+      "reason": "Scheduled",
+      "message": "Successfully assigned pod to node",
+      "source_component": "kube-scheduler",
+      "source_host": "node-1",
+      "count": 8,
+      "first_timestamp": "2026-02-20T16:24:39.262087505+08:00",
+      "last_timestamp": "2026-02-20T16:27:39.262087583+08:00",
+      "involved_object": {
+        "kind": "Pod",
+        "namespace": "default",
+        "name": "sample-pod",
+        "uid": "uid-sample-pod-2"
+      }
+    },
+    {
+      "name": "sample-pod-event-3",
+      "namespace": "default",
+      "type": "Normal",
+      "reason": "Scheduled",
+      "message": "Successfully assigned pod to node",
+      "source_component": "kube-scheduler",
+      "source_host": "node-1",
+      "count": 6,
+      "first_timestamp": "2026-02-20T16:20:39.262088173+08:00",
+      "last_timestamp": "2026-02-20T16:23:39.262088261+08:00",
+      "involved_object": {
+        "kind": "Pod",
+        "namespace": "default",
+        "name": "sample-pod",
+        "uid": "uid-sample-pod-3"
+      }
+    },
+    {
+      "name": "sample-pod-event-4",
+      "namespace": "default",
+      "type": "Normal",
+      "reason": "Scheduled",
+      "message": "Successfully assigned pod to node",
+      "source_component": "kube-scheduler",
+      "source_host": "node-2",
+      "count": 10,
+      "first_timestamp": "2026-02-20T15:42:39.262088855+08:00",
+      "last_timestamp": "2026-02-20T16:24:39.262088931+08:00",
+      "involved_object": {
+        "kind": "Pod",
+        "namespace": "default",
+        "name": "sample-pod",
+        "uid": "uid-sample-pod-4"
+      }
+    },
+    {
+      "name": "sample-pod-event-5",
+      "namespace": "default",
+      "type": "Normal",
+      "reason": "Scheduled",
+      "message": "Successfully assigned pod to node",
+      "source_component": "kube-scheduler",
+      "source_host": "node-2",
+      "count": 10,
+      "first_timestamp": "2026-02-20T15:59:39.26208936+08:00",
+      "last_timestamp": "2026-02-20T16:26:39.262089435+08:00",
+      "involved_object": {
+        "kind": "Pod",
+        "namespace": "default",
+        "name": "sample-pod",
+        "uid": "uid-sample-pod-5"
+      }
+    }
+  ],
+  "generated_at": "2026-02-20T16:27:39.262096055+08:00",
+  "namespaces": [
+    {
+      "name": "default",
+      "creation_timestamp": "2025-06-30T16:27:39.262008767+08:00",
+      "labels": {
+        "app": "default",
+        "environment": "development",
+        "version": "v3"
+      },
+      "annotations": {
+        "created-by": "mock-k8s-client",
+        "timestamp": "2026-02-20T16:27:39+08:00"
+      },
+      "status": "Active"
+    },
+    {
+      "name": "kube-system",
+      "creation_timestamp": "2025-10-13T16:27:39.262010649+08:00",
+      "labels": {
+        "app": "kube-system",
+        "environment": "staging",
+        "version": "v2"
+      },
+      "annotations": {
+        "created-by": "mock-k8s-client",
+        "timestamp": "2026-02-20T16:27:39+08:00"
+      },
+      "status": "Active"
+    },
+    {
+      "name": "monitoring",
+      "creation_timestamp": "2025-10-26T16:27:39.262011564+08:00",
+      "labels": {
+        "app": "monitoring",
+        "environment": "development",
+        "version": "v3"
+      },
+      "annotations": {
+        "created-by": "mock-k8s-client",
+        "timestamp": "2026-02-20T16:27:39+08:00"
+      },
+      "status": "Active"
+    },
+    {
+      "name": "app-prod",
+      "creation_timestamp": "2025-12-29T16:27:39.262012376+08:00",
+      "labels": {
+        "app": "app-prod",
+        "environment": "development",
+        "version": "v2"
+      },
+      "annotations": {
+        "created-by": "mock-k8s-client",
+        "timestamp": "2026-02-20T16:27:39+08:00"
+      },
+      "status": "Active"
+    },
+    {
+      "name": "app-staging",
+      "creation_timestamp": "2025-07-10T16:27:39.262013065+08:00",
+      "labels": {
+        "app": "app-staging",
+        "environment": "development",
+        "version": "v2"
+      },
+      "annotations": {
+        "created-by": "mock-k8s-client",
+        "timestamp": "2026-02-20T16:27:39+08:00"
+      },
+      "status": "Active"
+    }
+  ],
+  "nodes": [
+    {
+      "name": "node-1",
+      "creation_timestamp": "2025-10-13T16:27:39.26206517+08:00",
+      "labels": {
+        "app": "node-1",
+        "node-type": "storage",
+        "version": "v1"
+      },
+      "annotations": {
+        "created-by": "mock-k8s-client",
+        "timestamp": "2026-02-20T16:27:39+08:00"
+      },
+      "conditions": [
+        {
+          "type": "Ready",
+          "status": "True",
+          "reason": "KubeletReady",
+          "message": "kubelet is posting ready status"
+        },
+        {
+          "type": "MemoryPressure",
+          "status": "False",
+          "reason": "KubeletHasSufficientMemory",
+          "message": "kubelet has sufficient memory available"
+        },
+        {
+          "type": "DiskPressure",
+          "status": "False",
+          "reason": "KubeletHasNoDiskPressure",
+          "message": "kubelet has no disk pressure"
+        },
+        {
+          "type": "PIDPressure",
+          "status": "False",
+          "reason": "KubeletHasSufficientPID",
+          "message": "kubelet has sufficient PID available"
+        }
+      ],
+      "capacity": {
+        "cpu": "12",
+        "ephemeral-storage": "169Gi",
+        "memory": "65Gi",
+        "pods": "163"
+      },
+      "allocatable": {
+        "cpu": "9",
+        "ephemeral-storage": "169Gi",
+        "memory": "52Gi",
+        "pods": "203"
+      },
+      "addresses": [
+        {
+          "type": "InternalIP",
+          "address": "10.0.0.16"
+        },
+        {
+          "type": "Hostname",
+          "address": "node-1"
+        }
+      ]
+    },
+    {
+      "name": "node-2",
+      "creation_timestamp": "2025-10-03T16:27:39.262070893+08:00",
+      "labels": {
+        "app": "node-2",
+        "node-type": "storage",
+        "version": "v3"
+      },
+      "annotations": {
+        "created-by": "mock-k8s-client",
+        "timestamp": "2026-02-20T16:27:39+08:00"
+      },
+      "conditions": [
+        {
+          "type": "Ready",
+          "status": "True",
+          "reason": "KubeletReady",
+          "message": "kubelet is posting ready status"
+        },
+        {
+          "type": "MemoryPressure",
+          "status": "False",
+          "reason": "KubeletHasSufficientMemory",
+          "message": "kubelet has sufficient memory available"
+        },
+        {
+          "type": "DiskPressure",
+          "status": "False",
+          "reason": "KubeletHasNoDiskPressure",
+          "message": "kubelet has no disk pressure"
+        },
+        {
+          "type": "PIDPressure",
+          "status": "False",
+          "reason": "KubeletHasSufficientPID",
+          "message": "kubelet has sufficient PID available"
+        }
+      ],
+      "capacity": {
+        "cpu": "8",
+        "ephemeral-storage": "117Gi",
+        "memory": "52Gi",
+        "pods": "137"
+      },
+      "allocatable": {
+        "cpu": "13",
+        "ephemeral-storage": "123Gi",
+        "memory": "63Gi",
+        "pods": "140"
+      },
+      "addresses": [
+        {
+          "type": "InternalIP",
+          "address": "10.0.0.16"
+        },
+        {
+          "type": "Hostname",
+          "address": "node-2"
+        }
+      ]
+    },
+    {
+      "name": "node-3",
+      "creation_timestamp": "2025-10-27T16:27:39.262079058+08:00",
+      "labels": {
+        "app": "node-3",
+        "node-type": "compute",
+        "version": "v1"
+      },
+      "annotations": {
+        "created-by": "mock-k8s-client",
+        "timestamp": "2026-02-20T16:27:39+08:00"
+      },
+      "conditions": [
+        {
+          "type": "Ready",
+          "status": "True",
+          "reason": "KubeletReady",
+          "message": "kubelet is posting ready status"
+        },
+        {
+          "type": "MemoryPressure",
+          "status": "False",
+          "reason": "KubeletHasSufficientMemory",
+          "message": "kubelet has sufficient memory available"
+        },
+        {
+          "type": "DiskPressure",
+          "status": "False",
+          "reason": "KubeletHasNoDiskPressure",
+          "message": "kubelet has no disk pressure"
+        },
+        {
+          "type": "PIDPressure",
+          "status": "False",
+          "reason": "KubeletHasSufficientPID",
+          "message": "kubelet has sufficient PID available"
+        }
+      ],
+      "capacity": {
+        "cpu": "9",
+        "ephemeral-storage": "209Gi",
+        "memory": "56Gi",
+        "pods": "140"
+      },
+      "allocatable": {
+        "cpu": "16",
+        "ephemeral-storage": "101Gi",
+        "memory": "65Gi",
+        "pods": "147"
+      },
+      "addresses": [
+        {
+          "type": "InternalIP",
+          "address": "10.0.0.16"
+        },
+        {
+          "type": "Hostname",
+          "address": "node-3"
+        }
+      ]
+    },
+    {
+      "name": "node-4",
+      "creation_timestamp": "2026-01-04T16:27:39.262084348+08:00",
+      "labels": {
+        "app": "node-4",
+        "node-type": "compute",
+        "version": "v1"
+      },
+      "annotations": {
+        "created-by": "mock-k8s-client",
+        "timestamp": "2026-02-20T16:27:39+08:00"
+      },
+      "conditions": [
+        {
+          "type": "Ready",
+          "status": "True",
+          "reason": "KubeletReady",
+          "message": "kubelet is posting ready status"
+        },
+        {
+          "type": "MemoryPressure",
+          "status": "False",
+          "reason": "KubeletHasSufficientMemory",
+          "message": "kubelet has sufficient memory available"
+        },
+        {
+          "type": "DiskPressure",
+          "status": "False",
+          "reason": "KubeletHasNoDiskPressure",
+          "message": "kubelet has no disk pressure"
+        },
+        {
+          "type": "PIDPressure",
+          "status": "False",
+          "reason": "KubeletHasSufficientPID",
+          "message": "kubelet has sufficient PID available"
+        }
+      ],
+      "capacity": {
+        "cpu": "23",
+        "ephemeral-storage": "122Gi",
+        "memory": "84Gi",
+        "pods": "168"
+      },
+      "allocatable": {
+        "cpu": "8",
+        "ephemeral-storage": "195Gi",
+        "memory": "50Gi",
+        "pods": "184"
+      },
+      "addresses": [
+        {
+          "type": "InternalIP",
+          "address": "10.0.0.23"
+        },
+        {
+          "type": "Hostname",
+          "address": "node-4"
+        }
+      ]
+    }
+  ],
+  "pods": [
+    {
+      "name": "default-pod-1",
+      "namespace": "default",
+      "deployment": "",
+      "node_name": "node-3",
+      "phase": "Running",
+      "creation_timestamp": "2026-02-20T10:27:39.262022046+08:00",
+      "labels": {
+        "app": "default-pod-1",
+        "instance": "3",
+        "version": "v2"
+      },
+      "annotations": {
+        "created-by": "mock-k8s-client",
+        "description": "Mock pod for testing",
+        "timestamp": "2026-02-20T16:27:39+08:00"
+      },
+      "containers": [
+        {
+          "name": "container-1",
+          "image": "myapp/container-1:v3",
+          "resources": {
+            "requests": {
+              "cpu": "287m",
+              "memory": "864Mi"
+            },
+            "limits": {
+              "cpu": "1660m",
+              "memory": "640Mi"
+            }
+          },
+          "ready": true
+        },
+        {
+          "name": "container-2",
+          "image": "myapp/container-2:v2",
+          "resources": {
+            "requests": {
+              "cpu": "994m",
+              "memory": "364Mi"
+            },
+            "limits": {
+              "cpu": "929m",
+              "memory": "679Mi"
+            }
+          },
+          "ready": true
+        },
+        {
+          "name": "container-3",
+          "image": "myapp/container-3:v2",
+          "resources": {
+            "requests": {
+              "cpu": "392m",
+              "memory": "693Mi"
+            },
+            "limits": {
+              "cpu": "1991m",
+              "memory": "864Mi"
+            }
+          },
+          "ready": true
+        }
+      ]
+    },
+    {
+      "name": "default-pod-2",
+      "namespace": "default",
+      "deployment": "",
+      "node_name": "node-1",
+      "phase": "Running",
+      "creation_timestamp": "2026-02-19T22:27:39.262034225+08:00",
+      "labels": {
+        "app": "default-pod-2",
+        "instance": "2",
+        "version": "v1"
+      },
+      "annotations": {
+        "created-by": "mock-k8s-client",
+        "description": "Mock pod for testing",
+        "timestamp": "2026-02-20T16:27:39+08:00"
+      },
+      "containers": [
+        {
+          "name": "container-1",
+          "image": "myapp/container-1:v2",
+          "resources": {
+            "requests": {
+              "cpu": "178m",
+              "memory": "691Mi"
+            },
+            "limits": {
+              "cpu": "856m",
+              "memory": "1207Mi"
+            }
+          },
+          "ready": true
+        },
+        {
+          "name": "container-2",
+          "image": "myapp/container-2:v2",
+          "resources": {
+            "requests": {
+              "cpu": "996m",
+              "memory": "816Mi"
+            },
+            "limits": {
+              "cpu": "1116m",
+              "memory": "1119Mi"
+            }
+          },
+          "ready": true
+        },
+        {
+          "name": "container-3",
+          "image": "myapp/container-3:v2",
+          "resources": {
+            "requests": {
+              "cpu": "987m",
+              "memory": "886Mi"
+            },
+            "limits": {
+              "cpu": "587m",
+              "memory": "672Mi"
+            }
+          },
+          "ready": true
+        }
+      ]
+    },
+    {
+      "name": "default-pod-3",
+      "namespace": "default",
+      "deployment": "",
+      "node_name": "node-1",
+      "phase": "Running",
+      "creation_timestamp": "2026-02-20T11:27:39.262040582+08:00",
+      "labels": {
+        "app": "default-pod-3",
+        "instance": "4",
+        "version": "v3"
+      },
+      "annotations": {
+        "created-by": "mock-k8s-client",
+        "description": "Mock pod for testing",
+        "timestamp": "2026-02-20T16:27:39+08:00"
+      },
+      "containers": [
+        {
+          "name": "container-1",
+          "image": "myapp/container-1:v1",
+          "resources": {
+            "requests": {
+              "cpu": "423m",
+              "memory": "893Mi"
+            },
+            "limits": {
+              "cpu": "1059m",
+              "memory": "762Mi"
+            }
+          },
+          "ready": true
+        },
+        {
+          "name": "container-2",
+          "image": "myapp/container-2:v2",
+          "resources": {
+            "requests": {
+              "cpu": "735m",
+              "memory": "282Mi"
+            },
+            "limits": {
+              "cpu": "1183m",
+              "memory": "546Mi"
+            }
+          },
+          "ready": true
+        },
+        {
+          "name": "container-3",
+          "image": "myapp/container-3:v2",
+          "resources": {
+            "requests": {
+              "cpu": "198m",
+              "memory": "359Mi"
+            },
+            "limits": {
+              "cpu": "1007m",
+              "memory": "951Mi"
+            }
+          },
+          "ready": true
+        }
+      ]
+    },
+    {
+      "name": "default-pod-4",
+      "namespace": "default",
+      "deployment": "",
+      "node_name": "node-4",
+      "phase": "Running",
+      "creation_timestamp": "2026-02-20T12:27:39.262045876+08:00",
+      "labels": {
+        "app": "default-pod-4",
+        "instance": "2",
+        "version": "v2"
+      },
+      "annotations": {
+        "created-by": "mock-k8s-client",
+        "description": "Mock pod for testing",
+        "timestamp": "2026-02-20T16:27:39+08:00"
+      },
+      "containers": [
+        {
+          "name": "container-1",
+          "image": "myapp/container-1:v1",
+          "resources": {
+            "requests": {
+              "cpu": "604m",
+              "memory": "496Mi"
+            },
+            "limits": {
+              "cpu": "1555m",
+              "memory": "790Mi"
+            }
+          },
+          "ready": true
+        }
+      ]
+    },
+    {
+      "name": "default-pod-5",
+      "namespace": "default",
+      "deployment": "",
+      "node_name": "node-3",
+      "phase": "Running",
+      "creation_timestamp": "2026-02-20T10:27:39.262048733+08:00",
+      "labels": {
+        "app": "default-pod-5",
+        "instance": "1",
+        "version": "v3"
+      },
+      "annotations": {
+        "created-by": "mock-k8s-client",
+        "description": "Mock pod for testing",
+        "timestamp": "2026-02-20T16:27:39+08:00"
+      },
+      "containers": [
+        {
+          "name": "container-1",
+          "image": "myapp/container-1:v3",
+          "resources": {
+            "requests": {
+              "cpu": "131m",
+              "memory": "271Mi"
+            },
+            "limits": {
+              "cpu": "919m",
+              "memory": "523Mi"
+            }
+          },
+          "ready": true
+        },
+        {
+          "name": "container-2",
+          "image": "myapp/container-2:v2",
+          "resources": {
+            "requests": {
+              "cpu": "577m",
+              "memory": "539Mi"
+            },
+            "limits": {
+              "cpu": "1361m",
+              "memory": "554Mi"
+            }
+          },
+          "ready": true
+        }
+      ]
+    },
+    {
+      "name": "default-pod-6",
+      "namespace": "default",
+      "deployment": "",
+      "node_name": "node-2",
+      "phase": "Running",
+      "creation_timestamp": "2026-02-20T14:27:39.26205642+08:00",
+      "labels": {
+        "app": "default-pod-6",
+        "instance": "4",
+        "version": "v1"
+      },
+      "annotations": {
+        "created-by": "mock-k8s-client",
+        "description": "Mock pod for testing",
+        "timestamp": "2026-02-20T16:27:39+08:00"
+      },
+      "containers": [
+        {
+          "name": "container-1",
+          "image": "myapp/container-1:v1",
+          "resources": {
+            "requests": {
+              "cpu": "645m",
+              "memory": "282Mi"
+            },
+            "limits": {
+              "cpu": "1343m",
+              "memory": "1022Mi"
+            }
+          },
+          "ready": true
+        },
+        {
+          "name": "container-2",
+          "image": "myapp/container-2:v3",
+          "resources": {
+            "requests": {
+              "cpu": "629m",
+              "memory": "486Mi"
+            },
+            "limits": {
+              "cpu": "1081m",
+              "memory": "1014Mi"
+            }
+          },
+          "ready": true
+        }
+      ]
+    },
+    {
+      "name": "default-pod-7",
+      "namespace": "default",
+      "deployment": "",
+      "node_name": "node-4",
+      "phase": "Running",
+      "creation_timestamp": "2026-02-19T21:27:39.262058871+08:00",
+      "labels": {
+        "app": "default-pod-7",
+        "instance": "4",
+        "version": "v1"
+      },
+      "annotations": {
+        "created-by": "mock-k8s-client",
+        "description": "Mock pod for testing",
+        "timestamp": "2026-02-20T16:27:39+08:00"
+      },
+      "containers": [
+        {
+          "name": "container-1",
+          "image": "myapp/container-1:v2",
+          "resources": {
+            "requests": {
+              "cpu": "455m",
+              "memory": "959Mi"
+            },
+            "limits": {
+              "cpu": "763m",
+              "memory": "771Mi"
+            }
+          },
+          "ready": true
+        },
+        {
+          "name": "container-2",
+          "image": "myapp/container-2:v1",
+          "resources": {
+            "requests": {
+              "cpu": "394m",
+              "memory": "773Mi"
+            },
+            "limits": {
+              "cpu": "1262m",
+              "memory": "715Mi"
+            }
+          },
+          "ready": true
+        },
+        {
+          "name": "container-3",
+          "image": "myapp/container-3:v2",
+          "resources": {
+            "requests": {
+              "cpu": "476m",
+              "memory": "571Mi"
+            },
+            "limits": {
+              "cpu": "567m",
+              "memory": "815Mi"
+            }
+          },
+          "ready": true
+        }
+      ]
+    },
+    {
+      "name": "default-pod-8",
+      "namespace": "default",
+      "deployment": "",
+      "node_name": "node-3",
+      "phase": "Running",
+      "creation_timestamp": "2026-02-20T14:27:39.262062241+08:00",
+      "labels": {
+        "app": "default-pod-8",
+        "instance": "4",
+        "version": "v1"
+      },
+      "annotations": {
+        "created-by": "mock-k8s-client",
+        "description": "Mock pod for testing",
+        "timestamp": "2026-02-20T16:27:39+08:00"
+      },
+      "containers": [
+        {
+          "name": "container-1",
+          "image": "myapp/container-1:v1",
+          "resources": {
+            "requests": {
+              "cpu": "671m",
+              "memory": "568Mi"
+            },
+            "limits": {
+              "cpu": "1360m",
+              "memory": "809Mi"
+            }
+          },
+          "ready": true
+        },
+        {
+          "name": "container-2",
+          "image": "myapp/container-2:v1",
+          "resources": {
+            "requests": {
+              "cpu": "793m",
+              "memory": "917Mi"
+            },
+            "limits": {
+              "cpu": "1059m",
+              "memory": "805Mi"
+            }
+          },
+          "ready": true
+        },
+        {
+          "name": "container-3",
+          "image": "myapp/container-3:v3",
+          "resources": {
+            "requests": {
+              "cpu": "553m",
+              "memory": "597Mi"
+            },
+            "limits": {
+              "cpu": "1969m",
+              "memory": "593Mi"
+            }
+          },
+          "ready": true
+        }
+      ]
+    }
+  ]
+}

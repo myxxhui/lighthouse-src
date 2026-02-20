@@ -1,0 +1,436 @@
+{
+  "config": {
+    "scenario": "standard",
+    "data_size": "medium",
+    "namespaces": [
+      "default",
+      "kube-system",
+      "monitoring",
+      "app-prod",
+      "app-staging"
+    ],
+    "workloads_per_namespace": 3,
+    "pods_per_workload": 2,
+    "nodes": [
+      "node-1",
+      "node-2",
+      "node-3",
+      "node-4"
+    ],
+    "random_seed": 42,
+    "error_rate": 0,
+    "latency_ms": 0
+  },
+  "generated_at": "2026-02-20T16:27:39.26166401+08:00",
+  "node_metrics": [
+    {
+      "cpu_request": 10.908242591711312,
+      "cpu_usage_p95": 6.175524678828309,
+      "mem_request": 40769671565,
+      "mem_usage_p95": 18337287006,
+      "timestamp": "2026-02-19T16:27:39.261644994+08:00"
+    },
+    {
+      "cpu_request": 9.027980788273949,
+      "cpu_usage_p95": 5.126976599421703,
+      "mem_request": 49129922539,
+      "mem_usage_p95": 17730398096,
+      "timestamp": "2026-02-19T18:03:39.261645003+08:00"
+    },
+    {
+      "cpu_request": 10.302913476991137,
+      "cpu_usage_p95": 8.06614398626713,
+      "mem_request": 30378712183,
+      "mem_usage_p95": 8331900159,
+      "timestamp": "2026-02-19T19:39:39.261645012+08:00"
+    },
+    {
+      "cpu_request": 19.769598152630707,
+      "cpu_usage_p95": 5.891062908062928,
+      "mem_request": 40661839678,
+      "mem_usage_p95": 16835689275,
+      "timestamp": "2026-02-19T21:15:39.261645021+08:00"
+    },
+    {
+      "cpu_request": 8.404993081087788,
+      "cpu_usage_p95": 13.370748907267743,
+      "mem_request": 46214479956,
+      "mem_usage_p95": 13557246938,
+      "timestamp": "2026-02-19T22:51:39.26164503+08:00"
+    },
+    {
+      "cpu_request": 22.91981439049919,
+      "cpu_usage_p95": 5.37488143867637,
+      "mem_request": 33101254261,
+      "mem_usage_p95": 16178503614,
+      "timestamp": "2026-02-20T00:27:39.261645039+08:00"
+    },
+    {
+      "cpu_request": 13.284387193225111,
+      "cpu_usage_p95": 9.54908917343363,
+      "mem_request": 19316041887,
+      "mem_usage_p95": 16935348297,
+      "timestamp": "2026-02-20T02:03:39.261645048+08:00"
+    },
+    {
+      "cpu_request": 22.186241568862236,
+      "cpu_usage_p95": 9.256555389724607,
+      "mem_request": 34640515851,
+      "mem_usage_p95": 21591960318,
+      "timestamp": "2026-02-20T03:39:39.261645057+08:00"
+    },
+    {
+      "cpu_request": 17.758685226543072,
+      "cpu_usage_p95": 6.998646298448283,
+      "mem_request": 45582940440,
+      "mem_usage_p95": 24597672017,
+      "timestamp": "2026-02-20T05:15:39.261645066+08:00"
+    },
+    {
+      "cpu_request": 19.689140926380492,
+      "cpu_usage_p95": 9.647911009693363,
+      "mem_request": 25872699395,
+      "mem_usage_p95": 24459305532,
+      "timestamp": "2026-02-20T06:51:39.261645075+08:00"
+    },
+    {
+      "cpu_request": 19.710167447784748,
+      "cpu_usage_p95": 4.1928101019447555,
+      "mem_request": 37436421514,
+      "mem_usage_p95": 20460379286,
+      "timestamp": "2026-02-20T08:27:39.261645084+08:00"
+    },
+    {
+      "cpu_request": 10.076365574391689,
+      "cpu_usage_p95": 7.795929248061271,
+      "mem_request": 19103440710,
+      "mem_usage_p95": 7466516258,
+      "timestamp": "2026-02-20T10:03:39.261645093+08:00"
+    },
+    {
+      "cpu_request": 11.39958489335232,
+      "cpu_usage_p95": 4.859677316142573,
+      "mem_request": 34011450419,
+      "mem_usage_p95": 20380454170,
+      "timestamp": "2026-02-20T11:39:39.261645102+08:00"
+    },
+    {
+      "cpu_request": 14.390792550904607,
+      "cpu_usage_p95": 3.9750230953685453,
+      "mem_request": 37200543273,
+      "mem_usage_p95": 15367715682,
+      "timestamp": "2026-02-20T13:15:39.261645111+08:00"
+    },
+    {
+      "cpu_request": 19.912963080679553,
+      "cpu_usage_p95": 12.26912913778856,
+      "mem_request": 20502472074,
+      "mem_usage_p95": 30357572203,
+      "timestamp": "2026-02-20T14:51:39.26164512+08:00"
+    }
+  ],
+  "resource_metrics": [
+    {
+      "cpu_request": 1.9921134441865305,
+      "cpu_usage_p95": 0.650226224050102,
+      "mem_request": 3019664326,
+      "mem_usage_p95": 1070197275,
+      "timestamp": "2026-02-19T16:27:39.261644994+08:00"
+    },
+    {
+      "cpu_request": 0.6752738343974972,
+      "cpu_usage_p95": 0.306086313900857,
+      "mem_request": 3692202359,
+      "mem_usage_p95": 1632776526,
+      "timestamp": "2026-02-19T17:15:39.261644998+08:00"
+    },
+    {
+      "cpu_request": 2.032178612198865,
+      "cpu_usage_p95": 1.1350744617125632,
+      "mem_request": 3443369718,
+      "mem_usage_p95": 1236069138,
+      "timestamp": "2026-02-19T18:03:39.261645002+08:00"
+    },
+    {
+      "cpu_request": 1.9467310449221729,
+      "cpu_usage_p95": 0.6784264994651067,
+      "mem_request": 3212670802,
+      "mem_usage_p95": 1552047081,
+      "timestamp": "2026-02-19T18:51:39.261645006+08:00"
+    },
+    {
+      "cpu_request": 3.3494634715323985,
+      "cpu_usage_p95": 1.9639995477055974,
+      "mem_request": 4107077126,
+      "mem_usage_p95": 3020304718,
+      "timestamp": "2026-02-19T19:39:39.26164501+08:00"
+    },
+    {
+      "cpu_request": 0.9773271870549319,
+      "cpu_usage_p95": 0.42617991424271773,
+      "mem_request": 1996909991,
+      "mem_usage_p95": 725998823,
+      "timestamp": "2026-02-19T20:27:39.261645014+08:00"
+    },
+    {
+      "cpu_request": 3.11024859556889,
+      "cpu_usage_p95": 0.9852992650997893,
+      "mem_request": 4059136327,
+      "mem_usage_p95": 1278550488,
+      "timestamp": "2026-02-19T21:15:39.261645018+08:00"
+    },
+    {
+      "cpu_request": 2.3030339988964155,
+      "cpu_usage_p95": 0.8853761947387762,
+      "mem_request": 2257043797,
+      "mem_usage_p95": 1378728947,
+      "timestamp": "2026-02-19T22:03:39.261645022+08:00"
+    },
+    {
+      "cpu_request": 4.070467449704879,
+      "cpu_usage_p95": 2.844966871907271,
+      "mem_request": 1300151268,
+      "mem_usage_p95": 957873420,
+      "timestamp": "2026-02-19T22:51:39.261645026+08:00"
+    },
+    {
+      "cpu_request": 4.246960264991297,
+      "cpu_usage_p95": 2.72805090618783,
+      "mem_request": 1562016682,
+      "mem_usage_p95": 880387065,
+      "timestamp": "2026-02-19T23:39:39.26164503+08:00"
+    },
+    {
+      "cpu_request": 3.4728342507597665,
+      "cpu_usage_p95": 2.091978266288255,
+      "mem_request": 1895852560,
+      "mem_usage_p95": 527849533,
+      "timestamp": "2026-02-20T00:27:39.261645034+08:00"
+    },
+    {
+      "cpu_request": 3.3179018502572624,
+      "cpu_usage_p95": 1.7543067988493481,
+      "mem_request": 3762210115,
+      "mem_usage_p95": 1963089197,
+      "timestamp": "2026-02-20T01:15:39.261645038+08:00"
+    },
+    {
+      "cpu_request": 2.7273742219978,
+      "cpu_usage_p95": 1.6789300770847122,
+      "mem_request": 1675898792,
+      "mem_usage_p95": 566954914,
+      "timestamp": "2026-02-20T02:03:39.261645042+08:00"
+    },
+    {
+      "cpu_request": 4.253060679328508,
+      "cpu_usage_p95": 2.625624754210834,
+      "mem_request": 2790076432,
+      "mem_usage_p95": 1023804808,
+      "timestamp": "2026-02-20T02:51:39.261645046+08:00"
+    },
+    {
+      "cpu_request": 2.312819276111402,
+      "cpu_usage_p95": 0.9575168999392496,
+      "mem_request": 1199711504,
+      "mem_usage_p95": 455253538,
+      "timestamp": "2026-02-20T03:39:39.26164505+08:00"
+    },
+    {
+      "cpu_request": 4.154976383096623,
+      "cpu_usage_p95": 2.3847860870475963,
+      "mem_request": 1613548941,
+      "mem_usage_p95": 987998258,
+      "timestamp": "2026-02-20T04:27:39.261645054+08:00"
+    },
+    {
+      "cpu_request": 0.7425778953391554,
+      "cpu_usage_p95": 0.3113561198647735,
+      "mem_request": 2057507068,
+      "mem_usage_p95": 1108755912,
+      "timestamp": "2026-02-20T05:15:39.261645058+08:00"
+    },
+    {
+      "cpu_request": 4.091465050130044,
+      "cpu_usage_p95": 2.6459903233874464,
+      "mem_request": 1888196173,
+      "mem_usage_p95": 1131625822,
+      "timestamp": "2026-02-20T06:03:39.261645062+08:00"
+    },
+    {
+      "cpu_request": 2.31486247155508,
+      "cpu_usage_p95": 1.5188566241501296,
+      "mem_request": 3128380144,
+      "mem_usage_p95": 1628111253,
+      "timestamp": "2026-02-20T06:51:39.261645066+08:00"
+    },
+    {
+      "cpu_request": 2.2934927753335925,
+      "cpu_usage_p95": 0.7784006163510842,
+      "mem_request": 2621751279,
+      "mem_usage_p95": 1801498797,
+      "timestamp": "2026-02-20T07:39:39.26164507+08:00"
+    },
+    {
+      "cpu_request": 4.158847211494679,
+      "cpu_usage_p95": 2.8512406449869685,
+      "mem_request": 1953014844,
+      "mem_usage_p95": 1205587910,
+      "timestamp": "2026-02-20T08:27:39.261645074+08:00"
+    },
+    {
+      "cpu_request": 2.273270119688715,
+      "cpu_usage_p95": 1.3248003926619005,
+      "mem_request": 3711436227,
+      "mem_usage_p95": 1217886930,
+      "timestamp": "2026-02-20T09:15:39.261645078+08:00"
+    },
+    {
+      "cpu_request": 1.3562517975340782,
+      "cpu_usage_p95": 0.83762947746017,
+      "mem_request": 1954386997,
+      "mem_usage_p95": 1459539142,
+      "timestamp": "2026-02-20T10:03:39.261645082+08:00"
+    },
+    {
+      "cpu_request": 3.91044111409378,
+      "cpu_usage_p95": 1.4797172632544047,
+      "mem_request": 3240464018,
+      "mem_usage_p95": 1667355525,
+      "timestamp": "2026-02-20T10:51:39.261645086+08:00"
+    },
+    {
+      "cpu_request": 1.821461313587725,
+      "cpu_usage_p95": 1.2400898593470246,
+      "mem_request": 2405843608,
+      "mem_usage_p95": 1298201654,
+      "timestamp": "2026-02-20T11:39:39.26164509+08:00"
+    },
+    {
+      "cpu_request": 0.5549550320667044,
+      "cpu_usage_p95": 0.3844809670506673,
+      "mem_request": 2180717416,
+      "mem_usage_p95": 696882816,
+      "timestamp": "2026-02-20T12:27:39.261645094+08:00"
+    },
+    {
+      "cpu_request": 4.178904098738236,
+      "cpu_usage_p95": 2.787710107023995,
+      "mem_request": 2779498118,
+      "mem_usage_p95": 1152163441,
+      "timestamp": "2026-02-20T13:15:39.261645098+08:00"
+    },
+    {
+      "cpu_request": 3.462445990627188,
+      "cpu_usage_p95": 1.9226987668871673,
+      "mem_request": 2264869877,
+      "mem_usage_p95": 1306044578,
+      "timestamp": "2026-02-20T14:03:39.261645102+08:00"
+    },
+    {
+      "cpu_request": 1.1118912985852925,
+      "cpu_usage_p95": 0.4452567853108327,
+      "mem_request": 3730264593,
+      "mem_usage_p95": 2312333938,
+      "timestamp": "2026-02-20T14:51:39.261645106+08:00"
+    },
+    {
+      "cpu_request": 1.8014103802756631,
+      "cpu_usage_p95": 0.5414398114212837,
+      "mem_request": 1429470366,
+      "mem_usage_p95": 959332090,
+      "timestamp": "2026-02-20T15:39:39.26164511+08:00"
+    }
+  ],
+  "throttling_metrics": [
+    {
+      "namespace": "default",
+      "pod": "sample-pod",
+      "container": "container-1",
+      "throttled_period": 2.5962424095214858,
+      "total_period": 60,
+      "throttling_rate": 4.327070682535809,
+      "timestamp": "2026-02-19T16:27:39.261644994+08:00"
+    },
+    {
+      "namespace": "default",
+      "pod": "sample-pod",
+      "container": "container-2",
+      "throttled_period": 1.9802801030371817,
+      "total_period": 60,
+      "throttling_rate": 3.300466838395303,
+      "timestamp": "2026-02-19T18:51:39.261645008+08:00"
+    },
+    {
+      "namespace": "default",
+      "pod": "sample-pod",
+      "container": "container-3",
+      "throttled_period": 3.459745963032105,
+      "total_period": 60,
+      "throttling_rate": 5.766243271720175,
+      "timestamp": "2026-02-19T21:15:39.261645022+08:00"
+    },
+    {
+      "namespace": "default",
+      "pod": "sample-pod",
+      "container": "container-4",
+      "throttled_period": 2.3573936861024967,
+      "total_period": 60,
+      "throttling_rate": 3.9289894768374944,
+      "timestamp": "2026-02-19T23:39:39.261645036+08:00"
+    },
+    {
+      "namespace": "default",
+      "pod": "sample-pod",
+      "container": "container-5",
+      "throttled_period": 1.52519670996992,
+      "total_period": 60,
+      "throttling_rate": 2.5419945166165334,
+      "timestamp": "2026-02-20T02:03:39.26164505+08:00"
+    },
+    {
+      "namespace": "default",
+      "pod": "sample-pod",
+      "container": "container-6",
+      "throttled_period": 1.0791909421441563,
+      "total_period": 60,
+      "throttling_rate": 1.7986515702402606,
+      "timestamp": "2026-02-20T04:27:39.261645064+08:00"
+    },
+    {
+      "namespace": "default",
+      "pod": "sample-pod",
+      "container": "container-7",
+      "throttled_period": 3.1485459434532617,
+      "total_period": 60,
+      "throttling_rate": 5.247576572422103,
+      "timestamp": "2026-02-20T06:51:39.261645078+08:00"
+    },
+    {
+      "namespace": "default",
+      "pod": "sample-pod",
+      "container": "container-8",
+      "throttled_period": 2.6925163771878062,
+      "total_period": 60,
+      "throttling_rate": 4.4875272953130105,
+      "timestamp": "2026-02-20T09:15:39.261645092+08:00"
+    },
+    {
+      "namespace": "default",
+      "pod": "sample-pod",
+      "container": "container-9",
+      "throttled_period": 1.1308267666198315,
+      "total_period": 60,
+      "throttling_rate": 1.8847112776997192,
+      "timestamp": "2026-02-20T11:39:39.261645106+08:00"
+    },
+    {
+      "namespace": "default",
+      "pod": "sample-pod",
+      "container": "container-10",
+      "throttled_period": 1.2085035317207509,
+      "total_period": 60,
+      "throttling_rate": 2.014172552867918,
+      "timestamp": "2026-02-20T14:03:39.26164512+08:00"
+    }
+  ]
+}
