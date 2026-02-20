@@ -218,6 +218,7 @@ func (s *HTTPServer) drilldownCost(c *gin.Context) {
 		"network": 125.0,
 	}
 	c.JSON(http.StatusOK, gin.H{
+		"level":            level,
 		"id":               identifier,
 		"name":             respType + "-" + identifier,
 		"type":             respType,
@@ -250,14 +251,21 @@ func (s *HTTPServer) sloHealth(c *gin.Context) {
 	})
 }
 
-// roiDashboard handles GET /api/v1/roi/dashboard - returns ROITrend[] for frontend
+// roiDashboard handles GET /api/v1/roi/dashboard - returns summary + ROITrend[] for frontend
 func (s *HTTPServer) roiDashboard(c *gin.Context) {
-	// Mock ROI trends matching frontend ROITrend[] type
-	c.JSON(http.StatusOK, []gin.H{
+	// Mock ROI dashboard: summary (roi_percentage etc.) + trends array
+	trends := []gin.H{
 		{"date": "2025-01-15", "value": 1.2, "cost": 100000, "efficiency": 68},
 		{"date": "2025-01-22", "value": 1.35, "cost": 95000, "efficiency": 70},
 		{"date": "2025-02-01", "value": 1.45, "cost": 90000, "efficiency": 72},
 		{"date": "2025-02-15", "value": 1.5, "cost": 85000, "efficiency": 75},
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"roi_percentage": 45.2,
+		"total_savings":  125000.0,
+		"status":         "good",
+		"trend":          "improving",
+		"trends":         trends,
 	})
 }
 

@@ -1,6 +1,8 @@
 import { defineConfig } from 'umi';
 
 export default defineConfig({
+  // 解决 esbuild helpers 冲突（见 build 报错 esbuildHelperChecker）
+  esbuildMinifyIIFE: true,
   // API 代理：将 /api 转发到后端 8080
   proxy: {
     '/api': {

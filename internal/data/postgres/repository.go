@@ -188,3 +188,35 @@ type MetadataFilter struct {
 	Limit     int    `json:"limit"`
 	Offset    int    `json:"offset"`
 }
+
+// BillAccountSummary 云账户总账单汇总（表 cost_bill_account_summary）。Phase3 Mock 占位。
+type BillAccountSummary struct {
+	AccountID   string             `json:"account_id"`
+	PeriodType  string             `json:"period_type"`
+	PeriodStart time.Time         `json:"period_start"`
+	PeriodEnd   time.Time         `json:"period_end"`
+	TotalAmount float64          `json:"total_amount"`
+	Currency    string            `json:"currency"`
+	ByCategory  map[string]float64 `json:"by_category"`
+	CreatedAt   time.Time         `json:"created_at"`
+}
+
+// DailyStorageCost 存储维度日成本（表 cost_daily_storage）。Phase3 Mock 占位。
+type DailyStorageCost struct {
+	Day           time.Time `json:"day"`
+	Namespace     string    `json:"namespace"`
+	StorageClass  string    `json:"storage_class"`
+	PVCName       string    `json:"pvc_name"`
+	Cost          float64   `json:"cost"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+// DailyNetworkCost 网络维度日成本（表 cost_daily_network）。Phase3 Mock 占位。
+type DailyNetworkCost struct {
+	Day          time.Time `json:"day"`
+	Namespace    string    `json:"namespace"`
+	ResourceType string    `json:"resource_type"`
+	ResourceID   string    `json:"resource_id"`
+	Cost         float64   `json:"cost"`
+	CreatedAt    time.Time `json:"created_at"`
+}

@@ -113,6 +113,13 @@ func (s *CostService) GetGlobalCost(ctx context.Context) (*dto.GlobalCostRespons
 	}, nil
 }
 
+// MixedQueryTimeSeries 混合查询：历史 cost_hourly_workload + 当日 Prometheus 合并的时间序列（占位）。
+// 供趋势/全域视图使用；Phase4 实现历史表与当日实时数据合并。
+func (s *CostService) MixedQueryTimeSeries(ctx context.Context, start, end time.Time, namespace string) ([]dto.GranularCostDataPoint, error) {
+	// Phase3 占位：返回空切片；实现时合并 repo.AggregateHourlyWorkloadStats(start,end) 与当日 Prometheus 数据
+	return nil, nil
+}
+
 // ListNamespaces returns all namespaces with cost summary for the frontend cost table.
 func (s *CostService) ListNamespaces(ctx context.Context) ([]dto.NamespaceCostSummary, error) {
 	resp, err := s.GetGlobalCost(ctx)

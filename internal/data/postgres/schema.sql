@@ -37,3 +37,39 @@ CREATE TABLE IF NOT EXISTS cost_roi_events (
     savings_amount  DECIMAL(10, 2),
     description     TEXT
 );
+
+-- cost_bill_account_summary: 云账户总账单汇总（与 05_ 设计 4.0 一致）
+-- 供周期对比与总账单→计算资源层级使用；AKSK 仅环境变量/Secret，不在此表
+CREATE TABLE IF NOT EXISTS cost_bill_account_summary (
+    account_id      VARCHAR(64) NOT NULL,
+    period_type     VARCHAR(32) NOT NULL,
+    period_start    DATE NOT NULL,
+    period_end      DATE NOT NULL,
+    total_amount    DECIMAL(12, 2),
+    currency        VARCHAR(8) DEFAULT 'CNY',
+    by_category     JSONB,
+    created_at      TIMESTAMP DEFAULT NOW(),
+    PRIMARY KEY (account_id, period_type, period_start)
+);
+
+-- cost_daily_storage: 存储维度钻取
+CREATE TABLE IF NOT EXISTS cost_daily_storage (
+    day             DATE NOT NULL,
+    namespace       VARCHAR(64) NOT NULL,
+    storage_class   VARCHAR(64),
+    pvc_name        VARCHAR(256),
+    cost            DECIMAL(10, 2),
+    created_at      TIMESTAMP DEFAULT NOW(),
+    PRIMARY KEY (day, namespace, pvc_name)
+);
+
+-- cost_daily_network: 网络维度钻取
+CREATE TABLE IF NOT EXISTS cost_daily_network (
+    day             DATE NOT NULL,
+    namespace       VARCHAR(64) NOT NULL,
+    resource_type   VARCHAR(64),
+    resource_id     VARCHAR(256),
+    cost            DECIMAL(10, 2),
+    created_at      TIMESTAMP DEFAULT NOW(),
+    PRIMARY KEY (day, namespace, resource_id)
+);

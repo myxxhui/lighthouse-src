@@ -47,6 +47,29 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /cost/namespaces:
+    get:
+      tags:
+        - Cost
+      summary: List namespaces with cost summary
+      description: Returns list of namespaces with cost summary for the cost table (L1 aggregated)
+      operationId: listNamespaces
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/NamespaceCostSummary'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /cost/global:
     get:
       tags:
