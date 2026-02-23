@@ -76,6 +76,8 @@ type MockRepository struct {
 	billAccountSummaries map[string]BillAccountSummary // key: account_id-period_type-period_start
 	dailyStorageCosts     map[string]DailyStorageCost   // key: day-namespace-pvc_name
 	dailyNetworkCosts     map[string]DailyNetworkCost   // key: day-namespace-resource_id
+	// Phase4 01_：cost_cloud_bill_summary
+	cloudBillSummaries map[string]CloudBillSummary // key: day-billing_cycle
 }
 
 // MockTransaction is a mock implementation of the Transaction interface.
@@ -129,6 +131,7 @@ func NewMockRepository(config MockConfig) *MockRepository {
 		billAccountSummaries: make(map[string]BillAccountSummary),
 		dailyStorageCosts:    make(map[string]DailyStorageCost),
 		dailyNetworkCosts:    make(map[string]DailyNetworkCost),
+		cloudBillSummaries:   make(map[string]CloudBillSummary),
 	}
 
 	// Pre-populate with initial data
@@ -875,6 +878,57 @@ func (m *MockRepository) GetDailyNetworkCost(ctx context.Context, day time.Time,
 	return &c, nil
 }
 
+// --- Phase4 01_：cost_cloud_bill_summary ---
+
+func cloudBillSummaryKey(day time.Time, billingCycle string) string {
+	return fmt.Sprintf("%s-%s", day.Format("2006-01-02"), billingCycle)
+}
+
+// SaveCloudBillSummary 保存云账单汇总（cost_cloud_bill_summary）。
+func (m *MockRepository) SaveCloudBillSummary(ctx context.Context, s CloudBillSummary) error {
+	if m.shouldReturnError() {
+		return fmt.Errorf("mock PostgreSQL error: cannot save cloud bill summary")
+	}
+	now := time.Now()
+	if s.CreatedAt.IsZero() {
+		s.CreatedAt = now
+	}
+	s.UpdatedAt = now
+	key := cloudBillSummaryKey(s.Day, s.BillingCycle)
+	m.cloudBillSummaries[key] = s
+	return nil
+}
+
+// GetCloudBillSummary 按 day + billing_cycle 查询云账单汇总。
+func (m *MockRepository) GetCloudBillSummary(ctx context.Context, day time.Time, billingCycle string) (*CloudBillSummary, error) {
+	if m.shouldReturnError() {
+		return nil, fmt.Errorf("mock PostgreSQL error: cannot get cloud bill summary")
+	}
+	key := cloudBillSummaryKey(day, billingCycle)
+	s, ok := m.cloudBillSummaries[key]
+	if !ok {
+		return nil, nil
+	}
+	return &s, nil
+}
+
+// GetLatestCloudBillSummary 返回最近一条云账单汇总（按 day 降序）。
+func (m *MockRepository) GetLatestCloudBillSummary(ctx context.Context) (*CloudBillSummary, error) {
+	if m.shouldReturnError() {
+		return nil, fmt.Errorf("mock PostgreSQL error: cannot get latest cloud bill summary")
+	}
+	if len(m.cloudBillSummaries) == 0 {
+		return nil, nil
+	}
+	var latest CloudBillSummary
+	for _, s := range m.cloudBillSummaries {
+		if s.Day.After(latest.Day) || latest.Day.IsZero() {
+			latest = s
+		}
+	}
+	return &latest, nil
+}
+
 // HealthCheck always returns nil (healthy) for mock repository.
 func (m *MockRepository) HealthCheck(ctx context.Context) error {
 	if m.shouldReturnError() {
@@ -1362,6 +1416,18 @@ func (tr *transactionRepository) DeleteMetadata(ctx context.Context, key string)
 	}
 	delete(tr.tx.metadata, key)
 	return nil
+}
+
+func (tr *transactionRepository) SaveCloudBillSummary(ctx context.Context, s CloudBillSummary) error {
+	return tr.tx.repo.SaveCloudBillSummary(ctx, s)
+}
+
+func (tr *transactionRepository) GetCloudBillSummary(ctx context.Context, day time.Time, billingCycle string) (*CloudBillSummary, error) {
+	return tr.tx.repo.GetCloudBillSummary(ctx, day, billingCycle)
+}
+
+func (tr *transactionRepository) GetLatestCloudBillSummary(ctx context.Context) (*CloudBillSummary, error) {
+	return tr.tx.repo.GetLatestCloudBillSummary(ctx)
 }
 
 func (tr *transactionRepository) HealthCheck(ctx context.Context) error {

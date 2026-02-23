@@ -136,6 +136,16 @@ type BusinessConfig struct {
 	} `mapstructure:"roi"`
 }
 
+// CloudBillingConfig 云账单配置（15_ 规范）。凭证仅由环境变量或 K8s Secret 注入，不落配置文件。
+// 环境变量：CLOUD_BILLING_PROVIDER、CLOUD_BILLING_ENDPOINT、CLOUD_BILLING_PERIOD、CLOUD_BILLING_CYCLE；
+// 阿里云 AK/SK：ALIBABA_CLOUD_ACCESS_KEY_ID、ALIBABA_CLOUD_ACCESS_KEY_SECRET（或 K8s Secret 注入）。
+type CloudBillingConfig struct {
+	Provider     string `mapstructure:"provider" env:"PROVIDER"`      // "aliyun" | "aws" | ""
+	Endpoint     string `mapstructure:"endpoint" env:"ENDPOINT"`       // 可选
+	PeriodType   string `mapstructure:"period_type" env:"PERIOD"`      // "day" | "month"
+	BillingCycle string `mapstructure:"billing_cycle" env:"CYCLE"`     // 账期，如 2025-01
+}
+
 // 安全配置
 type SecurityConfig struct {
 	ResourceLimits struct {
@@ -168,4 +178,5 @@ type Config struct {
 	Retention      RetentionConfig      `mapstructure:"retention"`
 	Business       BusinessConfig       `mapstructure:"business"`
 	Security       SecurityConfig       `mapstructure:"security"`
+	CloudBilling   CloudBillingConfig   `mapstructure:"cloud_billing"`
 }

@@ -32,6 +32,39 @@ func TestCostService_GetGlobalCost(t *testing.T) {
 	}
 }
 
+// TestCostService_GetGlobalCost_CloudBill 验证有 cost_cloud_bill_summary 时优先返回云账单 total 与 domain_breakdown（01_）。
+func TestCostService_GetGlobalCost_CloudBill(t *testing.T) {
+	repo := postgres.NewMockRepository(postgres.DefaultMockConfig())
+	ctx := context.Background()
+	day := time.Now().UTC().Truncate(24 * time.Hour)
+	err := repo.SaveCloudBillSummary(ctx, postgres.CloudBillSummary{
+		Day:          day,
+		BillingCycle: "2025-01",
+		TotalAmount:  125000,
+		ProductBreakdown: map[string]float64{
+			"计算资源": 85000,
+			"存储":   25000,
+			"网络":   15000,
+		},
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	})
+	if err != nil {
+		t.Fatalf("SaveCloudBillSummary: %v", err)
+	}
+	svc := NewCostService(repo)
+	resp, err := svc.GetGlobalCost(ctx)
+	if err != nil {
+		t.Fatalf("GetGlobalCost: %v", err)
+	}
+	if resp.TotalCost != 125000 {
+		t.Errorf("TotalCost = %v, want 125000 (from cloud bill)", resp.TotalCost)
+	}
+	if len(resp.DomainBreakdown) != 3 {
+		t.Errorf("DomainBreakdown len = %d, want 3", len(resp.DomainBreakdown))
+	}
+}
+
 func TestCostService_MixedQueryTimeSeries(t *testing.T) {
 	repo := postgres.NewMockRepository(postgres.DefaultMockConfig())
 	svc := NewCostService(repo)

@@ -1,22 +1,48 @@
 // Package cloudbilling 工厂：根据 Config.CloudBilling.Provider 返回 CloudBillingFetcher 实现。
-// AKSK 仅从环境变量（如 CLOUD_BILL_AK、CLOUD_BILL_SK）或 Secret 注入，不在配置明文。
+// 凭证仅从环境变量（ALIBABA_CLOUD_ACCESS_KEY_ID/SECRET）或 K8s Secret 注入，不在配置明文。
 package cloudbilling
 
-// CloudBillingConfig 云账单配置（占位）。Provider 决定工厂返回的实现。
+import (
+	"context"
+
+	"github.com/myxxhui/lighthouse-src/internal/data/cloudbilling/aliyun"
+)
+
+// CloudBillingConfig 云账单配置（与 config.CloudBillingConfig 对齐）。Provider 决定工厂返回的实现。
 // AccessKeyID / AccessKeySecret 仅由环境变量或 Secret 填充，不落配置文件。
 type CloudBillingConfig struct {
-	Provider   string `json:"provider"`   // "aliyun" | "aws" | "tencent" | ""
-	Endpoint   string `json:"endpoint"`   // 可选
-	PeriodType string `json:"period_type"`
+	Provider     string `json:"provider"`      // "aliyun" | "aws" | "tencent" | ""
+	Endpoint     string `json:"endpoint"`      // 可选
+	PeriodType   string `json:"period_type"`   // "day" | "month"
+	BillingCycle string `json:"billing_cycle"` // 账期，如 2025-01
 }
 
-// NewFetcher 根据配置返回 CloudBillingFetcher 实现。Phase3 占位：无 Provider 或未实现时返回 nil。
-// 调用方需判断 nil，Phase4 接入 aliyun/ 等实现。
+// aliCloudFetcher 适配 aliyun.Fetcher 为 CloudBillingFetcher（避免 aliyun 依赖 cloudbilling 造成循环引用）。
+type aliCloudFetcher struct{ inner *aliyun.Fetcher }
+
+func (a *aliCloudFetcher) FetchAccountSummary(ctx context.Context, req FetchAccountSummaryRequest) (*FetchAccountSummaryResponse, error) {
+	// BillingCycle 如 "2025-01"；空时 aliyun 使用当前月
+	res, err := a.inner.FetchBillOverview(ctx, req.BillingCycle)
+	if err != nil {
+		return nil, err
+	}
+	return &FetchAccountSummaryResponse{
+		BillingCycle: res.BillingCycle,
+		TotalAmount:  res.TotalAmount,
+		Currency:     res.Currency,
+		ByCategory:   res.ByCategory,
+	}, nil
+}
+
+// NewFetcher 根据配置返回 CloudBillingFetcher 实现。aliyun 时从环境变量读取凭证；无凭证或未实现时返回 nil。
 func NewFetcher(cfg CloudBillingConfig) CloudBillingFetcher {
 	switch cfg.Provider {
-	case "aliyun", "aws", "tencent":
-		// Phase4: return aliyun.NewFetcher(cfg) 等
-		return nil
+	case "aliyun":
+		f, ok := aliyun.NewFetcher()
+		if !ok {
+			return nil
+		}
+		return &aliCloudFetcher{inner: f}
 	default:
 		return nil
 	}

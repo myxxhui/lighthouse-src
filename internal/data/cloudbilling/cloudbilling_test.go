@@ -6,7 +6,6 @@ import (
 )
 
 func TestCloudBillingFetcherInterface(t *testing.T) {
-	// 占位包：确保 interface 与 factory 可编译，Phase4 实现真实拉取
 	_ = (*CloudBillingFetcher)(nil)
 	cfg := CloudBillingConfig{Provider: ""}
 	f := NewFetcher(cfg)
@@ -15,10 +14,8 @@ func TestCloudBillingFetcherInterface(t *testing.T) {
 	}
 	cfg.Provider = "aliyun"
 	f = NewFetcher(cfg)
-	// Phase3 占位返回 nil
-	if f != nil {
-		t.Fatal("Phase3 placeholder: expected nil for aliyun")
-	}
+	// 无 AK/SK 时返回 nil；有环境变量时返回非 nil（不在此断言，避免依赖环境）
+	_ = f
 }
 
 func TestFetchAccountSummaryRequestResponse(t *testing.T) {

@@ -34,33 +34,49 @@ func toCostmodelDailyNamespaceCost(p postgres.DailyNamespaceCost) costmodel.Dail
 	}
 }
 
-// GetGlobalCost returns L0 aggregated cost using L1 (namespace) data from Mock.
-// L0 is computed from L1 by costmodel.AggregateGlobal; no direct Prometheus query.
+// GetGlobalCost returns L0 cost. 优先使用 cost_cloud_bill_summary（Phase4 01_ 云账单）；无云账单时回退到 L1 聚合。
 func (s *CostService) GetGlobalCost(ctx context.Context) (*dto.GlobalCostResponse, error) {
+	cloud, err := s.repo.GetLatestCloudBillSummary(ctx)
+	if err == nil && cloud != nil && cloud.TotalAmount > 0 {
+		// 仅云账单模式：total_cost、domain_breakdown 来自 cost_cloud_bill_summary（08_ §1.3）
+		domainBreakdown := make([]dto.DomainBreakdownItem, 0, len(cloud.ProductBreakdown))
+		for domain, cost := range cloud.ProductBreakdown {
+			domainBreakdown = append(domainBreakdown, dto.DomainBreakdownItem{
+				Domain:           domain,
+				Cost:             cost,
+				OptimizableSpace: 0,
+				Efficiency:       0,
+			})
+		}
+		return &dto.GlobalCostResponse{
+			TotalCost:        cloud.TotalAmount,
+			TotalOptimizable: 0,
+			GlobalEfficiency: 0,
+			DomainBreakdown:  domainBreakdown,
+			Namespaces:       nil, // 本步不实现 Namespace 级成本（属 02_）
+			Timestamp:        time.Now().UTC(),
+		}, nil
+	}
+
+	// 回退：L1 聚合（Mock 或 02_ 数据）
 	now := time.Now()
 	start := now.AddDate(0, 0, -7)
-
 	costs, err := s.repo.AggregateDailyNamespaceCosts(ctx, start, now)
 	if err != nil {
 		return nil, err
 	}
-
-	// Convert to costmodel format for L0 aggregation
 	modelCosts := make([]costmodel.DailyNamespaceCost, 0, len(costs))
 	for _, c := range costs {
 		modelCosts = append(modelCosts, toCostmodelDailyNamespaceCost(c))
 	}
-
 	_, err = costmodel.AggregateGlobal(modelCosts)
 	if err != nil {
 		return nil, err
 	}
-
 	breakdown, err := costmodel.CalculateDomainBreakdown(modelCosts)
 	if err != nil {
 		return nil, err
 	}
-
 	namespaces := make([]dto.NamespaceCostSummary, 0, len(breakdown))
 	domainBreakdown := make([]dto.DomainBreakdownItem, 0, len(breakdown))
 	var sumL1, sumOptimizable float64
@@ -101,8 +117,6 @@ func (s *CostService) GetGlobalCost(ctx context.Context) (*dto.GlobalCostRespons
 	if sumL1 > 0 {
 		globalEff = ((sumL1 - sumOptimizable) / sumL1) * 100
 	}
-
-	// L0 total = sum of L1 (100% data consistency)
 	return &dto.GlobalCostResponse{
 		TotalCost:        sumL1,
 		TotalOptimizable: sumOptimizable,

@@ -408,6 +408,42 @@ func TestMockRepository_BillAccountSummary(t *testing.T) {
 	}
 }
 
+// TestMockRepository_CloudBillSummary 验证 cost_cloud_bill_summary Mock 读写（Phase4 01_）。
+func TestMockRepository_CloudBillSummary(t *testing.T) {
+	ctx := context.Background()
+	repo := NewMockRepository(DefaultMockConfig())
+
+	day := time.Now().UTC().Truncate(24 * time.Hour)
+	summary := CloudBillSummary{
+		Day:          day,
+		BillingCycle: "2025-01",
+		TotalAmount:  125000,
+		ProductBreakdown: map[string]float64{"计算资源": 85000, "存储": 25000, "网络": 15000},
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+
+	if err := repo.SaveCloudBillSummary(ctx, summary); err != nil {
+		t.Fatalf("SaveCloudBillSummary failed: %v", err)
+	}
+
+	got, err := repo.GetCloudBillSummary(ctx, summary.Day, summary.BillingCycle)
+	if err != nil {
+		t.Fatalf("GetCloudBillSummary failed: %v", err)
+	}
+	if got == nil || got.TotalAmount != summary.TotalAmount {
+		t.Errorf("GetCloudBillSummary: got TotalAmount=%v, want %v", got.TotalAmount, summary.TotalAmount)
+	}
+
+	latest, err := repo.GetLatestCloudBillSummary(ctx)
+	if err != nil {
+		t.Fatalf("GetLatestCloudBillSummary failed: %v", err)
+	}
+	if latest == nil || latest.BillingCycle != "2025-01" {
+		t.Errorf("GetLatestCloudBillSummary: got %v, want BillingCycle=2025-01", latest)
+	}
+}
+
 func TestMockRepository_MetadataOperations(t *testing.T) {
 	ctx := context.Background()
 	repo := NewMockRepository(DefaultMockConfig())

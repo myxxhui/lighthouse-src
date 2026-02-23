@@ -40,6 +40,11 @@ type Repository interface {
 	ListMetadata(ctx context.Context, filter MetadataFilter) ([]Metadata, error)
 	DeleteMetadata(ctx context.Context, key string) error
 
+	// CloudBillSummary (cost_cloud_bill_summary, 06_ §2.1) — Phase4 01_ 成本透视真实数据
+	SaveCloudBillSummary(ctx context.Context, s CloudBillSummary) error
+	GetCloudBillSummary(ctx context.Context, day time.Time, billingCycle string) (*CloudBillSummary, error)
+	GetLatestCloudBillSummary(ctx context.Context) (*CloudBillSummary, error)
+
 	// HealthCheck checks if the database is reachable.
 	HealthCheck(ctx context.Context) error
 
@@ -187,6 +192,16 @@ type MetadataFilter struct {
 	CreatedBy string `json:"created_by"`
 	Limit     int    `json:"limit"`
 	Offset    int    `json:"offset"`
+}
+
+// CloudBillSummary 云账单汇总（表 cost_cloud_bill_summary，06_ §2.1）。Phase4 01_ 落库目标。
+type CloudBillSummary struct {
+	Day              time.Time       `json:"day"`
+	BillingCycle     string          `json:"billing_cycle"`
+	TotalAmount      float64         `json:"total_amount"`
+	ProductBreakdown map[string]float64 `json:"product_breakdown"` // domain/category -> amount，用于 domain_breakdown
+	CreatedAt        time.Time       `json:"created_at"`
+	UpdatedAt        time.Time       `json:"updated_at"`
 }
 
 // BillAccountSummary 云账户总账单汇总（表 cost_bill_account_summary）。Phase3 Mock 占位。
