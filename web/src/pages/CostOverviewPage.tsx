@@ -55,6 +55,7 @@ const CostOverviewPage: React.FC = () => {
     useMockData,
     costTimeRange,
     costCompareMode,
+    selectedDimension,
     fetchGlobalCostMetrics,
     fetchNamespaceCosts,
     setUseMockData,
@@ -68,7 +69,9 @@ const CostOverviewPage: React.FC = () => {
   }, [fetchGlobalCostMetrics, fetchNamespaceCosts, costTimeRange, costCompareMode]);
 
   const handleRowClick = (record: any) => {
-    navigate(`/DrilldownPage?type=namespace&id=${record.namespace}`);
+    navigate(
+      `/DrilldownPage?dimension=${selectedDimension}&type=namespace&id=${encodeURIComponent(record.namespace)}`,
+    );
   };
 
   const renderGlobalMetrics = () => {
@@ -140,7 +143,7 @@ const CostOverviewPage: React.FC = () => {
         <Col xs={24} sm={12} md={6}>
           <Card
             hoverable
-            onClick={() => navigate('/DrilldownPage?focus=optimizable')}
+            onClick={() => navigate(`/DrilldownPage?dimension=${selectedDimension}&focus=optimizable`)}
             style={{ cursor: 'pointer' }}
           >
             <Statistic
@@ -361,7 +364,9 @@ const CostOverviewPage: React.FC = () => {
                   type="button"
                   onClick={() => {
                     setDomainDetail(null);
-                    navigate(`/DrilldownPage?type=namespace&id=${encodeURIComponent(ns.namespace)}`);
+                    navigate(
+                      `/DrilldownPage?dimension=${selectedDimension}&type=namespace&id=${encodeURIComponent(ns.namespace)}`,
+                    );
                   }}
                   style={{ marginRight: 8 }}
                 >
