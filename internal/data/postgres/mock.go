@@ -929,6 +929,42 @@ func (m *MockRepository) GetLatestCloudBillSummary(ctx context.Context) (*CloudB
 	return &latest, nil
 }
 
+// GetLatestCloudBillSummaryForBillingCycle 返回指定账期最近一条云账单汇总。
+func (m *MockRepository) GetLatestCloudBillSummaryForBillingCycle(ctx context.Context, billingCycle string) (*CloudBillSummary, error) {
+	if m.shouldReturnError() {
+		return nil, fmt.Errorf("mock PostgreSQL error: cannot get cloud bill summary for cycle")
+	}
+	var latest *CloudBillSummary
+	for _, s := range m.cloudBillSummaries {
+		if s.BillingCycle != billingCycle {
+			continue
+		}
+		if latest == nil || s.Day.After(latest.Day) {
+			cp := s
+			latest = &cp
+		}
+	}
+	return latest, nil
+}
+
+// GetCloudBillSummariesForBillingCycles 返回多个账期各自最近一条汇总。
+func (m *MockRepository) GetCloudBillSummariesForBillingCycles(ctx context.Context, billingCycles []string) ([]*CloudBillSummary, error) {
+	if m.shouldReturnError() {
+		return nil, fmt.Errorf("mock PostgreSQL error: cannot get cloud bill summaries")
+	}
+	var out []*CloudBillSummary
+	for _, cycle := range billingCycles {
+		one, err := m.GetLatestCloudBillSummaryForBillingCycle(ctx, cycle)
+		if err != nil {
+			return nil, err
+		}
+		if one != nil {
+			out = append(out, one)
+		}
+	}
+	return out, nil
+}
+
 // HealthCheck always returns nil (healthy) for mock repository.
 func (m *MockRepository) HealthCheck(ctx context.Context) error {
 	if m.shouldReturnError() {
@@ -1428,6 +1464,14 @@ func (tr *transactionRepository) GetCloudBillSummary(ctx context.Context, day ti
 
 func (tr *transactionRepository) GetLatestCloudBillSummary(ctx context.Context) (*CloudBillSummary, error) {
 	return tr.tx.repo.GetLatestCloudBillSummary(ctx)
+}
+
+func (tr *transactionRepository) GetLatestCloudBillSummaryForBillingCycle(ctx context.Context, billingCycle string) (*CloudBillSummary, error) {
+	return tr.tx.repo.GetLatestCloudBillSummaryForBillingCycle(ctx, billingCycle)
+}
+
+func (tr *transactionRepository) GetCloudBillSummariesForBillingCycles(ctx context.Context, billingCycles []string) ([]*CloudBillSummary, error) {
+	return tr.tx.repo.GetCloudBillSummariesForBillingCycles(ctx, billingCycles)
 }
 
 func (tr *transactionRepository) HealthCheck(ctx context.Context) error {

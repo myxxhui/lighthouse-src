@@ -53,11 +53,19 @@ func (w *BillingWorker) Run(ctx context.Context) error {
 		slog.Warn("billing ETL: fetch failed", "billing_cycle", cycle, "error", err)
 		return err
 	}
+	// 合并领域汇总与产品级明细：product_breakdown 存 domain 与 "domain:ProductCode"，供 API 返回 top4 产品 [Ref: 01_成本透视真实数据]
+	merged := make(map[string]float64)
+	for k, v := range resp.ByCategory {
+		merged[k] = v
+	}
+	for _, it := range resp.Items {
+		merged[it.Category+":"+it.ProductCode] = it.Amount
+	}
 	summary := postgres.CloudBillSummary{
 		Day:              day,
 		BillingCycle:     resp.BillingCycle,
 		TotalAmount:      resp.TotalAmount,
-		ProductBreakdown: resp.ByCategory,
+		ProductBreakdown: merged,
 		CreatedAt:        time.Now(),
 		UpdatedAt:        time.Now(),
 	}

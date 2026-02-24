@@ -25,7 +25,7 @@ const CostTable: React.FC<CostTableProps> = ({
       render: (text: string) => <strong>{text}</strong>,
     },
     {
-      title: '成本 (¥)',
+      title: '成本 ($)',
       dataIndex: 'cost',
       key: 'cost',
       render: (value: number, record: NamespaceCost) => (
@@ -50,7 +50,7 @@ const CostTable: React.FC<CostTableProps> = ({
       sorter: (a: NamespaceCost, b: NamespaceCost) => a.cost - b.cost,
     },
     {
-      title: '可优化空间 (¥)',
+      title: '可优化空间 ($)',
       dataIndex: 'optimizableSpace',
       key: 'optimizableSpace',
       render: (value: number, record: NamespaceCost) => (

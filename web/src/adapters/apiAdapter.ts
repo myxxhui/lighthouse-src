@@ -23,6 +23,7 @@ export interface DomainBreakdownApiItem {
   cost: number;
   optimizable_space: number;
   efficiency: number;
+  top_products?: { product: string; cost: number }[];
 }
 
 export interface NamespaceCostSummaryApiItem {
@@ -37,8 +38,17 @@ export interface NamespaceCostSummaryApiItem {
  * GlobalCostApiResponse -> CostMetrics
  */
 export function adaptGlobalCostToCostMetrics(res: GlobalCostApiResponse): CostMetrics {
-  const totalOptimizable = res.total_optimizable ?? res.total_cost * 0.3;
-  const globalEfficiency = res.global_efficiency ?? 70;
+  // 真实数据时后端可能返回 0 表示无可优化/效率数据，不臆造
+  const totalOptimizable =
+    res.total_optimizable !== undefined && res.total_optimizable !== null
+      ? res.total_optimizable
+      : res.total_cost != null
+        ? res.total_cost * 0.3
+        : 0;
+  const globalEfficiency =
+    res.global_efficiency !== undefined && res.global_efficiency !== null
+      ? res.global_efficiency
+      : 70;
   const totalCost = res.total_cost || 1;
   const domainBreakdown: DomainBreakdown[] =
     res.domain_breakdown?.map((d) => ({
@@ -46,8 +56,9 @@ export function adaptGlobalCostToCostMetrics(res: GlobalCostApiResponse): CostMe
       cost: d.cost,
       optimizableSpace: d.optimizable_space,
       efficiency: d.efficiency,
+      topProducts: d.top_products,
     })) ??
-    res.namespaces.map((n) => ({
+    (res.namespaces ?? []).map((n) => ({
       domain: n.name,
       cost: n.cost,
       optimizableSpace: totalOptimizable * (n.cost / totalCost) || 0,
@@ -66,9 +77,10 @@ export function adaptGlobalCostToCostMetrics(res: GlobalCostApiResponse): CostMe
  * NamespaceCostSummaryApiItem[] -> NamespaceCost[]
  */
 export function adaptNamespacesToNamespaceCosts(
-  items: NamespaceCostSummaryApiItem[],
+  items: NamespaceCostSummaryApiItem[] | null | undefined,
 ): NamespaceCost[] {
-  return items.map((n) => {
+  const list = items ?? [];
+  return list.map((n) => {
     const efficiency = gradeToEfficiency(n.grade ?? 'Healthy');
     const optimizableRatio = 1 - efficiency / 100;
     return {

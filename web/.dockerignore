@@ -1,0 +1,24 @@
+# [Ref: 04_Phase4 成本透视] 前端镜像构建上下文：排除 node_modules 与构建产物，加速 COPY . .
+# 构建上下文为 lighthouse-src/web；依赖由 Dockerfile 内 npm ci 安装
+
+# 依赖在镜像内通过 npm ci 安装，不打包本地 node_modules（约 1.3G）
+node_modules/
+
+# 构建在镜像内执行，不打包本地 dist
+dist/
+build/
+
+# 开发与测试
+.git
+.gitignore
+*.log
+npm-debug.log*
+.DS_Store
+coverage
+.nyc_output
+.env
+.env.*
+
+# 文档与工具
+*.md
+README*

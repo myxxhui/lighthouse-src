@@ -44,14 +44,16 @@ export const costService = {
   },
 
   // 获取Namespace级别成本数据（通过适配层转换为前端类型）
+  // 真实账期数据时后端可能返回 null，避免 .map 报错 [Ref: 04_Phase4/01_成本透视真实数据]
   async getNamespaceCosts(params?: { period?: CostTimeRange }): Promise<NamespaceCost[]> {
     try {
       const query = params?.period ? { period: params.period } : {};
-      const response = await apiClient.get<NamespaceCostSummaryApiItem[]>(
+      const response = await apiClient.get<NamespaceCostSummaryApiItem[] | null>(
         `${COST_API_PREFIX}/namespaces`,
         { params: query },
       );
-      return adaptNamespacesToNamespaceCosts(response.data);
+      const data = Array.isArray(response.data) ? response.data : [];
+      return adaptNamespacesToNamespaceCosts(data);
     } catch (error) {
       console.error('Failed to fetch namespace costs:', error);
       throw error;

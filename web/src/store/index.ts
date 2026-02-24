@@ -103,7 +103,8 @@ export const useAppStore = create<AppState>()(
 
       costTimeRange: '30d',
       costCompareMode: 'none',
-      useMockData: true,
+      // [Ref: 04_Phase4/01_成本透视真实数据] 默认使用真实云 API 与数据库数据；仅无真实数据源时可手动开启 Mock
+      useMockData: false,
       selectedDimension: 'compute',
       selectedNamespace: null,
       selectedNode: null,

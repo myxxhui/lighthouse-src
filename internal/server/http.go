@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/myxxhui/lighthouse-src/internal/config"
+	"github.com/myxxhui/lighthouse-src/internal/server/dto"
 	"github.com/myxxhui/lighthouse-src/internal/server/middleware"
 	"github.com/myxxhui/lighthouse-src/internal/server/service"
 	swaggerFiles "github.com/swaggo/files"
@@ -121,10 +122,11 @@ func (s *HTTPServer) healthCheck(c *gin.Context) {
 	})
 }
 
-// globalCost handles GET /api/v1/cost/global
+// globalCost handles GET /api/v1/cost/global?period=1d|7d|30d|month|quarter
 func (s *HTTPServer) globalCost(c *gin.Context) {
+	period := c.DefaultQuery("period", "month")
 	if s.costService != nil {
-		resp, err := s.costService.GetGlobalCost(c.Request.Context())
+		resp, err := s.costService.GetGlobalCost(c.Request.Context(), period)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -143,13 +145,18 @@ func (s *HTTPServer) globalCost(c *gin.Context) {
 	})
 }
 
-// listNamespaces handles GET /api/v1/cost/namespaces
+// listNamespaces handles GET /api/v1/cost/namespaces?period=1d|7d|30d|month|quarter
+// 云账单模式下无命名空间级数据，返回空数组避免前端 null.map [Ref: 04_Phase4/01_成本透视真实数据]
 func (s *HTTPServer) listNamespaces(c *gin.Context) {
+	period := c.DefaultQuery("period", "month")
 	if s.costService != nil {
-		list, err := s.costService.ListNamespaces(c.Request.Context())
+		list, err := s.costService.ListNamespaces(c.Request.Context(), period)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
+		}
+		if list == nil {
+			list = []dto.NamespaceCostSummary{}
 		}
 		c.JSON(http.StatusOK, list)
 		return

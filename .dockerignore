@@ -1,0 +1,26 @@
+# [Ref: 04_Phase4 成本透视] 后端镜像构建上下文：排除无关目录与产物，加速 COPY . .
+# 构建上下文为 lighthouse-src，仅需 Go 源码与 go.mod/sum
+
+# 前端整目录（约 1.3G node_modules），后端镜像不需要
+web/
+
+# 版本控制与 CI 产物
+.git
+.gitignore
+*.out
+coverage*
+*.test
+
+# 本地构建产物
+server
+bin/
+
+# 文档与工具（非运行时）
+Makefile
+README.md
+.golangci.yml
+*.md
+
+# 避免把 deploy 或 doc 误带入（若在 monorepo 上层构建时）
+lighthouse-deploy
+lighthouse-doc

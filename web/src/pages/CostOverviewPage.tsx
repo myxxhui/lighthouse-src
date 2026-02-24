@@ -23,8 +23,10 @@ import ROITrendSection from '@/components/ROITrendSection';
 import { useAppStore } from '@/store';
 import type { CostTimeRange, CostCompareMode } from '@/types';
 import type { DomainBreakdown } from '@/types';
+import { CURRENCY_SYMBOL } from '@/constants';
 
 const TIME_RANGE_OPTIONS: { label: string; value: CostTimeRange }[] = [
+  { label: '当天', value: '1d' },
   { label: '近7天', value: '7d' },
   { label: '近30天', value: '30d' },
   { label: '本月', value: 'month' },
@@ -121,7 +123,7 @@ const CostOverviewPage: React.FC = () => {
                 </Space>
               }
               value={globalCostMetrics.totalBillableCost}
-              prefix="¥"
+              prefix={CURRENCY_SYMBOL}
               formatter={value => Number(value).toLocaleString()}
               suffix={
                 costChange != null && (
@@ -156,7 +158,7 @@ const CostOverviewPage: React.FC = () => {
                 </Space>
               }
               value={globalCostMetrics.totalOptimizableSpace}
-              prefix="¥"
+              prefix={CURRENCY_SYMBOL}
               formatter={value => Number(value).toLocaleString()}
               suffix={
                 optimChange != null && (
@@ -244,7 +246,7 @@ const CostOverviewPage: React.FC = () => {
                 <Statistic
                   title={domain.domain}
                   value={domain.cost}
-                  prefix="¥"
+                  prefix={CURRENCY_SYMBOL}
                   formatter={value => Number(value).toLocaleString()}
                   suffix={
                     <div style={{ marginTop: 8 }}>
@@ -272,6 +274,9 @@ const CostOverviewPage: React.FC = () => {
       >
         <h2>全域成本透视</h2>
         <Space>
+          <span style={{ color: '#666', fontSize: 12 }}>
+            {useMockData ? '数据来源：Mock' : (globalCostMetrics && globalCostMetrics.totalBillableCost > 0 ? '数据来源：云账单' : '数据来源：—')}
+          </span>
           <span>使用Mock数据</span>
           <Switch
             checked={useMockData}
@@ -281,6 +286,28 @@ const CostOverviewPage: React.FC = () => {
           />
         </Space>
       </div>
+
+      {!useMockData && (
+        <Alert
+          message="当前为账期汇总数据（真实数据）"
+          description="为什么所有时间线数据一样？后端当前仅返回整账期汇总（月/季度），不按天切分，所以切换时间范围（当天/7天/30天/本月/本季度）不会改变结果。对比上一周期：账期汇总模式下暂无上期数据，仅 Mock 数据可展示环比。如需按不同时间范围或对比看到差异，可开启「使用Mock数据」。"
+          type="info"
+          showIcon
+          style={{ marginBottom: 16 }}
+        />
+      )}
+      {!useMockData &&
+        globalCostMetrics &&
+        globalCostMetrics.totalBillableCost === 0 &&
+        (!namespaceCosts || namespaceCosts.length === 0) && (
+          <Alert
+            message="暂无真实数据"
+            description="当前未接入真实数据源。请完成：1) 01_ 成本透视真实数据：配置阿里云 AK/SK 并执行 ETL，将云账单写入 cost_cloud_bill_summary；2) 02_ 真实数据源：接入 Prometheus/K8s 获取集群内计算成本。完成后关闭 Mock 即可看到真实成本与领域占比。"
+            type="warning"
+            showIcon
+            style={{ marginBottom: 16 }}
+          />
+        )}
 
       <Alert
         message="当前版本能力范围"
@@ -381,11 +408,15 @@ const CostOverviewPage: React.FC = () => {
         {domainDetail && (
           <Descriptions column={1} bordered size="small">
             <Descriptions.Item label="领域">{domainDetail.domain}</Descriptions.Item>
-            <Descriptions.Item label="成本 (¥)">¥{domainDetail.cost.toLocaleString()}</Descriptions.Item>
-            <Descriptions.Item label="可优化空间 (¥)">
-              ¥{domainDetail.optimizableSpace.toLocaleString()}
+            <Descriptions.Item label={`成本 (${CURRENCY_SYMBOL})`}>{CURRENCY_SYMBOL}{domainDetail.cost.toLocaleString()}</Descriptions.Item>
+            <Descriptions.Item label={`可优化空间 (${CURRENCY_SYMBOL})`}>
+              {domainDetail.optimizableSpace != null && domainDetail.optimizableSpace > 0
+                ? `${CURRENCY_SYMBOL}${domainDetail.optimizableSpace.toLocaleString()}`
+                : '—'}
             </Descriptions.Item>
-            <Descriptions.Item label="效率"> {domainDetail.efficiency}%</Descriptions.Item>
+            <Descriptions.Item label="效率">
+              {domainDetail.efficiency != null && domainDetail.efficiency > 0 ? `${domainDetail.efficiency}%` : '—'}
+            </Descriptions.Item>
           </Descriptions>
         )}
       </Modal>
@@ -400,22 +431,49 @@ const CostOverviewPage: React.FC = () => {
         {detailModal === 'bill' && globalCostMetrics && (
           <div>
             <p style={{ color: '#666', marginBottom: 16 }}>
-              总账单由基础计算、存储、网络及其它云产品费用汇总。下方为账单详情与领域分解。
+              总账单由计算资源、存储、网络、其它四类领域汇总，分项之和=总账单。可优化空间与效率在无数据支撑时显示「—」。下方按领域列出该账期成本最高的产品（最多 4 个），金额为该领域下该产品的总成本（非单价）。点击「查看详情」可跳转钻取页（账期汇总数据下无命名空间级下钻，仅 Mock 时可下钻）。
             </p>
             {globalCostMetrics.billDetail && (
               <Descriptions column={1} bordered size="small" style={{ marginBottom: 16 }}>
-                <Descriptions.Item label="基础计算资源">¥{globalCostMetrics.billDetail.compute.toLocaleString()}</Descriptions.Item>
-                <Descriptions.Item label="存储">¥{globalCostMetrics.billDetail.storage.toLocaleString()}</Descriptions.Item>
-                <Descriptions.Item label="网络">¥{globalCostMetrics.billDetail.network.toLocaleString()}</Descriptions.Item>
-                <Descriptions.Item label="其它云产品">¥{globalCostMetrics.billDetail.other.toLocaleString()}</Descriptions.Item>
+                <Descriptions.Item label="基础计算资源">{CURRENCY_SYMBOL}{globalCostMetrics.billDetail.compute.toLocaleString()}</Descriptions.Item>
+                <Descriptions.Item label="存储">{CURRENCY_SYMBOL}{globalCostMetrics.billDetail.storage.toLocaleString()}</Descriptions.Item>
+                <Descriptions.Item label="网络">{CURRENCY_SYMBOL}{globalCostMetrics.billDetail.network.toLocaleString()}</Descriptions.Item>
+                <Descriptions.Item label="其它云产品">{CURRENCY_SYMBOL}{globalCostMetrics.billDetail.other.toLocaleString()}</Descriptions.Item>
               </Descriptions>
             )}
             <Descriptions column={1} bordered size="small">
-              {globalCostMetrics.domainBreakdown.map((d, i) => (
-                <Descriptions.Item key={i} label={d.domain}>
-                  ¥{d.cost.toLocaleString()}（可优化空间 ¥{d.optimizableSpace.toLocaleString()}，效率 {d.efficiency}%）
-                </Descriptions.Item>
-              ))}
+              {(globalCostMetrics.domainBreakdown ?? []).map((d, i) => {
+                const dimensionAnchor = (d.domain === '计算资源' && 'compute') || (d.domain === '存储' && 'storage') || (d.domain === '网络' && 'network') || null;
+                return (
+                  <Descriptions.Item key={i} label={d.domain}>
+                    <div>
+                      <div>
+                        {CURRENCY_SYMBOL}{d.cost.toLocaleString()}
+                        （可优化空间 {d.optimizableSpace > 0 ? `${CURRENCY_SYMBOL}${d.optimizableSpace.toLocaleString()}` : '—'}，效率 {d.efficiency > 0 ? `${d.efficiency}%` : '—'}）
+                      </div>
+                      {d.topProducts && d.topProducts.length > 0 && (
+                        <div style={{ marginTop: 8 }}>
+                          <div style={{ marginBottom: 4, fontSize: 12, color: '#666' }}>成本前 4 产品（该领域该账期总成本，非单价）：</div>
+                          <ul style={{ margin: 0, paddingLeft: 18 }}>
+                            {(d.topProducts || []).map((p, j) => (
+                              <li key={j}>{p.product}：{CURRENCY_SYMBOL}{p.cost.toLocaleString()}</li>
+                            ))}
+                          </ul>
+                          {dimensionAnchor && (
+                            <a
+                              href={`#/DrilldownPage?dimension=${dimensionAnchor}`}
+                              onClick={(e) => { e.preventDefault(); navigate(`/DrilldownPage?dimension=${dimensionAnchor}`); setDetailModal(null); }}
+                              style={{ marginTop: 6, display: 'inline-block' }}
+                            >
+                              查看详情 →
+                            </a>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </Descriptions.Item>
+                );
+              })}
             </Descriptions>
           </div>
         )}
@@ -427,7 +485,7 @@ const CostOverviewPage: React.FC = () => {
             <Table
               size="small"
               dataSource={[
-                ...globalCostMetrics.domainBreakdown.map(d => ({
+                ...(globalCostMetrics.domainBreakdown ?? []).map(d => ({
                   key: `domain-${d.domain}`,
                   name: d.domain,
                   efficiency: d.efficiency,
@@ -443,7 +501,7 @@ const CostOverviewPage: React.FC = () => {
               columns={[
                 { title: '类型', dataIndex: 'type', width: 80 },
                 { title: '名称', dataIndex: 'name' },
-                { title: '效率 (%)', dataIndex: 'efficiency', render: (v: number) => `${v}%` },
+                { title: '效率 (%)', dataIndex: 'efficiency', render: (v: number) => (v != null && v > 0 ? `${v}%` : '—') },
               ]}
               pagination={false}
             />

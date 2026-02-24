@@ -20,7 +20,7 @@ func TestCostService_GetGlobalCost(t *testing.T) {
 	repo := postgres.NewMockRepository(postgres.DefaultMockConfig())
 	svc := NewCostService(repo)
 	ctx := context.Background()
-	resp, err := svc.GetGlobalCost(ctx)
+	resp, err := svc.GetGlobalCost(ctx, "month")
 	if err != nil {
 		t.Fatalf("GetGlobalCost: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestCostService_GetGlobalCost_CloudBill(t *testing.T) {
 		t.Fatalf("SaveCloudBillSummary: %v", err)
 	}
 	svc := NewCostService(repo)
-	resp, err := svc.GetGlobalCost(ctx)
+	resp, err := svc.GetGlobalCost(ctx, "month")
 	if err != nil {
 		t.Fatalf("GetGlobalCost: %v", err)
 	}
@@ -62,6 +62,35 @@ func TestCostService_GetGlobalCost_CloudBill(t *testing.T) {
 	}
 	if len(resp.DomainBreakdown) != 3 {
 		t.Errorf("DomainBreakdown len = %d, want 3", len(resp.DomainBreakdown))
+	}
+}
+
+// TestCostService_GetGlobalCost_CloudBillZero 验证有云账单行但 total=0 时仍采用云账单来源（不回退 L1）。
+func TestCostService_GetGlobalCost_CloudBillZero(t *testing.T) {
+	repo := postgres.NewMockRepository(postgres.DefaultMockConfig())
+	ctx := context.Background()
+	day := time.Now().UTC().Truncate(24 * time.Hour)
+	err := repo.SaveCloudBillSummary(ctx, postgres.CloudBillSummary{
+		Day:              day,
+		BillingCycle:     "2025-02",
+		TotalAmount:      0,
+		ProductBreakdown: map[string]float64{},
+		CreatedAt:        time.Now(),
+		UpdatedAt:        time.Now(),
+	})
+	if err != nil {
+		t.Fatalf("SaveCloudBillSummary: %v", err)
+	}
+	svc := NewCostService(repo)
+	resp, err := svc.GetGlobalCost(ctx, "month")
+	if err != nil {
+		t.Fatalf("GetGlobalCost: %v", err)
+	}
+	if resp.TotalCost != 0 {
+		t.Errorf("TotalCost = %v, want 0 (from cloud bill)", resp.TotalCost)
+	}
+	if len(resp.DomainBreakdown) != 0 {
+		t.Errorf("DomainBreakdown len = %d, want 0", len(resp.DomainBreakdown))
 	}
 }
 

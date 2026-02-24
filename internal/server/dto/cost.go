@@ -11,12 +11,19 @@ import (
 // Global Cost DTOs
 // =============================================
 
+// ProductCostItem 产品级成本（用于账单详情 top-N 与详情跳转）。
+type ProductCostItem struct {
+	Product string  `json:"product"`
+	Cost    float64 `json:"cost"`
+}
+
 // DomainBreakdownItem represents a domain in the cost breakdown pie chart.
 type DomainBreakdownItem struct {
-	Domain          string  `json:"domain"`
-	Cost            float64 `json:"cost"`
-	OptimizableSpace float64 `json:"optimizable_space"`
-	Efficiency      float64 `json:"efficiency"`
+	Domain           string             `json:"domain"`
+	Cost             float64            `json:"cost"`
+	OptimizableSpace float64            `json:"optimizable_space"`
+	Efficiency       float64            `json:"efficiency"`
+	TopProducts      []ProductCostItem  `json:"top_products,omitempty"` // 成本最高的最多 4 个产品，用于详情与跳转
 }
 
 // GlobalCostResponse represents the response for global cost overview.

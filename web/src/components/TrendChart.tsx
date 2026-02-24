@@ -38,8 +38,8 @@ const TrendChart: React.FC<TrendChartProps> = ({ data, height = 300, showEfficie
           <p>
             <strong>日期: {data.date}</strong>
           </p>
-          <p>价值: ¥{data.value.toLocaleString()}</p>
-          <p>成本: ¥{data.cost.toLocaleString()}</p>
+          <p>价值: ${data.value.toLocaleString()}</p>
+          <p>成本: ${data.cost.toLocaleString()}</p>
           {showEfficiency && <p>效率: {data.efficiency}%</p>}
         </div>
       );
@@ -59,7 +59,7 @@ const TrendChart: React.FC<TrendChartProps> = ({ data, height = 300, showEfficie
             textAnchor="end"
             height={60}
           />
-          <YAxis yAxisId="left" tickFormatter={value => `¥${value.toLocaleString()}`} />
+          <YAxis yAxisId="left" tickFormatter={value => `$${value.toLocaleString()}`} />
           {showEfficiency && (
             <YAxis
               yAxisId="right"

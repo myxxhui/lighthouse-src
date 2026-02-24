@@ -1,5 +1,5 @@
 /** 成本透视时间范围 */
-export type CostTimeRange = '7d' | '30d' | 'month' | 'quarter';
+export type CostTimeRange = '1d' | '7d' | '30d' | 'month' | 'quarter';
 
 /** 成本对比模式 */
 export type CostCompareMode = 'none' | 'previous';
@@ -38,11 +38,19 @@ export interface CostMetrics {
   };
 }
 
+/** 产品级成本（账单详情 top-N 与详情跳转） */
+export interface ProductCostItem {
+  product: string;
+  cost: number;
+}
+
 export interface DomainBreakdown {
   domain: string;
   cost: number;
   optimizableSpace: number;
   efficiency: number;
+  /** 成本最高的最多 4 个产品，用于详情与跳转 */
+  topProducts?: ProductCostItem[];
 }
 
 export interface NamespaceCost {

@@ -10,12 +10,13 @@ import {
   ResourceDimension,
 } from '@/types';
 
-// 按时间范围生成确定性的基准倍数（用于区分 7d/30d/month/quarter 数据差异）
+// 按时间范围生成确定性的基准倍数（用于区分 1d/7d/30d/month/quarter 数据差异）
 const periodMultipliers: Record<CostTimeRange, { cost: number; optim: number; efficiency: number }> = {
-  '7d': { cost: 0.25, optim: 0.28, efficiency: 68 },       // 近7天：约 1/4 月成本，效率略低
-  '30d': { cost: 1, optim: 1, efficiency: 70 },            // 近30天：基准
+  '1d': { cost: 1 / 30, optim: 1 / 30, efficiency: 66 },    // 当天：约 1/30 月成本
+  '7d': { cost: 0.25, optim: 0.28, efficiency: 68 },       // 近7天：约 1/4 月成本
+  '30d': { cost: 1, optim: 1, efficiency: 70 },           // 近30天：基准
   'month': { cost: 1.05, optim: 1.02, efficiency: 71 },    // 本月：略高于30天
-  'quarter': { cost: 3.2, optim: 3.1, efficiency: 72 },     // 本季度：约 3 倍月
+  'quarter': { cost: 3.2, optim: 3.1, efficiency: 72 },    // 本季度：约 3 倍月
 };
 
 // 上一周期相对本期的固定比例，保证环比可校验：环比 = (本期 - 上期) / 上期 * 100

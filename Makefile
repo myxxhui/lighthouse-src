@@ -7,7 +7,8 @@ VERSION := $(shell git describe --tags --always 2>/dev/null || echo "0.1.0")
 GIT_COMMIT := $(shell git rev-parse --short=8 HEAD)
 BRANCH_NAME := $(shell git rev-parse --abbrev-ref HEAD)
 IMAGE_TAG := $(VERSION)-$(GIT_COMMIT)
-REGISTRY ?= registry.example.com
+# 默认使用 Docker 官方仓库，不做镜像仓库选择 [Ref: 04_Phase4/01_成本透视真实数据]
+REGISTRY ?= docker.io
 NAMESPACE ?= lighthouse
 
 # 目录定义
@@ -15,8 +16,11 @@ BACKEND_DIR := .
 FRONTEND_DIR := ./web
 DEPLOY_DIR := ../lighthouse-deploy
 
+# 镜像构建：默认仅当前平台以加速本地/CI；多架构可传 DOCKER_PLATFORM=linux/amd64,linux/arm64
+DOCKER_PLATFORM ?= linux/amd64
+
 .PHONY: help build build-backend build-frontend build-all docker-backend docker-frontend \
-        docker-all run-local run-docker push-images test lint clean security-scan \
+        docker-all run-local run-docker push-images test lint clean clean-env security-scan \
         verify-build verify-phase1 verify-phase2 verify-phase3 generate-sbom sign-images
 
 # 默认目标：显示帮助
@@ -27,8 +31,8 @@ help:
 	@echo "  make build-backend     构建后端二进制文件"
 	@echo "  make build-frontend    构建前端静态资源"
 	@echo "  make build-all         构建前后端所有组件"
-	@echo "  make docker-backend    构建后端Docker镜像"
-	@echo "  make docker-frontend   构建前端Docker镜像"
+	@echo "  make docker-backend    构建后端Docker镜像（多阶段 deps 层缓存，依赖不变不重装）"
+	@echo "  make docker-frontend   构建前端Docker镜像（多阶段 deps 层缓存，依赖不变不重装）"
 	@echo "  make docker-all        构建所有Docker镜像"
 	@echo "  make run-local         本地运行开发环境"
 	@echo "  make run-docker        使用Docker运行完整环境"
@@ -36,6 +40,7 @@ help:
 	@echo "  make test              运行所有测试"
 	@echo "  make lint              代码检查"
 	@echo "  make clean             清理构建产物"
+	@echo "  make clean-env         一键清理运行容器、数据卷与前后端镜像（deploy 环境）"
 	@echo "  make security-scan     安全扫描"
 	@echo "  make verify-build      验证构建结果"
 	@echo "  make verify-phase1     Phase1 一键验收（骨架+领域+配置）"
@@ -73,11 +78,12 @@ build-frontend:
 # 构建所有
 build-all: build-backend build-frontend
 
-# Docker镜像构建 - 后端
+# Docker镜像构建 - 后端（单 Dockerfile 多阶段：deps→builder→runtime，依赖层缓存）
 docker-backend:
-	@echo "🐳 构建后端Docker镜像..."
+	@echo "🐳 构建后端Docker镜像 (platform=$(DOCKER_PLATFORM))..."
 	docker buildx build \
-		--platform linux/amd64,linux/arm64 \
+		--platform $(DOCKER_PLATFORM) \
+		--progress=plain \
 		--build-arg GIT_COMMIT=$(GIT_COMMIT) \
 		--build-arg VERSION=$(VERSION) \
 		--build-arg BUILD_TIME=$(shell date -u +'%Y-%m-%dT%H:%M:%SZ') \
@@ -87,11 +93,12 @@ docker-backend:
 		$(BACKEND_DIR)
 	@echo "✅ 后端镜像构建完成: $(PROJECT_NAME)-backend:$(IMAGE_TAG)"
 
-# Docker镜像构建 - 前端
+# Docker镜像构建 - 前端（单 Dockerfile 多阶段：deps→builder→nginx，依赖层缓存）
 docker-frontend:
-	@echo "🐳 构建前端Docker镜像..."
+	@echo "🐳 构建前端Docker镜像 (platform=$(DOCKER_PLATFORM))..."
 	docker buildx build \
-		--platform linux/amd64,linux/arm64 \
+		--platform $(DOCKER_PLATFORM) \
+		--progress=plain \
 		--build-arg GIT_COMMIT=$(GIT_COMMIT) \
 		--build-arg VERSION=$(VERSION) \
 		--build-arg BUILD_TIME=$(shell date -u +'%Y-%m-%dT%H:%M:%SZ') \
@@ -115,14 +122,33 @@ run-local:
 	@echo "  后端: http://localhost:8080"
 	@echo "  前端: http://localhost:8000"
 
-# Docker运行完整环境
+# Docker运行完整环境（在 deploy 目录执行 compose 以加载 .env；首次需先 init-db）
 run-docker: docker-all
 	@echo "🚀 使用Docker运行完整环境..."
-	docker-compose -f $(DEPLOY_DIR)/docker-compose.yml up -d
+	@echo "  首次请先: cd $(DEPLOY_DIR) && docker compose up -d postgres && sleep 5 && ./scripts/init-db.sh"
+	cd $(DEPLOY_DIR) && docker compose up -d
 	@echo "✅ 容器化环境已启动"
 	@echo "  后端API: http://localhost:8080"
 	@echo "  前端界面: http://localhost:3000"
-	@echo "  监控面板: http://localhost:9090"
+
+# 一键清理：停止并删除 compose 容器、数据卷，删除本机构建的前后端镜像（Docker/Podman 通用）
+# 按项目 label 停删所有相关容器（避免旧命名容器未清理导致端口/卷仍占用），再删卷与镜像
+# 执行：make clean-env（须在 lighthouse-src 目录）；清理后重新部署需 make docker-all 再 docker compose up -d
+clean-env:
+	@echo "🧹 一键清理 deploy 环境（容器、数据卷、前后端镜像）..."
+	@echo "  按项目 label 停删残留容器（含旧命名）..."
+	@for label in "io.podman.compose.project=lighthouse-deploy" "com.docker.compose.project=lighthouse-deploy"; do \
+		ids=$$(docker ps -aq --filter label=$$label 2>/dev/null); \
+		if [ -n "$$ids" ]; then docker stop -t 10 $$ids 2>/dev/null || true; docker rm -f $$ids 2>/dev/null || true; fi; \
+	done
+	@cd $(DEPLOY_DIR) && (docker compose down -v >/dev/null 2>&1 || true)
+	@docker volume rm lighthouse-deploy_postgres_data lighthouse-deploy_clickhouse_data 2>/dev/null || true
+	@echo "  已停止并删除 compose 容器与数据卷"
+	@docker rmi $(PROJECT_NAME)-backend:latest $(PROJECT_NAME)-frontend:latest 2>/dev/null || true
+	@docker rmi localhost/$(PROJECT_NAME)-backend:latest localhost/$(PROJECT_NAME)-frontend:latest 2>/dev/null || true
+	@docker rmi $(PROJECT_NAME)-backend:$(IMAGE_TAG) $(PROJECT_NAME)-frontend:$(IMAGE_TAG) 2>/dev/null || true
+	@docker image prune -f
+	@echo "✅ 清理完成（下次需 make docker-all 再部署）"
 
 # 推送镜像到远程仓库
 push-images: docker-all

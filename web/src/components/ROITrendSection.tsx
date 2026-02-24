@@ -30,7 +30,7 @@ const ROITrendSection: React.FC = () => {
             <Statistic
               title="当前价值"
               value={latest.value}
-              prefix="¥"
+              prefix="$"
               formatter={value => Number(value).toLocaleString()}
               valueStyle={{ color: valueChange >= 0 ? '#52c41a' : '#ff4d4f' }}
               suffix={
@@ -51,7 +51,7 @@ const ROITrendSection: React.FC = () => {
             <Statistic
               title="当前成本"
               value={latest.cost}
-              prefix="¥"
+              prefix="$"
               formatter={value => Number(value).toLocaleString()}
               valueStyle={{ color: costChange <= 0 ? '#52c41a' : '#ff4d4f' }}
               suffix={

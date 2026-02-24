@@ -44,6 +44,10 @@ type Repository interface {
 	SaveCloudBillSummary(ctx context.Context, s CloudBillSummary) error
 	GetCloudBillSummary(ctx context.Context, day time.Time, billingCycle string) (*CloudBillSummary, error)
 	GetLatestCloudBillSummary(ctx context.Context) (*CloudBillSummary, error)
+	// GetLatestCloudBillSummaryForBillingCycle 返回指定账期最近一条汇总（用于按时间范围返回真实数据）
+	GetLatestCloudBillSummaryForBillingCycle(ctx context.Context, billingCycle string) (*CloudBillSummary, error)
+	// GetCloudBillSummariesForBillingCycles 返回多个账期各自最近一条汇总（用于本季度聚合）
+	GetCloudBillSummariesForBillingCycles(ctx context.Context, billingCycles []string) ([]*CloudBillSummary, error)
 
 	// HealthCheck checks if the database is reachable.
 	HealthCheck(ctx context.Context) error

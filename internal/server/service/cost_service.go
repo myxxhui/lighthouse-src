@@ -3,6 +3,8 @@ package service
 
 import (
 	"context"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/myxxhui/lighthouse-src/internal/data/postgres"
@@ -34,26 +36,99 @@ func toCostmodelDailyNamespaceCost(p postgres.DailyNamespaceCost) costmodel.Dail
 	}
 }
 
+// topProductsForDomain 从 productBreakdown 中取 key 为 "domain:ProductCode" 的项，按金额降序取前 n 个 [Ref: 01_成本透视真实数据]。
+func topProductsForDomain(pb *map[string]float64, domain string, n int) []dto.ProductCostItem {
+	if pb == nil || n <= 0 {
+		return nil
+	}
+	prefix := domain + ":"
+	var list []dto.ProductCostItem
+	for k, cost := range *pb {
+		if !strings.HasPrefix(k, prefix) || cost <= 0 {
+			continue
+		}
+		product := strings.TrimPrefix(k, prefix)
+		list = append(list, dto.ProductCostItem{Product: product, Cost: cost})
+	}
+	if len(list) == 0 {
+		return nil
+	}
+	sort.Slice(list, func(i, j int) bool { return list[i].Cost > list[j].Cost })
+	if len(list) > n {
+		list = list[:n]
+	}
+	return list
+}
+
+// aggregateCloudBillByPeriod 按时间范围聚合云账单：month/1d/7d/30d 用当月账期，quarter 用本季度三月汇总。
+// 返回 (有云账单, 总金额, 领域分项)；无数据时 (false, 0, nil)。
+func (s *CostService) aggregateCloudBillByPeriod(ctx context.Context, period string) (bool, float64, *map[string]float64) {
+	now := time.Now()
+	currentCycle := now.Format("2006-01")
+	switch period {
+	case "quarter":
+		// 本季度三个月账期
+		cycles := []string{currentCycle, now.AddDate(0, -1, 0).Format("2006-01"), now.AddDate(0, -2, 0).Format("2006-01")}
+		list, err := s.repo.GetCloudBillSummariesForBillingCycles(ctx, cycles)
+		if err != nil || len(list) == 0 {
+			return false, 0, nil
+		}
+		var total float64
+		merged := make(map[string]float64)
+		for _, c := range list {
+			total += c.TotalAmount
+			for k, v := range c.ProductBreakdown {
+				merged[k] += v
+			}
+		}
+		return true, total, &merged
+	case "1d", "7d", "30d", "month", "":
+		// 云账单粒度为账期，1d/7d/30d/month 均用当月账期
+		cloud, err := s.repo.GetLatestCloudBillSummaryForBillingCycle(ctx, currentCycle)
+		if err != nil || cloud == nil {
+			// 无当月则用全局最新一条（兼容历史数据）
+			cloud, err = s.repo.GetLatestCloudBillSummary(ctx)
+			if err != nil || cloud == nil {
+				return false, 0, nil
+			}
+		}
+		return true, cloud.TotalAmount, &cloud.ProductBreakdown
+	default:
+		cloud, err := s.repo.GetLatestCloudBillSummary(ctx)
+		if err != nil || cloud == nil {
+			return false, 0, nil
+		}
+		return true, cloud.TotalAmount, &cloud.ProductBreakdown
+	}
+}
+
 // GetGlobalCost returns L0 cost. 优先使用 cost_cloud_bill_summary（Phase4 01_ 云账单）；无云账单时回退到 L1 聚合。
-func (s *CostService) GetGlobalCost(ctx context.Context) (*dto.GlobalCostResponse, error) {
-	cloud, err := s.repo.GetLatestCloudBillSummary(ctx)
-	if err == nil && cloud != nil && cloud.TotalAmount > 0 {
-		// 仅云账单模式：total_cost、domain_breakdown 来自 cost_cloud_bill_summary（08_ §1.3）
-		domainBreakdown := make([]dto.DomainBreakdownItem, 0, len(cloud.ProductBreakdown))
-		for domain, cost := range cloud.ProductBreakdown {
+// period: 1d|7d|30d|month|quarter；云账单按账期聚合：month/1d/7d/30d 用当月账期，quarter 用本季度三月汇总。
+// [Ref: 03_01_成本透视真实数据] 真实数据不臆造可优化空间/效率，无数据支撑时返回 0，前端展示「—」。
+func (s *CostService) GetGlobalCost(ctx context.Context, period string) (*dto.GlobalCostResponse, error) {
+	cloud, totalAmount, productBreakdown := s.aggregateCloudBillByPeriod(ctx, period)
+	if cloud && productBreakdown != nil {
+		// 仅领域键（不含 ":"）参与 domain 汇总；含 ":" 的为 "domain:ProductCode" 产品级明细，用于 top_products [Ref: 01_成本透视真实数据]
+		domainBreakdown := make([]dto.DomainBreakdownItem, 0)
+		for domain, cost := range *productBreakdown {
+			if strings.Contains(domain, ":") {
+				continue
+			}
+			topProducts := topProductsForDomain(productBreakdown, domain, 4)
 			domainBreakdown = append(domainBreakdown, dto.DomainBreakdownItem{
 				Domain:           domain,
 				Cost:             cost,
 				OptimizableSpace: 0,
 				Efficiency:       0,
+				TopProducts:      topProducts,
 			})
 		}
 		return &dto.GlobalCostResponse{
-			TotalCost:        cloud.TotalAmount,
+			TotalCost:        totalAmount,
 			TotalOptimizable: 0,
 			GlobalEfficiency: 0,
 			DomainBreakdown:  domainBreakdown,
-			Namespaces:       nil, // 本步不实现 Namespace 级成本（属 02_）
+			Namespaces:       nil,
 			Timestamp:        time.Now().UTC(),
 		}, nil
 	}
@@ -135,8 +210,8 @@ func (s *CostService) MixedQueryTimeSeries(ctx context.Context, start, end time.
 }
 
 // ListNamespaces returns all namespaces with cost summary for the frontend cost table.
-func (s *CostService) ListNamespaces(ctx context.Context) ([]dto.NamespaceCostSummary, error) {
-	resp, err := s.GetGlobalCost(ctx)
+func (s *CostService) ListNamespaces(ctx context.Context, period string) ([]dto.NamespaceCostSummary, error) {
+	resp, err := s.GetGlobalCost(ctx, period)
 	if err != nil {
 		return nil, err
 	}

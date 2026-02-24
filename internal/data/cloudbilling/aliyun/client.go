@@ -6,28 +6,48 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/alibabacloud-go/bssopenapi-20171214/v4/client"
 	openapi "github.com/alibabacloud-go/darabonba-openapi/v2/client"
 	"github.com/alibabacloud-go/tea/tea"
+	"github.com/alibabacloud-go/tea-utils/v2/service"
 )
 
 const (
-	envAccessKeyID     = "ALIBABA_CLOUD_ACCESS_KEY_ID"
-	envAccessKeySecret = "ALIBABA_CLOUD_ACCESS_KEY_SECRET"
-	maxRetries         = 3
-	baseBackoff        = time.Second
-	circuitFailThreshold = 5
-	circuitOpenDuration  = 60 * time.Second
+	envAccessKeyID         = "ALIBABA_CLOUD_ACCESS_KEY_ID"
+	envAccessKeySecret     = "ALIBABA_CLOUD_ACCESS_KEY_SECRET"
+	envBillingEndpoint     = "ALIBABA_CLOUD_BILLING_ENDPOINT" // 可选；国际站填 business.ap-southeast-1.aliyuncs.com
+	defaultBillingEndpoint = "business.aliyuncs.com"          // 中国站
+	maxRetries             = 3
+	baseBackoff            = time.Second
+	circuitFailThreshold   = 5
+	circuitOpenDuration    = 60 * time.Second
 )
+
+// productCodeToDomain 将阿里云产品码映射为领域名（15_ 规范：算力/存储/网络/其它）。未匹配的归为「其它」，保证领域汇总之和=总账。
+var productCodeToDomain = map[string]string{
+	"ecs": "计算资源", "ack": "计算资源", "cs": "计算资源", "ecs_workflow": "计算资源",
+	"oss": "存储", "nas": "存储", "disk": "存储",
+	"cdn": "网络", "slb": "网络", "vpc": "网络", "eip": "网络",
+	"cdt": "其它", "sfm": "其它", // 未归入计算/存储/网络的产品统一归为其它，避免与总账不一致
+}
+
+// BillItemResult 单产品金额，用于产品级明细与 top-N 展示。
+type BillItemResult struct {
+	ProductCode string
+	Amount      float64
+	Domain      string
+}
 
 // BillOverviewResult 账期总账与按产品金额（供工厂转换为 FetchAccountSummaryResponse）。
 type BillOverviewResult struct {
 	BillingCycle string
 	TotalAmount  float64
 	ByCategory   map[string]float64
+	Items        []BillItemResult
 	Currency     string
 }
 
@@ -39,17 +59,24 @@ type Fetcher struct {
 	mu                  sync.Mutex
 }
 
-// NewFetcher 从环境变量读取 AccessKeyId/AccessKeySecret 创建 Fetcher。未设置凭证时返回 nil, false。
-func NewFetcher() (*Fetcher, bool) {
+// NewFetcher 从环境变量读取 AccessKeyId/AccessKeySecret 创建 Fetcher；endpoint 可选（空则用环境变量或中国站默认）。
+// 国际站账号须指定 endpoint，如 business.ap-southeast-1.aliyuncs.com，否则会报 NotApplicable（caller site 与 regionId 不匹配）。
+func NewFetcher(endpoint string) (*Fetcher, bool) {
 	ak := os.Getenv(envAccessKeyID)
 	sk := os.Getenv(envAccessKeySecret)
 	if ak == "" || sk == "" {
 		return nil, false
 	}
+	if endpoint == "" {
+		endpoint = os.Getenv(envBillingEndpoint)
+	}
+	if endpoint == "" {
+		endpoint = defaultBillingEndpoint
+	}
 	cfg := &openapi.Config{
 		AccessKeyId:     tea.String(ak),
 		AccessKeySecret: tea.String(sk),
-		Endpoint:        tea.String("business.aliyuncs.com"),
+		Endpoint:        tea.String(endpoint),
 	}
 	c, err := client.NewClient(cfg)
 	if err != nil {
@@ -60,6 +87,7 @@ func NewFetcher() (*Fetcher, bool) {
 }
 
 // FetchBillOverview 拉取账期总账单与按产品占比。退避重试；熔断时返回错误。
+// FetchBillOverview 拉取账期总账单与按产品占比。当月无数据时自动尝试上月账期（01_ 修复：避免 total_cost/domain_breakdown 始终为空）。
 func (f *Fetcher) FetchBillOverview(ctx context.Context, billingCycle string) (*BillOverviewResult, error) {
 	f.mu.Lock()
 	if time.Now().Before(f.circuitOpenUntil) {
@@ -88,8 +116,18 @@ func (f *Fetcher) FetchBillOverview(ctx context.Context, billingCycle string) (*
 			f.mu.Lock()
 			f.consecutiveFailures = 0
 			f.mu.Unlock()
-			// 可观测：成功调用与延迟（15_、文档 4.1 第5条）
 			slog.Info("aliyun billing: fetch ok", "billing_cycle", billingCycle, "duration_ms", time.Since(start).Milliseconds(), "total", resp.TotalAmount)
+			// 当月无数据时尝试上月账期，便于新环境或当月未出账时仍有展示
+			if resp.TotalAmount == 0 && len(resp.ByCategory) == 0 {
+				prevCycle := prevMonthBillingCycle(billingCycle)
+				if prevCycle != billingCycle {
+					prev, err2 := f.queryBillOverview(ctx, prevCycle)
+					if err2 == nil && (prev.TotalAmount > 0 || len(prev.ByCategory) > 0) {
+						slog.Info("aliyun billing: using previous cycle", "current", billingCycle, "previous", prevCycle, "total", prev.TotalAmount)
+						return prev, nil
+					}
+				}
+			}
 			return resp, nil
 		}
 		lastErr = err
@@ -107,11 +145,20 @@ func (f *Fetcher) FetchBillOverview(ctx context.Context, billingCycle string) (*
 	return nil, lastErr
 }
 
+func prevMonthBillingCycle(cycle string) string {
+	if len(cycle) != 7 || cycle[4] != '-' {
+		return cycle
+	}
+	y, _ := time.Parse("2006-01", cycle)
+	prev := y.AddDate(0, -1, 0)
+	return prev.Format("2006-01")
+}
+
 func (f *Fetcher) queryBillOverview(ctx context.Context, billingCycle string) (*BillOverviewResult, error) {
 	req := &client.QueryBillOverviewRequest{
 		BillingCycle: tea.String(billingCycle),
 	}
-	resp, err := f.bssClient.QueryBillOverviewWithOptions(req, nil)
+	resp, err := f.bssClient.QueryBillOverviewWithOptions(req, &service.RuntimeOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -120,12 +167,14 @@ func (f *Fetcher) queryBillOverview(ctx context.Context, billingCycle string) (*
 			BillingCycle: billingCycle,
 			TotalAmount:  0,
 			ByCategory:   make(map[string]float64),
+			Items:        nil,
 			Currency:     "CNY",
 		}, nil
 	}
 	data := resp.Body.Data
 	total := 0.0
 	byCategory := make(map[string]float64)
+	var items []BillItemResult
 	if data.Items != nil && len(data.Items.Item) > 0 {
 		for _, it := range data.Items.Item {
 			amount := 0.0
@@ -133,11 +182,16 @@ func (f *Fetcher) queryBillOverview(ctx context.Context, billingCycle string) (*
 				amount = float64(*it.PretaxAmount)
 			}
 			total += amount
-			productCode := "other"
+			domain := "其它"
+			codeStr := "OTHER"
 			if it.ProductCode != nil && *it.ProductCode != "" {
-				productCode = *it.ProductCode
+				codeStr = strings.ToUpper(strings.TrimSpace(*it.ProductCode))
+				if d, ok := productCodeToDomain[strings.ToLower(*it.ProductCode)]; ok {
+					domain = d
+				}
 			}
-			byCategory[productCode] += amount
+			byCategory[domain] += amount
+			items = append(items, BillItemResult{ProductCode: codeStr, Amount: amount, Domain: domain})
 		}
 	}
 	cycle := billingCycle
@@ -148,6 +202,7 @@ func (f *Fetcher) queryBillOverview(ctx context.Context, billingCycle string) (*
 		BillingCycle: cycle,
 		TotalAmount:  total,
 		ByCategory:   byCategory,
+		Items:        items,
 		Currency:     "CNY",
 	}, nil
 }

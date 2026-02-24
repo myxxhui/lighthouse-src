@@ -26,11 +26,21 @@ func (a *aliCloudFetcher) FetchAccountSummary(ctx context.Context, req FetchAcco
 	if err != nil {
 		return nil, err
 	}
+	items := make([]BillItem, 0, len(res.Items))
+	for _, it := range res.Items {
+		items = append(items, BillItem{
+			ProductCode: it.ProductCode,
+			ItemCode:    "",
+			Amount:      it.Amount,
+			Category:    it.Domain,
+		})
+	}
 	return &FetchAccountSummaryResponse{
 		BillingCycle: res.BillingCycle,
 		TotalAmount:  res.TotalAmount,
 		Currency:     res.Currency,
 		ByCategory:   res.ByCategory,
+		Items:        items,
 	}, nil
 }
 
@@ -38,7 +48,7 @@ func (a *aliCloudFetcher) FetchAccountSummary(ctx context.Context, req FetchAcco
 func NewFetcher(cfg CloudBillingConfig) CloudBillingFetcher {
 	switch cfg.Provider {
 	case "aliyun":
-		f, ok := aliyun.NewFetcher()
+		f, ok := aliyun.NewFetcher(cfg.Endpoint)
 		if !ok {
 			return nil
 		}

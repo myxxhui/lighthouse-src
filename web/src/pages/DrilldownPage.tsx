@@ -129,7 +129,7 @@ const DrilldownPage: React.FC = () => {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <strong>{ns.namespace}</strong>
                     <span>
-                      成本 ¥{ns.cost.toLocaleString()} · 效率 {ns.efficiency}%
+                      成本 ${ns.cost.toLocaleString()} · 效率 {ns.efficiency}%
                     </span>
                   </div>
                 </Card>
@@ -145,8 +145,8 @@ const DrilldownPage: React.FC = () => {
       }
       return (
         <Alert
-          message="请选择下钻起点"
-          description="请从「全域成本透视」选择命名空间开始下钻，或等待数据加载后在此选择。"
+          message="暂无命名空间下钻数据"
+          description="当前为账期汇总数据时无命名空间级成本。领域与产品明细请在全域成本透视的「成本账单详情」中查看；若需下钻示例可开启 Mock 数据后重试。"
           type="info"
           showIcon
           action={
@@ -211,10 +211,10 @@ const DrilldownPage: React.FC = () => {
             <Descriptions.Item label="类型">
               {getTypeName(currentDrilldownItem.type)}
             </Descriptions.Item>
-            <Descriptions.Item label="成本 (¥)">
+            <Descriptions.Item label="成本 ($)">
               {currentDrilldownItem.cost.toLocaleString()}
             </Descriptions.Item>
-            <Descriptions.Item label="可优化空间 (¥)">
+            <Descriptions.Item label="可优化空间 ($)">
               {currentDrilldownItem.optimizableSpace.toLocaleString()}
             </Descriptions.Item>
             <Descriptions.Item label="效率分">
@@ -241,7 +241,7 @@ const DrilldownPage: React.FC = () => {
                     percent={Math.min(100, Math.round((currentDrilldownItem.costBreakdown.cpu / currentDrilldownItem.cost) * 100))}
                     size="small"
                     showInfo={true}
-                    format={(p) => `¥${currentDrilldownItem.costBreakdown!.cpu.toLocaleString()} (${p}%)`}
+                    format={(p) => `$${currentDrilldownItem.costBreakdown!.cpu.toLocaleString()} (${p}%)`}
                   />
                 </div>
                 <div>
@@ -250,7 +250,7 @@ const DrilldownPage: React.FC = () => {
                     percent={Math.min(100, Math.round((currentDrilldownItem.costBreakdown.memory / currentDrilldownItem.cost) * 100))}
                     size="small"
                     showInfo={true}
-                    format={(p) => `¥${currentDrilldownItem.costBreakdown!.memory.toLocaleString()} (${p}%)`}
+                    format={(p) => `$${currentDrilldownItem.costBreakdown!.memory.toLocaleString()} (${p}%)`}
                   />
                 </div>
                 <div>
@@ -259,7 +259,7 @@ const DrilldownPage: React.FC = () => {
                     percent={Math.min(100, Math.round((currentDrilldownItem.costBreakdown.storage / currentDrilldownItem.cost) * 100))}
                     size="small"
                     showInfo={true}
-                    format={(p) => `¥${currentDrilldownItem.costBreakdown!.storage.toLocaleString()} (${p}%)`}
+                    format={(p) => `$${currentDrilldownItem.costBreakdown!.storage.toLocaleString()} (${p}%)`}
                   />
                 </div>
                 <div>
@@ -268,7 +268,7 @@ const DrilldownPage: React.FC = () => {
                     percent={Math.min(100, Math.round((currentDrilldownItem.costBreakdown.network / currentDrilldownItem.cost) * 100))}
                     size="small"
                     showInfo={true}
-                    format={(p) => `¥${currentDrilldownItem.costBreakdown!.network.toLocaleString()} (${p}%)`}
+                    format={(p) => `$${currentDrilldownItem.costBreakdown!.network.toLocaleString()} (${p}%)`}
                   />
                 </div>
               </Space>
@@ -297,7 +297,7 @@ const DrilldownPage: React.FC = () => {
                       {getTypeName(child.type)}: {child.name}
                     </strong>
                     <div style={{ fontSize: '12px', color: '#666' }}>
-                      成本: ¥{child.cost.toLocaleString()} | 效率: {child.efficiency}%
+                      成本: ${child.cost.toLocaleString()} | 效率: {child.efficiency}%
                     </div>
                   </div>
                   <div>
