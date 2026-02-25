@@ -43,8 +43,9 @@ func main() {
 			repo = postgres.NewMockRepository(postgres.DefaultMockConfig())
 		} else {
 			repo = pgRepo
-			// 启动时执行一次云账单 ETL（PG + 云账单凭证已配置时）
+			// 启动时执行一次云账单 ETL（PG + 云账单凭证已配置时）。[Ref: D2-5] 执行时间可配置，CronJob 部署时请使用 cfg.CloudBilling.EffectiveETLScheduleCron()
 			if cfg.CloudBilling.Provider == "aliyun" && os.Getenv("ALIBABA_CLOUD_ACCESS_KEY_ID") != "" && os.Getenv("ALIBABA_CLOUD_ACCESS_KEY_SECRET") != "" {
+				log.Printf("billing ETL schedule (config): %s", cfg.CloudBilling.EffectiveETLScheduleCron())
 				fetcher := cloudbilling.NewFetcher(cloudbilling.CloudBillingConfig{
 					Provider:     cfg.CloudBilling.Provider,
 					Endpoint:     cfg.CloudBilling.Endpoint,
@@ -56,9 +57,27 @@ func main() {
 					cycle = time.Now().Format("2006-01")
 				}
 				worker := etl.NewBillingWorker(fetcher, repo, cycle)
+				worker.OnPipelineFailAlert = func(step string, err error) {
+					log.Printf("WARN: billing ETL pipeline failed [%s]: %v", step, err)
+					// D1-1：与 04_ 监控告警集成时在此触发告警
+				}
 				ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 				if err := worker.Run(ctx); err != nil {
 					log.Printf("WARN: billing ETL run failed: %v", err)
+					if worker.OnPipelineFailAlert != nil {
+						worker.OnPipelineFailAlert("run", err)
+					}
+				}
+				// [Ref: 06_ D2] 若 repo 支持三表流水线，再执行固定顺序 ETL（写昨日→校验→删10月前→写月→聚合）
+				if err := worker.RunPipeline(ctx); err != nil {
+					log.Printf("WARN: billing ETL pipeline run failed: %v", err)
+					if worker.OnPipelineFailAlert != nil {
+						worker.OnPipelineFailAlert("pipeline", err)
+					}
+				}
+				// [Ref: 06_ D3] 每日对账：日表当月 sum vs 月表 total，偏差 >1% 告警
+				if err := worker.RunReconcile(ctx); err != nil {
+					log.Printf("WARN: billing reconcile failed: %v", err)
 				}
 				cancel()
 			}

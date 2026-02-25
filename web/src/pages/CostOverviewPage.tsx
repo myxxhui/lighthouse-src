@@ -15,7 +15,9 @@ import {
   Descriptions,
   Table,
   Tabs,
+  DatePicker,
 } from 'antd';
+import dayjs, { type Dayjs } from 'dayjs';
 import { LoadingOutlined, QuestionCircleOutlined } from '@ant-design/icons';
 import CostTable from '@/components/CostTable';
 import EfficiencyChart from '@/components/EfficiencyChart';
@@ -26,11 +28,12 @@ import type { DomainBreakdown } from '@/types';
 import { CURRENCY_SYMBOL } from '@/constants';
 
 const TIME_RANGE_OPTIONS: { label: string; value: CostTimeRange }[] = [
-  { label: '当天', value: '1d' },
+  { label: '昨天', value: '1d' },
   { label: '近7天', value: '7d' },
   { label: '近30天', value: '30d' },
   { label: '本月', value: 'month' },
   { label: '本季度', value: 'quarter' },
+  { label: '自定义', value: 'custom' },
 ];
 
 const COMPARE_OPTIONS: { label: string; value: CostCompareMode }[] = [
@@ -57,18 +60,20 @@ const CostOverviewPage: React.FC = () => {
     useMockData,
     costTimeRange,
     costCompareMode,
+    costCustomDateRange,
     selectedDimension,
     fetchGlobalCostMetrics,
     fetchNamespaceCosts,
     setUseMockData,
     setCostTimeRange,
     setCostCompareMode,
+    setCostCustomDateRange,
   } = useAppStore();
 
   useEffect(() => {
     fetchGlobalCostMetrics();
     fetchNamespaceCosts();
-  }, [fetchGlobalCostMetrics, fetchNamespaceCosts, costTimeRange, costCompareMode]);
+  }, [fetchGlobalCostMetrics, fetchNamespaceCosts, costTimeRange, costCompareMode, costCustomDateRange]);
 
   const handleRowClick = (record: any) => {
     navigate(
@@ -78,9 +83,22 @@ const CostOverviewPage: React.FC = () => {
 
   const renderGlobalMetrics = () => {
     if (loadingGlobalMetrics) {
+      const isDateRange = costCustomDateRange != null && costCustomDateRange[0] && costCustomDateRange[1];
+      const daysHint =
+        isDateRange && costCustomDateRange
+          ? Math.max(0, Math.ceil((new Date(costCustomDateRange[1]).getTime() - new Date(costCustomDateRange[0]).getTime()) / 86400000) + 1)
+          : 0;
       return (
         <Card loading={true}>
-          <LoadingOutlined />
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+            <LoadingOutlined spin style={{ fontSize: 24 }} />
+            <span>{isDateRange ? '正在汇总所选日期成本…' : '加载中...'}</span>
+            {isDateRange && daysHint > 0 && (
+              <span style={{ fontSize: 12, color: '#666' }}>
+                已选 {daysHint} 天，可能需要 10～30 秒
+              </span>
+            )}
+          </div>
         </Card>
       );
     }
@@ -235,8 +253,9 @@ const CostOverviewPage: React.FC = () => {
     return (
       <Card title="领域成本分解" style={{ marginTop: 16 }}>
         <Row gutter={[16, 16]}>
-          {globalCostMetrics.domainBreakdown.map((domain, index) => (
-            <Col key={index} xs={24} sm={12} md={8} lg={6}>
+          {globalCostMetrics.domainBreakdown.map((domain, index) => {
+            const isStorageOrNetwork = domain.domain === '存储' || domain.domain === '网络';
+            const card = (
               <Card
                 size="small"
                 hoverable
@@ -244,7 +263,15 @@ const CostOverviewPage: React.FC = () => {
                 style={{ cursor: 'pointer' }}
               >
                 <Statistic
-                  title={domain.domain}
+                  title={
+                    isStorageOrNetwork ? (
+                      <Tooltip title="当前仅展示成本金额，深度分析后续开放">
+                        <span>{domain.domain} <QuestionCircleOutlined style={{ fontSize: 12, color: '#999' }} /></span>
+                      </Tooltip>
+                    ) : (
+                      domain.domain
+                    )
+                  }
                   value={domain.cost}
                   prefix={CURRENCY_SYMBOL}
                   formatter={value => Number(value).toLocaleString()}
@@ -255,8 +282,13 @@ const CostOverviewPage: React.FC = () => {
                   }
                 />
               </Card>
-            </Col>
-          ))}
+            );
+            return (
+              <Col key={index} xs={24} sm={12} md={8} lg={6}>
+                {card}
+              </Col>
+            );
+          })}
         </Row>
       </Card>
     );
@@ -276,6 +308,9 @@ const CostOverviewPage: React.FC = () => {
         <Space>
           <span style={{ color: '#666', fontSize: 12 }}>
             {useMockData ? '数据来源：Mock' : (globalCostMetrics && globalCostMetrics.totalBillableCost > 0 ? '数据来源：云账单' : '数据来源：—')}
+            {globalCostMetrics?.lastUpdatedAt && (
+              <> · 数据更新至 {new Date(globalCostMetrics.lastUpdatedAt).toLocaleString('zh-CN', { dateStyle: 'short', timeStyle: 'short' })}</>
+            )}
           </span>
           <span>使用Mock数据</span>
           <Switch
@@ -290,7 +325,7 @@ const CostOverviewPage: React.FC = () => {
       {!useMockData && (
         <Alert
           message="当前为账期汇总数据（真实数据）"
-          description="为什么所有时间线数据一样？后端当前仅返回整账期汇总（月/季度），不按天切分，所以切换时间范围（当天/7天/30天/本月/本季度）不会改变结果。对比上一周期：账期汇总模式下暂无上期数据，仅 Mock 数据可展示环比。如需按不同时间范围或对比看到差异，可开启「使用Mock数据」。"
+          description="为什么所有时间线数据一样？后端当前仅返回整账期汇总（月/季度），不按天切分，所以切换时间范围（昨天/7天/30天/本月/本季度）不会改变结果。对比上一周期：账期汇总模式下暂无上期数据，仅 Mock 数据可展示环比。如需按不同时间范围或对比看到差异，可开启「使用Mock数据」。"
           type="info"
           showIcon
           style={{ marginBottom: 16 }}
@@ -321,8 +356,17 @@ const CostOverviewPage: React.FC = () => {
         <Space wrap size="middle">
           <span>时间范围：</span>
           <Segmented
-            value={costTimeRange}
-            onChange={v => setCostTimeRange(v as CostTimeRange)}
+            value={costCustomDateRange != null && costCustomDateRange[0] && costCustomDateRange[1] ? 'custom' : costTimeRange}
+            onChange={v => {
+              const val = v as CostTimeRange;
+              if (val === 'custom') {
+                setCostTimeRange('custom');
+                setCostCustomDateRange(null);
+              } else {
+                setCostCustomDateRange(null);
+                setCostTimeRange(val);
+              }
+            }}
             options={TIME_RANGE_OPTIONS}
           />
           <span style={{ marginLeft: 8 }}>对比：</span>
@@ -333,6 +377,65 @@ const CostOverviewPage: React.FC = () => {
             style={{ width: 140 }}
           />
         </Space>
+        {!useMockData && (costTimeRange === 'custom' || (costCustomDateRange != null && costCustomDateRange[0] && costCustomDateRange[1])) && (
+          <div style={{ marginTop: 12 }}>
+            <span style={{ marginRight: 8 }}>自定义日期（最多 6 个月内）：</span>
+            <DatePicker.RangePicker
+              value={costCustomDateRange?.[0] && costCustomDateRange?.[1] ? [dayjs(costCustomDateRange[0]), dayjs(costCustomDateRange[1])] : null}
+              onChange={(dates: [Dayjs | null, Dayjs | null] | null) => {
+                if (dates?.[0] && dates?.[1]) {
+                  const from = dates[0].format('YYYY-MM-DD');
+                  const to = dates[1].format('YYYY-MM-DD');
+                  if (dates[1].diff(dates[0], 'day') <= 180) {
+                    setCostTimeRange('custom');
+                    setCostCustomDateRange([from, to]);
+                  }
+                } else {
+                  setCostCustomDateRange(null);
+                }
+              }}
+            />
+          </div>
+        )}
+      </Card>
+
+      {/* 四环境卡片 POC/FAT/UAT/PROD [Ref: 01_设计 §按环境展示 D9-4] */}
+      <Card title="按环境总账" style={{ marginBottom: 16 }}>
+        <Row gutter={[16, 16]}>
+          {(['POC', 'FAT', 'UAT', 'PROD'] as const).map(env => {
+            const item = globalCostMetrics?.envBreakdown?.find(e => e.environment === env);
+            const isConfigured = item && (item.account_id || item.total_cost > 0 || item.account_display_name !== '未配置');
+            const displayName = item?.account_display_name ?? '未配置';
+            const totalCost = item?.total_cost ?? 0;
+            const changePct = item?.change_pct;
+            const card = (
+              <Col key={env} xs={24} sm={12} md={6}>
+                <Card
+                  size="small"
+                  title={env}
+                  hoverable={!!isConfigured}
+                  onClick={isConfigured ? () => navigate(`/CostDrilldownEnvPage?env=${env}`) : undefined}
+                  style={{ cursor: isConfigured ? 'pointer' : 'default' }}
+                >
+                  <Statistic
+                    title={displayName}
+                    value={totalCost}
+                    prefix={CURRENCY_SYMBOL}
+                    formatter={value => Number(value).toLocaleString()}
+                    suffix={
+                      changePct != null && !Number.isNaN(changePct) ? (
+                        <span style={{ fontSize: 12, color: changePct >= 0 ? '#ff4d4f' : '#52c41a' }}>
+                          {changePct >= 0 ? '+' : ''}{changePct.toFixed(1)}% 较上期
+                        </span>
+                      ) : null
+                    }
+                  />
+                </Card>
+              </Col>
+            );
+            return card;
+          })}
+        </Row>
       </Card>
 
       <Tabs

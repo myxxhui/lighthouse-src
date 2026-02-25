@@ -26,14 +26,40 @@ type DomainBreakdownItem struct {
 	TopProducts      []ProductCostItem  `json:"top_products,omitempty"` // 成本最高的最多 4 个产品，用于详情与跳转
 }
 
+// GlobalCostMetadata D1-3：数据更新至、来源（聚合表/原始表降级）。
+type GlobalCostMetadata struct {
+	LastUpdatedAt *time.Time `json:"last_updated_at,omitempty"` // 聚合完成时间，前端展示「数据更新至」
+	DataStatus    string     `json:"data_status,omitempty"`      // "aggregate" | "fallback"
+}
+
+// EnvBreakdownItem 按环境（POC/FAT/UAT/PROD）的总账与对比。[Ref: 01_设计 §按环境展示、12_API GlobalCostResponse]
+type EnvBreakdownItem struct {
+	Environment         string   `json:"environment"`
+	AccountID           string   `json:"account_id"`
+	AccountDisplayName  string   `json:"account_display_name"`
+	TotalCost           float64  `json:"total_cost"`
+	PreviousPeriodCost  float64  `json:"previous_period_cost,omitempty"`
+	ChangePct           float64  `json:"change_pct,omitempty"`
+}
+
 // GlobalCostResponse represents the response for global cost overview.
 type GlobalCostResponse struct {
 	TotalCost        float64                 `json:"total_cost"`
 	TotalOptimizable float64                 `json:"total_optimizable"`
 	GlobalEfficiency float64                 `json:"global_efficiency"`
 	DomainBreakdown  []DomainBreakdownItem   `json:"domain_breakdown"`
+	EnvBreakdown     []EnvBreakdownItem       `json:"env_breakdown,omitempty"` // [Ref: 01_设计 D9-4]
 	Namespaces       []NamespaceCostSummary  `json:"namespaces"`
 	Timestamp        time.Time               `json:"timestamp"`
+	Metadata         *GlobalCostMetadata     `json:"metadata,omitempty"`
+}
+
+// EnvDrilldownItem 按环境钻取：云产品维度成本。[Ref: 01_设计 §产品分类与按环境钻取、12_API]
+type EnvDrilldownItem struct {
+	ProductCode string  `json:"product_code"`
+	ProductName string  `json:"product_name,omitempty"`
+	Cost        float64 `json:"cost"`
+	Category    string  `json:"category"` // compute|network|storage|security|other
 }
 
 // NamespaceCostSummary represents a summary of cost for a namespace.

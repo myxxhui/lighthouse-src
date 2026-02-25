@@ -66,6 +66,9 @@ build-backend:
 		          -X main.BuildTime=$(shell date -u +'%Y-%m-%dT%H:%M:%SZ')" \
 		-o bin/lighthouse-server ./cmd/server
 	@echo "✅ 后端构建完成: $(BACKEND_DIR)/bin/lighthouse-server"
+	@mkdir -p $(BACKEND_DIR)/bin
+	cd $(BACKEND_DIR) && CGO_ENABLED=0 GOOS=linux go build -o bin/billing-backfill ./cmd/billing-backfill
+	@echo "✅ 全量回填二进制: $(BACKEND_DIR)/bin/billing-backfill [Ref: D2-6]"
 
 # 构建前端
 build-frontend:

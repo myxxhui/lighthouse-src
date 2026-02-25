@@ -965,6 +965,47 @@ func (m *MockRepository) GetCloudBillSummariesForBillingCycles(ctx context.Conte
 	return out, nil
 }
 
+// [Ref: 06_ 成本云账单三表] 以下为 Mock 占位，满足 Repository 接口。
+func (m *MockRepository) SaveCloudBillDailyRaw(ctx context.Context, r CloudBillDailyRaw) error {
+	return nil
+}
+func (m *MockRepository) GetCloudBillDailyRaw(ctx context.Context, billDate time.Time) (*CloudBillDailyRaw, error) {
+	return nil, nil
+}
+func (m *MockRepository) DeleteCloudBillDailyRawForDate(ctx context.Context, billDate time.Time) error {
+	return nil
+}
+func (m *MockRepository) ListMissingCloudBillDailyDates(ctx context.Context, from, to time.Time) ([]time.Time, error) {
+	return nil, nil
+}
+func (m *MockRepository) SaveCloudBillMonthlyRaw(ctx context.Context, r CloudBillMonthlyRaw) error {
+	return nil
+}
+func (m *MockRepository) GetCloudBillMonthlyRaw(ctx context.Context, billingCycle string) (*CloudBillMonthlyRaw, error) {
+	return nil, nil
+}
+func (m *MockRepository) SaveCloudBillAggregate(ctx context.Context, a CloudBillAggregate) error {
+	return nil
+}
+func (m *MockRepository) GetCloudBillAggregate(ctx context.Context, reportType, periodKey string) (*CloudBillAggregate, error) {
+	return nil, nil
+}
+func (m *MockRepository) DeleteCloudBillAggregateExcept(ctx context.Context, reportType string, keepPeriodKeys []string) error {
+	return nil
+}
+func (m *MockRepository) ListCloudBillDailyRawFromTo(ctx context.Context, from, to time.Time) ([]CloudBillDailyRaw, error) {
+	return nil, nil
+}
+func (m *MockRepository) ListEnvAccountConfig(ctx context.Context) ([]EnvAccountConfig, error) {
+	return nil, nil
+}
+func (m *MockRepository) GetProductCategory(ctx context.Context, productCode string) (string, bool) {
+	return "", false
+}
+func (m *MockRepository) ListCloudBillAggregateForReportPeriod(ctx context.Context, reportType, periodKey string) ([]CloudBillAggregate, error) {
+	return nil, nil
+}
+
 // HealthCheck always returns nil (healthy) for mock repository.
 func (m *MockRepository) HealthCheck(ctx context.Context) error {
 	if m.shouldReturnError() {
@@ -1472,6 +1513,46 @@ func (tr *transactionRepository) GetLatestCloudBillSummaryForBillingCycle(ctx co
 
 func (tr *transactionRepository) GetCloudBillSummariesForBillingCycles(ctx context.Context, billingCycles []string) ([]*CloudBillSummary, error) {
 	return tr.tx.repo.GetCloudBillSummariesForBillingCycles(ctx, billingCycles)
+}
+
+func (tr *transactionRepository) SaveCloudBillDailyRaw(ctx context.Context, r CloudBillDailyRaw) error {
+	return tr.tx.repo.SaveCloudBillDailyRaw(ctx, r)
+}
+func (tr *transactionRepository) GetCloudBillDailyRaw(ctx context.Context, billDate time.Time) (*CloudBillDailyRaw, error) {
+	return tr.tx.repo.GetCloudBillDailyRaw(ctx, billDate)
+}
+func (tr *transactionRepository) DeleteCloudBillDailyRawForDate(ctx context.Context, billDate time.Time) error {
+	return tr.tx.repo.DeleteCloudBillDailyRawForDate(ctx, billDate)
+}
+func (tr *transactionRepository) ListMissingCloudBillDailyDates(ctx context.Context, from, to time.Time) ([]time.Time, error) {
+	return tr.tx.repo.ListMissingCloudBillDailyDates(ctx, from, to)
+}
+func (tr *transactionRepository) SaveCloudBillMonthlyRaw(ctx context.Context, r CloudBillMonthlyRaw) error {
+	return tr.tx.repo.SaveCloudBillMonthlyRaw(ctx, r)
+}
+func (tr *transactionRepository) GetCloudBillMonthlyRaw(ctx context.Context, billingCycle string) (*CloudBillMonthlyRaw, error) {
+	return tr.tx.repo.GetCloudBillMonthlyRaw(ctx, billingCycle)
+}
+func (tr *transactionRepository) SaveCloudBillAggregate(ctx context.Context, a CloudBillAggregate) error {
+	return tr.tx.repo.SaveCloudBillAggregate(ctx, a)
+}
+func (tr *transactionRepository) GetCloudBillAggregate(ctx context.Context, reportType, periodKey string) (*CloudBillAggregate, error) {
+	return tr.tx.repo.GetCloudBillAggregate(ctx, reportType, periodKey)
+}
+func (tr *transactionRepository) DeleteCloudBillAggregateExcept(ctx context.Context, reportType string, keepPeriodKeys []string) error {
+	return tr.tx.repo.DeleteCloudBillAggregateExcept(ctx, reportType, keepPeriodKeys)
+}
+func (tr *transactionRepository) ListCloudBillDailyRawFromTo(ctx context.Context, from, to time.Time) ([]CloudBillDailyRaw, error) {
+	return tr.tx.repo.ListCloudBillDailyRawFromTo(ctx, from, to)
+}
+func (tr *transactionRepository) ListEnvAccountConfig(ctx context.Context) ([]EnvAccountConfig, error) {
+	return tr.tx.repo.ListEnvAccountConfig(ctx)
+}
+func (tr *transactionRepository) GetProductCategory(ctx context.Context, productCode string) (string, bool) {
+	return tr.tx.repo.GetProductCategory(ctx, productCode)
+}
+func (tr *transactionRepository) ListCloudBillAggregateForReportPeriod(ctx context.Context, reportType, periodKey string) ([]CloudBillAggregate, error) {
+	return tr.tx.repo.ListCloudBillAggregateForReportPeriod(ctx, reportType, periodKey)
 }
 
 func (tr *transactionRepository) HealthCheck(ctx context.Context) error {

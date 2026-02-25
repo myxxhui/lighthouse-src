@@ -191,6 +191,254 @@ func (p *PGRepository) GetCloudBillSummariesForBillingCycles(ctx context.Context
 	return out, nil
 }
 
+// --- [Ref: 06_ 成本云账单三表] 日原始、月原始、聚合 ---
+
+func (p *PGRepository) SaveCloudBillDailyRaw(ctx context.Context, r CloudBillDailyRaw) error {
+	d := r.BillDate.Truncate(24 * time.Hour).Format("2006-01-02")
+	js, err := json.Marshal(r.ProductBreakdown)
+	if err != nil {
+		return err
+	}
+	_, err = p.db.ExecContext(ctx,
+		`INSERT INTO cost_cloud_bill_daily_raw (bill_date, total_amount, product_breakdown, snapshot_at, created_at)
+		 VALUES ($1::date, $2, $3, $4, $5)
+		 ON CONFLICT (bill_date) DO UPDATE SET total_amount = EXCLUDED.total_amount, product_breakdown = EXCLUDED.product_breakdown, snapshot_at = EXCLUDED.snapshot_at`,
+		d, r.TotalAmount, js, r.SnapshotAt, r.CreatedAt)
+	return err
+}
+
+func (p *PGRepository) GetCloudBillDailyRaw(ctx context.Context, billDate time.Time) (*CloudBillDailyRaw, error) {
+	d := billDate.Truncate(24 * time.Hour).Format("2006-01-02")
+	var totalAmount float64
+	var breakdown []byte
+	var snapshotAt, createdAt time.Time
+	err := p.db.QueryRowContext(ctx,
+		`SELECT total_amount, product_breakdown, snapshot_at, created_at FROM cost_cloud_bill_daily_raw WHERE bill_date = $1::date`, d).
+		Scan(&totalAmount, &breakdown, &snapshotAt, &createdAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var m map[string]float64
+	if len(breakdown) > 0 {
+		_ = json.Unmarshal(breakdown, &m)
+	}
+	if m == nil {
+		m = make(map[string]float64)
+	}
+	t, _ := time.Parse("2006-01-02", d)
+	return &CloudBillDailyRaw{BillDate: t, TotalAmount: totalAmount, ProductBreakdown: m, SnapshotAt: snapshotAt, CreatedAt: createdAt}, nil
+}
+
+func (p *PGRepository) DeleteCloudBillDailyRawForDate(ctx context.Context, billDate time.Time) error {
+	d := billDate.Truncate(24 * time.Hour).Format("2006-01-02")
+	_, err := p.db.ExecContext(ctx, `DELETE FROM cost_cloud_bill_daily_raw WHERE bill_date = $1::date`, d)
+	return err
+}
+
+func (p *PGRepository) ListMissingCloudBillDailyDates(ctx context.Context, from, to time.Time) ([]time.Time, error) {
+	rows, err := p.db.QueryContext(ctx,
+		`SELECT d::date FROM generate_series($1::date, $2::date, '1 day'::interval) d
+		 LEFT JOIN cost_cloud_bill_daily_raw r ON r.bill_date = d::date WHERE r.bill_date IS NULL ORDER BY 1`,
+		from.Format("2006-01-02"), to.Format("2006-01-02"))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []time.Time
+	for rows.Next() {
+		var d time.Time
+		if err := rows.Scan(&d); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+func (p *PGRepository) SaveCloudBillMonthlyRaw(ctx context.Context, r CloudBillMonthlyRaw) error {
+	js, err := json.Marshal(r.ProductBreakdown)
+	if err != nil {
+		return err
+	}
+	_, err = p.db.ExecContext(ctx,
+		`INSERT INTO cost_cloud_bill_monthly_raw (billing_cycle, total_amount, product_breakdown, snapshot_at, created_at)
+		 VALUES ($1, $2, $3, $4, $5)
+		 ON CONFLICT (billing_cycle) DO UPDATE SET total_amount = EXCLUDED.total_amount, product_breakdown = EXCLUDED.product_breakdown, snapshot_at = EXCLUDED.snapshot_at`,
+		r.BillingCycle, r.TotalAmount, js, r.SnapshotAt, r.CreatedAt)
+	return err
+}
+
+func (p *PGRepository) GetCloudBillMonthlyRaw(ctx context.Context, billingCycle string) (*CloudBillMonthlyRaw, error) {
+	var totalAmount float64
+	var breakdown []byte
+	var snapshotAt, createdAt time.Time
+	err := p.db.QueryRowContext(ctx,
+		`SELECT total_amount, product_breakdown, snapshot_at, created_at FROM cost_cloud_bill_monthly_raw WHERE billing_cycle = $1`, billingCycle).
+		Scan(&totalAmount, &breakdown, &snapshotAt, &createdAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var m map[string]float64
+	if len(breakdown) > 0 {
+		_ = json.Unmarshal(breakdown, &m)
+	}
+	if m == nil {
+		m = make(map[string]float64)
+	}
+	return &CloudBillMonthlyRaw{BillingCycle: billingCycle, TotalAmount: totalAmount, ProductBreakdown: m, SnapshotAt: snapshotAt, CreatedAt: createdAt}, nil
+}
+
+func (p *PGRepository) SaveCloudBillAggregate(ctx context.Context, a CloudBillAggregate) error {
+	js, _ := json.Marshal(a.ProductBreakdown)
+	now := time.Now()
+	_, err := p.db.ExecContext(ctx,
+		`INSERT INTO cost_cloud_bill_aggregate (report_type, period_key, total_amount, product_breakdown, last_success_at, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)
+		 ON CONFLICT (report_type, period_key) DO UPDATE SET total_amount = EXCLUDED.total_amount, product_breakdown = EXCLUDED.product_breakdown, last_success_at = EXCLUDED.last_success_at, updated_at = EXCLUDED.updated_at`,
+		a.ReportType, a.PeriodKey, a.TotalAmount, js, a.LastSuccessAt, now, now)
+	return err
+}
+
+func (p *PGRepository) GetCloudBillAggregate(ctx context.Context, reportType, periodKey string) (*CloudBillAggregate, error) {
+	list, err := p.ListCloudBillAggregateForReportPeriod(ctx, reportType, periodKey)
+	if err != nil || len(list) == 0 {
+		return nil, err
+	}
+	// 单账号时返回唯一一行；多账号时调用方应使用 List 按 env 汇总，此处兼容返回第一行
+	return &list[0], nil
+}
+
+// ListCloudBillAggregateForReportPeriod 返回指定 report_type+period_key 下所有 account 的聚合行。[Ref: 01_设计 §后端数据聚合与存储方案]
+func (p *PGRepository) ListCloudBillAggregateForReportPeriod(ctx context.Context, reportType, periodKey string) ([]CloudBillAggregate, error) {
+	rows, err := p.db.QueryContext(ctx,
+		`SELECT total_amount, product_breakdown, last_success_at, created_at, updated_at, COALESCE(account_id,'') FROM cost_cloud_bill_aggregate WHERE report_type = $1 AND period_key = $2`,
+		reportType, periodKey)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []CloudBillAggregate
+	for rows.Next() {
+		var totalAmount float64
+		var breakdown []byte
+		var lastSuccessAt sql.NullTime
+		var createdAt, updatedAt time.Time
+		var accountID string
+		if err := rows.Scan(&totalAmount, &breakdown, &lastSuccessAt, &createdAt, &updatedAt, &accountID); err != nil {
+			return nil, err
+		}
+		var m map[string]float64
+		if len(breakdown) > 0 {
+			_ = json.Unmarshal(breakdown, &m)
+		}
+		if m == nil {
+			m = make(map[string]float64)
+		}
+		var last *time.Time
+		if lastSuccessAt.Valid {
+			last = &lastSuccessAt.Time
+		}
+		out = append(out, CloudBillAggregate{
+			ReportType:       reportType,
+			PeriodKey:        periodKey,
+			TotalAmount:      totalAmount,
+			ProductBreakdown: m,
+			LastSuccessAt:    last,
+			CreatedAt:        createdAt,
+			UpdatedAt:        updatedAt,
+			AccountID:        accountID,
+		})
+	}
+	return out, rows.Err()
+}
+
+func (p *PGRepository) ListEnvAccountConfig(ctx context.Context) ([]EnvAccountConfig, error) {
+	rows, err := p.db.QueryContext(ctx,
+		`SELECT environment, account_id, COALESCE(display_name,''), COALESCE(sort_order,0), created_at FROM cost_env_account_config ORDER BY sort_order, environment`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []EnvAccountConfig
+	for rows.Next() {
+		var e EnvAccountConfig
+		if err := rows.Scan(&e.Environment, &e.AccountID, &e.DisplayName, &e.SortOrder, &e.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+func (p *PGRepository) GetProductCategory(ctx context.Context, productCode string) (string, bool) {
+	var category string
+	err := p.db.QueryRowContext(ctx, `SELECT category FROM product_category_mapping WHERE product_code = $1`, productCode).Scan(&category)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", false
+		}
+		return "", false
+	}
+	return category, true
+}
+
+func (p *PGRepository) DeleteCloudBillAggregateExcept(ctx context.Context, reportType string, keepPeriodKeys []string) error {
+	if len(keepPeriodKeys) == 0 {
+		_, err := p.db.ExecContext(ctx, `DELETE FROM cost_cloud_bill_aggregate WHERE report_type = $1`, reportType)
+		return err
+	}
+	// keepPeriodKeys 占位构建 IN 子句
+	args := []interface{}{reportType}
+	for _, k := range keepPeriodKeys {
+		args = append(args, k)
+	}
+	placeholders := ""
+	for i := 0; i < len(keepPeriodKeys); i++ {
+		if i > 0 {
+			placeholders += ","
+		}
+		placeholders += fmt.Sprintf("$%d", i+2)
+	}
+	_, err := p.db.ExecContext(ctx, `DELETE FROM cost_cloud_bill_aggregate WHERE report_type = $1 AND period_key NOT IN (`+placeholders+`)`, args...)
+	return err
+}
+
+// ListCloudBillDailyRawFromTo 按日期范围查询日原始表。[Ref: D8-6] 严格按 bill_date 索引（主键）只取 [from,to] 所选日期，单次查询完成，无全表扫描。
+func (p *PGRepository) ListCloudBillDailyRawFromTo(ctx context.Context, from, to time.Time) ([]CloudBillDailyRaw, error) {
+	rows, err := p.db.QueryContext(ctx,
+		`SELECT bill_date, total_amount, product_breakdown, snapshot_at, created_at FROM cost_cloud_bill_daily_raw WHERE bill_date >= $1::date AND bill_date <= $2::date ORDER BY bill_date`,
+		from.Format("2006-01-02"), to.Format("2006-01-02"))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []CloudBillDailyRaw
+	for rows.Next() {
+		var billDate time.Time
+		var totalAmount float64
+		var breakdown []byte
+		var snapshotAt, createdAt time.Time
+		if err := rows.Scan(&billDate, &totalAmount, &breakdown, &snapshotAt, &createdAt); err != nil {
+			return nil, err
+		}
+		var m map[string]float64
+		if len(breakdown) > 0 {
+			_ = json.Unmarshal(breakdown, &m)
+		}
+		if m == nil {
+			m = make(map[string]float64)
+		}
+		out = append(out, CloudBillDailyRaw{BillDate: billDate, TotalAmount: totalAmount, ProductBreakdown: m, SnapshotAt: snapshotAt, CreatedAt: createdAt})
+	}
+	return out, rows.Err()
+}
+
 // --- HealthCheck ---
 
 func (p *PGRepository) HealthCheck(ctx context.Context) error {
@@ -296,6 +544,45 @@ func (r *pgTxRepository) GetLatestCloudBillSummaryForBillingCycle(ctx context.Co
 }
 func (r *pgTxRepository) GetCloudBillSummariesForBillingCycles(ctx context.Context, billingCycles []string) ([]*CloudBillSummary, error) {
 	return r.parent.GetCloudBillSummariesForBillingCycles(ctx, billingCycles)
+}
+func (r *pgTxRepository) SaveCloudBillDailyRaw(ctx context.Context, raw CloudBillDailyRaw) error {
+	return r.parent.SaveCloudBillDailyRaw(ctx, raw)
+}
+func (r *pgTxRepository) GetCloudBillDailyRaw(ctx context.Context, billDate time.Time) (*CloudBillDailyRaw, error) {
+	return r.parent.GetCloudBillDailyRaw(ctx, billDate)
+}
+func (r *pgTxRepository) DeleteCloudBillDailyRawForDate(ctx context.Context, billDate time.Time) error {
+	return r.parent.DeleteCloudBillDailyRawForDate(ctx, billDate)
+}
+func (r *pgTxRepository) ListMissingCloudBillDailyDates(ctx context.Context, from, to time.Time) ([]time.Time, error) {
+	return r.parent.ListMissingCloudBillDailyDates(ctx, from, to)
+}
+func (r *pgTxRepository) SaveCloudBillMonthlyRaw(ctx context.Context, r2 CloudBillMonthlyRaw) error {
+	return r.parent.SaveCloudBillMonthlyRaw(ctx, r2)
+}
+func (r *pgTxRepository) GetCloudBillMonthlyRaw(ctx context.Context, billingCycle string) (*CloudBillMonthlyRaw, error) {
+	return r.parent.GetCloudBillMonthlyRaw(ctx, billingCycle)
+}
+func (r *pgTxRepository) SaveCloudBillAggregate(ctx context.Context, a CloudBillAggregate) error {
+	return r.parent.SaveCloudBillAggregate(ctx, a)
+}
+func (r *pgTxRepository) GetCloudBillAggregate(ctx context.Context, reportType, periodKey string) (*CloudBillAggregate, error) {
+	return r.parent.GetCloudBillAggregate(ctx, reportType, periodKey)
+}
+func (r *pgTxRepository) DeleteCloudBillAggregateExcept(ctx context.Context, reportType string, keepPeriodKeys []string) error {
+	return r.parent.DeleteCloudBillAggregateExcept(ctx, reportType, keepPeriodKeys)
+}
+func (r *pgTxRepository) ListCloudBillDailyRawFromTo(ctx context.Context, from, to time.Time) ([]CloudBillDailyRaw, error) {
+	return r.parent.ListCloudBillDailyRawFromTo(ctx, from, to)
+}
+func (r *pgTxRepository) ListEnvAccountConfig(ctx context.Context) ([]EnvAccountConfig, error) {
+	return r.parent.ListEnvAccountConfig(ctx)
+}
+func (r *pgTxRepository) GetProductCategory(ctx context.Context, productCode string) (string, bool) {
+	return r.parent.GetProductCategory(ctx, productCode)
+}
+func (r *pgTxRepository) ListCloudBillAggregateForReportPeriod(ctx context.Context, reportType, periodKey string) ([]CloudBillAggregate, error) {
+	return r.parent.ListCloudBillAggregateForReportPeriod(ctx, reportType, periodKey)
 }
 func (r *pgTxRepository) HealthCheck(ctx context.Context) error { return r.parent.HealthCheck(ctx) }
 func (r *pgTxRepository) BeginTx(ctx context.Context) (Transaction, error) {

@@ -49,6 +49,25 @@ type Repository interface {
 	// GetCloudBillSummariesForBillingCycles 返回多个账期各自最近一条汇总（用于本季度聚合）
 	GetCloudBillSummariesForBillingCycles(ctx context.Context, billingCycles []string) ([]*CloudBillSummary, error)
 
+	// [Ref: 06_ 成本云账单三表 D2] 日/月原始与聚合表（ETL 五步流水线）
+	SaveCloudBillDailyRaw(ctx context.Context, r CloudBillDailyRaw) error
+	GetCloudBillDailyRaw(ctx context.Context, billDate time.Time) (*CloudBillDailyRaw, error)
+	DeleteCloudBillDailyRawForDate(ctx context.Context, billDate time.Time) error
+	ListMissingCloudBillDailyDates(ctx context.Context, from, to time.Time) ([]time.Time, error)
+	SaveCloudBillMonthlyRaw(ctx context.Context, r CloudBillMonthlyRaw) error
+	GetCloudBillMonthlyRaw(ctx context.Context, billingCycle string) (*CloudBillMonthlyRaw, error)
+	SaveCloudBillAggregate(ctx context.Context, a CloudBillAggregate) error
+	GetCloudBillAggregate(ctx context.Context, reportType, periodKey string) (*CloudBillAggregate, error)
+	// DeleteCloudBillAggregateExcept 删除指定 report_type 下 period_key 不在 keepPeriodKeys 中的行（D8-1 聚合表只保留当前有效 period）
+	DeleteCloudBillAggregateExcept(ctx context.Context, reportType string, keepPeriodKeys []string) error
+	ListCloudBillDailyRawFromTo(ctx context.Context, from, to time.Time) ([]CloudBillDailyRaw, error)
+
+	// [Ref: 01_设计 §环境与云账号配置 D9-3] 环境与产品配置
+	ListEnvAccountConfig(ctx context.Context) ([]EnvAccountConfig, error)
+	GetProductCategory(ctx context.Context, productCode string) (category string, ok bool)
+	// ListCloudBillAggregateForReportPeriod 返回指定 report_type+period_key 下所有 account 的聚合行（多账号时多行），用于按环境汇总 env_breakdown
+	ListCloudBillAggregateForReportPeriod(ctx context.Context, reportType, periodKey string) ([]CloudBillAggregate, error)
+
 	// HealthCheck checks if the database is reachable.
 	HealthCheck(ctx context.Context) error
 
@@ -206,6 +225,52 @@ type CloudBillSummary struct {
 	ProductBreakdown map[string]float64 `json:"product_breakdown"` // domain/category -> amount，用于 domain_breakdown
 	CreatedAt        time.Time       `json:"created_at"`
 	UpdatedAt        time.Time       `json:"updated_at"`
+}
+
+// [Ref: 06_ 成本云账单三表] 日原始表行
+type CloudBillDailyRaw struct {
+	BillDate         time.Time       `json:"bill_date"`
+	TotalAmount      float64         `json:"total_amount"`
+	ProductBreakdown map[string]float64 `json:"product_breakdown"`
+	SnapshotAt       time.Time       `json:"snapshot_at"`
+	CreatedAt        time.Time       `json:"created_at"`
+}
+
+// [Ref: 06_ 成本云账单三表] 月原始表行
+type CloudBillMonthlyRaw struct {
+	BillingCycle     string          `json:"billing_cycle"`
+	TotalAmount      float64         `json:"total_amount"`
+	ProductBreakdown map[string]float64 `json:"product_breakdown"`
+	SnapshotAt       time.Time       `json:"snapshot_at"`
+	CreatedAt        time.Time       `json:"created_at"`
+}
+
+// [Ref: 06_ 成本云账单三表] 聚合表行；多账号时主键含 account_id，单账号时 AccountID 为空
+type CloudBillAggregate struct {
+	ReportType       string            `json:"report_type"`
+	PeriodKey        string            `json:"period_key"`
+	TotalAmount      float64           `json:"total_amount"`
+	ProductBreakdown map[string]float64 `json:"product_breakdown"`
+	LastSuccessAt    *time.Time        `json:"last_success_at"`
+	CreatedAt        time.Time         `json:"created_at"`
+	UpdatedAt        time.Time         `json:"updated_at"`
+	AccountID        string            `json:"account_id,omitempty"` // 多账号时必填；单账号为 "" 或 NULL
+}
+
+// EnvAccountConfig 环境与云账号映射（cost_env_account_config）。[Ref: 01_设计 §环境与云账号配置]
+type EnvAccountConfig struct {
+	Environment  string    `json:"environment"`  // POC|FAT|UAT|PROD
+	AccountID    string    `json:"account_id"`
+	DisplayName  string    `json:"display_name"`
+	SortOrder    int       `json:"sort_order"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+// ProductCategoryMapping 云产品与成本分类（product_category_mapping）。[Ref: 01_设计 §产品分类与按环境钻取]
+type ProductCategoryMapping struct {
+	ProductCode string    `json:"product_code"`
+	Category    string    `json:"category"` // compute|network|storage|security
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 // BillAccountSummary 云账户总账单汇总（表 cost_bill_account_summary）。Phase3 Mock 占位。

@@ -3,6 +3,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -99,6 +100,8 @@ func (s *HTTPServer) registerCostRoutes(group *gin.RouterGroup) {
 	group.GET("/namespaces", s.listNamespaces)
 	// Namespace cost
 	group.GET("/namespace/:namespace", s.namespaceCost)
+	// 按环境云产品钻取 [Ref: 01_设计 D9-4、12_API]
+	group.GET("/drilldown/env/:envId", s.drilldownEnvCost)
 	// Drilldown
 	group.GET("/drilldown/:level/:identifier", s.drilldownCost)
 }
@@ -122,12 +125,44 @@ func (s *HTTPServer) healthCheck(c *gin.Context) {
 	})
 }
 
-// globalCost handles GET /api/v1/cost/global?period=1d|7d|30d|month|quarter
+// globalCost handles GET /api/v1/cost/global?period=1d|7d|30d|month|quarter 或 date_from=YYYY-MM-DD&date_to=YYYY-MM-DD（D8-2 自定义日期，从日原始表叠加 [Ref: 04_01_成本透视真实数据]）
 func (s *HTTPServer) globalCost(c *gin.Context) {
+	dateFrom := c.Query("date_from")
+	dateTo := c.Query("date_to")
+	if dateFrom != "" && dateTo != "" && s.costService != nil {
+		from, err1 := time.Parse("2006-01-02", dateFrom)
+		to, err2 := time.Parse("2006-01-02", dateTo)
+		if err1 == nil && err2 == nil {
+			resp, err := s.costService.GetGlobalCostByDateRange(c.Request.Context(), from, to)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			// 自定义日期路径：有数据返回 resp，无数据返回空结构，不回退到 period
+			if resp != nil {
+				c.JSON(http.StatusOK, resp)
+			} else {
+				c.JSON(http.StatusOK, gin.H{
+					"total_cost":        0,
+					"total_optimizable": 0,
+					"global_efficiency": 0,
+					"domain_breakdown":  []interface{}{},
+					"namespaces":         nil,
+					"timestamp":         time.Now().UTC(),
+				})
+			}
+			return
+		}
+	}
 	period := c.DefaultQuery("period", "month")
 	if s.costService != nil {
 		resp, err := s.costService.GetGlobalCost(c.Request.Context(), period)
 		if err != nil {
+			// D1-4：降级查询超时返回 503
+			if errors.Is(err, service.ErrFallbackTimeout) {
+				c.JSON(http.StatusServiceUnavailable, gin.H{"error": "cost fallback query timeout"})
+				return
+			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
@@ -196,6 +231,32 @@ var typeToLevel = map[string]string{
 // levelToType maps backend level to frontend type
 var levelToType = map[string]string{
 	"L1": "namespace", "L2": "node", "L3": "workload", "L4": "pod",
+}
+
+// drilldownEnvCost handles GET /api/v1/cost/drilldown/env/:envId?report_type=&period_key=&category=&sort=
+func (s *HTTPServer) drilldownEnvCost(c *gin.Context) {
+	envId := c.Param("envId")
+	reportType := c.DefaultQuery("report_type", "30d")
+	periodKey := c.Query("period_key")
+	if periodKey == "" {
+		now := time.Now().UTC()
+		periodKey = now.Format("2006-01-02")
+	}
+	category := c.Query("category")
+	sortOrder := c.DefaultQuery("sort", "cost_desc")
+	if s.costService != nil {
+		list, err := s.costService.GetEnvDrilldown(c.Request.Context(), envId, reportType, periodKey, category, sortOrder)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if list == nil {
+			list = []dto.EnvDrilldownItem{}
+		}
+		c.JSON(http.StatusOK, list)
+		return
+	}
+	c.JSON(http.StatusOK, []dto.EnvDrilldownItem{})
 }
 
 // drilldownCost handles GET /api/v1/cost/drilldown/:level/:identifier

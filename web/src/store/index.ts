@@ -44,6 +44,8 @@ interface AppState {
   // 成本透视时间与对比
   costTimeRange: CostTimeRange;
   costCompareMode: CostCompareMode;
+  /** D8-5：自定义日期范围 [date_from, date_to] YYYY-MM-DD，最多 6 个月内；非空时请求使用 date_from/date_to */
+  costCustomDateRange: [string, string] | null;
 
   // 应用状态
   useMockData: boolean;
@@ -67,6 +69,7 @@ interface AppState {
   fetchROITrends: () => Promise<void>;
   setCostTimeRange: (range: CostTimeRange) => void;
   setCostCompareMode: (mode: CostCompareMode) => void;
+  setCostCustomDateRange: (range: [string, string] | null) => void;
   setUseMockData: (useMock: boolean) => void;
   setSelectedNamespace: (namespace: string | null) => void;
   setSelectedNode: (node: string | null) => void;
@@ -103,7 +106,7 @@ export const useAppStore = create<AppState>()(
 
       costTimeRange: '30d',
       costCompareMode: 'none',
-      // [Ref: 04_Phase4/01_成本透视真实数据] 默认使用真实云 API 与数据库数据；仅无真实数据源时可手动开启 Mock
+      costCustomDateRange: null,
       useMockData: false,
       selectedDimension: 'compute',
       selectedNamespace: null,
@@ -113,16 +116,33 @@ export const useAppStore = create<AppState>()(
 
       // Actions
       fetchGlobalCostMetrics: async () => {
-        const { useMockData, costTimeRange, costCompareMode } = get();
+        const { useMockData, costTimeRange, costCompareMode, costCustomDateRange } = get();
         set({ loadingGlobalMetrics: true, errorGlobalMetrics: null });
 
         try {
-          const data = useMockData
-            ? await mockApi.getGlobalCostMetrics({ period: costTimeRange, compareMode: costCompareMode })
-            : await costService.getGlobalCostMetrics({ period: costTimeRange, compareMode: costCompareMode });
+          let data: CostMetrics;
+          const effectivePeriod = costTimeRange === 'custom' ? '30d' : costTimeRange;
+          if (useMockData) {
+            data = await mockApi.getGlobalCostMetrics({ period: effectivePeriod, compareMode: costCompareMode });
+          } else if (costTimeRange === 'custom' && costCustomDateRange != null && costCustomDateRange[0] && costCustomDateRange[1]) {
+            data = await costService.getGlobalCostMetrics({
+              date_from: costCustomDateRange[0],
+              date_to: costCustomDateRange[1],
+            });
+          } else {
+            data = await costService.getGlobalCostMetrics({ period: effectivePeriod, compareMode: costCompareMode });
+          }
           set({ globalCostMetrics: data, loadingGlobalMetrics: false });
         } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : '获取全局成本指标失败';
+          // D8-8：日期选择请求超时提示重试或缩小范围
+          const isTimeout =
+            (error as { code?: string })?.code === 'ECONNABORTED' ||
+            (error instanceof Error && error.message?.toLowerCase().includes('timeout'));
+          const errorMessage = isTimeout
+            ? '请求超时，请重试或缩小日期范围'
+            : error instanceof Error
+              ? error.message
+              : '获取全局成本指标失败';
           set({ errorGlobalMetrics: errorMessage, loadingGlobalMetrics: false });
         }
       },
@@ -130,11 +150,12 @@ export const useAppStore = create<AppState>()(
       fetchNamespaceCosts: async () => {
         const { useMockData, costTimeRange } = get();
         set({ loadingNamespaceCosts: true, errorNamespaceCosts: null });
+        const effectivePeriod = costTimeRange === 'custom' ? '30d' : costTimeRange;
 
         try {
           const data = useMockData
-            ? await mockApi.getNamespaceCosts({ period: costTimeRange })
-            : await costService.getNamespaceCosts({ period: costTimeRange });
+            ? await mockApi.getNamespaceCosts({ period: effectivePeriod })
+            : await costService.getNamespaceCosts({ period: effectivePeriod });
           set({ namespaceCosts: data, loadingNamespaceCosts: false });
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : '获取命名空间成本失败';
@@ -220,6 +241,10 @@ export const useAppStore = create<AppState>()(
 
       setCostCompareMode: mode => {
         set({ costCompareMode: mode });
+      },
+
+      setCostCustomDateRange: range => {
+        set({ costCustomDateRange: range });
       },
 
       setUseMockData: useMock => {

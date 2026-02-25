@@ -19,23 +19,39 @@ import {
   type DrilldownApiResponse,
 } from '@/adapters/apiAdapter';
 
+export interface EnvDrilldownApiItem {
+  product_code: string;
+  product_name?: string;
+  cost: number;
+  category: string;
+}
+
 const COST_API_PREFIX = '/v1/cost';
 
 export interface CostQueryParams {
   period?: CostTimeRange;
   compareMode?: CostCompareMode;
+  /** D8-2/D8-5：日期选择，最多最近 6 个月内 */
+  date_from?: string;
+  date_to?: string;
 }
 
 export const costService = {
-  // 获取全域成本透视数据（通过适配层转换为前端类型）
+  /** D8-8：日期选择请求超时 25s，常规 period 请求用默认超时 */
+  DATE_RANGE_REQUEST_TIMEOUT_MS: 25000,
+
   async getGlobalCostMetrics(params?: CostQueryParams): Promise<CostMetrics> {
     try {
-      const query = params
-        ? { period: params.period, compareMode: params.compareMode }
-        : {};
-      const response = await apiClient.get<GlobalCostApiResponse>(`${COST_API_PREFIX}/global`, {
-        params: query,
-      });
+      const query: Record<string, string | undefined> = {};
+      if (params?.period != null) query.period = params.period;
+      if (params?.compareMode != null) query.compareMode = params.compareMode;
+      if (params?.date_from != null) query.date_from = params.date_from;
+      if (params?.date_to != null) query.date_to = params.date_to;
+      const config: { params: Record<string, string | undefined>; timeout?: number } = { params: query };
+      if (params?.date_from != null && params?.date_to != null) {
+        config.timeout = costService.DATE_RANGE_REQUEST_TIMEOUT_MS;
+      }
+      const response = await apiClient.get<GlobalCostApiResponse>(`${COST_API_PREFIX}/global`, config);
       return adaptGlobalCostToCostMetrics(response.data);
     } catch (error) {
       console.error('Failed to fetch global cost metrics:', error);
@@ -58,6 +74,23 @@ export const costService = {
       console.error('Failed to fetch namespace costs:', error);
       throw error;
     }
+  },
+
+  /** 按环境云产品钻取 [Ref: 01_设计 D9-4] GET /api/v1/cost/drilldown/env/:envId */
+  async getEnvDrilldown(
+    envId: string,
+    params?: { report_type?: string; period_key?: string; category?: string; sort?: string },
+  ): Promise<EnvDrilldownApiItem[]> {
+    const query: Record<string, string> = {};
+    if (params?.report_type) query.report_type = params.report_type;
+    if (params?.period_key) query.period_key = params.period_key;
+    if (params?.category) query.category = params.category;
+    if (params?.sort) query.sort = params.sort;
+    const response = await apiClient.get<EnvDrilldownApiItem[]>(
+      `${COST_API_PREFIX}/drilldown/env/${encodeURIComponent(envId)}`,
+      { params: query },
+    );
+    return Array.isArray(response.data) ? response.data : [];
   },
 
   // 获取钻取数据（dimension=compute|storage|network，未传默认 compute）

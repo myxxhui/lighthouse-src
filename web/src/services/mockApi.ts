@@ -10,9 +10,9 @@ import {
   ResourceDimension,
 } from '@/types';
 
-// 按时间范围生成确定性的基准倍数（用于区分 1d/7d/30d/month/quarter 数据差异）
-const periodMultipliers: Record<CostTimeRange, { cost: number; optim: number; efficiency: number }> = {
-  '1d': { cost: 1 / 30, optim: 1 / 30, efficiency: 66 },    // 当天：约 1/30 月成本
+// 按时间范围生成确定性的基准倍数（用于区分 1d/7d/30d/month/quarter 数据差异）；custom 按 30d 处理
+const periodMultipliers: Record<Exclude<CostTimeRange, 'custom'>, { cost: number; optim: number; efficiency: number }> = {
+  '1d': { cost: 1 / 30, optim: 1 / 30, efficiency: 66 },    // 昨天：约 1/30 月成本
   '7d': { cost: 0.25, optim: 0.28, efficiency: 68 },       // 近7天：约 1/4 月成本
   '30d': { cost: 1, optim: 1, efficiency: 70 },           // 近30天：基准
   'month': { cost: 1.05, optim: 1.02, efficiency: 71 },    // 本月：略高于30天

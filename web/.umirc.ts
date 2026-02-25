@@ -19,6 +19,7 @@ export default defineConfig({
         { path: '/', redirect: '/CostOverviewPage' },
         { path: '/CostOverviewPage', component: '@/pages/CostOverviewPage' },
         { path: '/DrilldownPage', component: '@/pages/DrilldownPage' },
+        { path: '/CostDrilldownEnvPage', component: '@/pages/CostDrilldownEnvPage' },
         { path: '/SLODashboard', component: '@/pages/SLODashboard' },
         { path: '/ROIDashboard', redirect: '/CostOverviewPage?tab=roi' },
         { path: '/PreventionPage', component: '@/pages/PreventionPage' },

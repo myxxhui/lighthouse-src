@@ -4,6 +4,7 @@ import {
   DomainBreakdown,
   DrilldownItem,
   DrilldownCostBreakdown,
+  EnvBreakdownItem,
 } from '@/types';
 
 /**
@@ -14,8 +15,19 @@ export interface GlobalCostApiResponse {
   total_optimizable?: number;
   global_efficiency?: number;
   domain_breakdown?: DomainBreakdownApiItem[];
+  env_breakdown?: EnvBreakdownApiItem[];
   namespaces: NamespaceCostSummaryApiItem[];
   timestamp: string;
+  metadata?: { last_updated_at?: string; data_status?: string };
+}
+
+export interface EnvBreakdownApiItem {
+  environment: string;
+  account_id: string;
+  account_display_name: string;
+  total_cost: number;
+  previous_period_cost?: number;
+  change_pct?: number;
 }
 
 export interface DomainBreakdownApiItem {
@@ -65,11 +77,23 @@ export function adaptGlobalCostToCostMetrics(res: GlobalCostApiResponse): CostMe
       efficiency: gradeToEfficiency(n.grade ?? 'Healthy'),
     }));
 
+  const lastUpdatedAt =
+    res.metadata?.last_updated_at != null ? res.metadata.last_updated_at : undefined;
+  const envBreakdown: EnvBreakdownItem[] | undefined = res.env_breakdown?.map((e) => ({
+    environment: e.environment,
+    account_id: e.account_id,
+    account_display_name: e.account_display_name,
+    total_cost: e.total_cost,
+    previous_period_cost: e.previous_period_cost,
+    change_pct: e.change_pct,
+  }));
   return {
     totalBillableCost: res.total_cost,
     totalOptimizableSpace: totalOptimizable,
     globalEfficiency,
     domainBreakdown,
+    envBreakdown,
+    lastUpdatedAt,
   };
 }
 

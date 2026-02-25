@@ -1,5 +1,5 @@
-/** 成本透视时间范围 */
-export type CostTimeRange = '1d' | '7d' | '30d' | 'month' | 'quarter';
+/** 成本透视时间范围；'custom' 表示使用自定义日期范围（与 costCustomDateRange 二选一） */
+export type CostTimeRange = '1d' | '7d' | '30d' | 'month' | 'quarter' | 'custom';
 
 /** 成本对比模式 */
 export type CostCompareMode = 'none' | 'previous';
@@ -23,19 +23,31 @@ export interface DrilldownCostBreakdown {
   network: number;
 }
 
+/** 按环境（POC/FAT/UAT/PROD）总账与对比 [Ref: 01_设计 D9-4] */
+export interface EnvBreakdownItem {
+  environment: string;
+  account_id: string;
+  account_display_name: string;
+  total_cost: number;
+  previous_period_cost?: number;
+  change_pct?: number;
+}
+
 export interface CostMetrics {
   totalBillableCost: number;
-  totalOptimizableSpace: number; // 使用"可优化空间"代替"浪费"
+  totalOptimizableSpace: number;
   globalEfficiency: number;
   domainBreakdown: DomainBreakdown[];
-  /** 可选：按资源类型的账单详情（基础计算、存储、网络、其它云产品） */
+  /** 四环境卡片数据 [Ref: 01_设计 §按环境展示] */
+  envBreakdown?: EnvBreakdownItem[];
   billDetail?: BillDetail;
-  /** 可选：对比上一周期时的基准值（用于展示环比） */
   previousPeriod?: {
     totalBillableCost: number;
     totalOptimizableSpace: number;
     globalEfficiency: number;
   };
+  /** D1-3：数据更新至，前端展示「数据更新至 YYYY-MM-DD HH:mm」 */
+  lastUpdatedAt?: string;
 }
 
 /** 产品级成本（账单详情 top-N 与详情跳转） */
