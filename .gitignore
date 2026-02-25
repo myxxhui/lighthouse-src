@@ -1,4 +1,15 @@
 node_modules/
+**/node_modules/
+
+# Go 编译产物与测试覆盖率
+/server
+coverage.out
+*.test
+*.exe
+
+# 前端构建产物
+dist/
+**/dist/
 
 # Umi 构建/缓存，含可能泄露的 token，禁止提交
 .umi/
