@@ -1,1 +1,7 @@
 node_modules/
+
+# Umi 构建/缓存，含可能泄露的 token，禁止提交
+.umi/
+.umi-production/
+**/.umi/
+**/.umi-production/
