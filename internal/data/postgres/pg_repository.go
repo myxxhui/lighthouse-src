@@ -199,11 +199,15 @@ func (p *PGRepository) SaveCloudBillDailyRaw(ctx context.Context, r CloudBillDai
 	if err != nil {
 		return err
 	}
+	var accID interface{} = r.AccountID
+	if r.AccountID == "" {
+		accID = nil
+	}
 	_, err = p.db.ExecContext(ctx,
-		`INSERT INTO cost_cloud_bill_daily_raw (bill_date, total_amount, product_breakdown, snapshot_at, created_at)
-		 VALUES ($1::date, $2, $3, $4, $5)
-		 ON CONFLICT (bill_date) DO UPDATE SET total_amount = EXCLUDED.total_amount, product_breakdown = EXCLUDED.product_breakdown, snapshot_at = EXCLUDED.snapshot_at`,
-		d, r.TotalAmount, js, r.SnapshotAt, r.CreatedAt)
+		`INSERT INTO cost_cloud_bill_daily_raw (bill_date, total_amount, product_breakdown, snapshot_at, created_at, account_id)
+		 VALUES ($1::date, $2, $3, $4, $5, $6)
+		 ON CONFLICT (bill_date) DO UPDATE SET total_amount = EXCLUDED.total_amount, product_breakdown = EXCLUDED.product_breakdown, snapshot_at = EXCLUDED.snapshot_at, account_id = EXCLUDED.account_id`,
+		d, r.TotalAmount, js, r.SnapshotAt, r.CreatedAt, accID)
 	return err
 }
 
@@ -263,11 +267,15 @@ func (p *PGRepository) SaveCloudBillMonthlyRaw(ctx context.Context, r CloudBillM
 	if err != nil {
 		return err
 	}
+	var accID interface{} = r.AccountID
+	if r.AccountID == "" {
+		accID = nil
+	}
 	_, err = p.db.ExecContext(ctx,
-		`INSERT INTO cost_cloud_bill_monthly_raw (billing_cycle, total_amount, product_breakdown, snapshot_at, created_at)
-		 VALUES ($1, $2, $3, $4, $5)
-		 ON CONFLICT (billing_cycle) DO UPDATE SET total_amount = EXCLUDED.total_amount, product_breakdown = EXCLUDED.product_breakdown, snapshot_at = EXCLUDED.snapshot_at`,
-		r.BillingCycle, r.TotalAmount, js, r.SnapshotAt, r.CreatedAt)
+		`INSERT INTO cost_cloud_bill_monthly_raw (billing_cycle, total_amount, product_breakdown, snapshot_at, created_at, account_id)
+		 VALUES ($1, $2, $3, $4, $5, $6)
+		 ON CONFLICT (billing_cycle) DO UPDATE SET total_amount = EXCLUDED.total_amount, product_breakdown = EXCLUDED.product_breakdown, snapshot_at = EXCLUDED.snapshot_at, account_id = EXCLUDED.account_id`,
+		r.BillingCycle, r.TotalAmount, js, r.SnapshotAt, r.CreatedAt, accID)
 	return err
 }
 
@@ -297,11 +305,15 @@ func (p *PGRepository) GetCloudBillMonthlyRaw(ctx context.Context, billingCycle 
 func (p *PGRepository) SaveCloudBillAggregate(ctx context.Context, a CloudBillAggregate) error {
 	js, _ := json.Marshal(a.ProductBreakdown)
 	now := time.Now()
+	var accID interface{} = a.AccountID
+	if a.AccountID == "" {
+		accID = nil
+	}
 	_, err := p.db.ExecContext(ctx,
-		`INSERT INTO cost_cloud_bill_aggregate (report_type, period_key, total_amount, product_breakdown, last_success_at, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)
-		 ON CONFLICT (report_type, period_key) DO UPDATE SET total_amount = EXCLUDED.total_amount, product_breakdown = EXCLUDED.product_breakdown, last_success_at = EXCLUDED.last_success_at, updated_at = EXCLUDED.updated_at`,
-		a.ReportType, a.PeriodKey, a.TotalAmount, js, a.LastSuccessAt, now, now)
+		`INSERT INTO cost_cloud_bill_aggregate (report_type, period_key, total_amount, product_breakdown, last_success_at, created_at, updated_at, account_id)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		 ON CONFLICT (report_type, period_key) DO UPDATE SET total_amount = EXCLUDED.total_amount, product_breakdown = EXCLUDED.product_breakdown, last_success_at = EXCLUDED.last_success_at, updated_at = EXCLUDED.updated_at, account_id = EXCLUDED.account_id`,
+		a.ReportType, a.PeriodKey, a.TotalAmount, js, a.LastSuccessAt, now, now, accID)
 	return err
 }
 

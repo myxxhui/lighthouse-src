@@ -21,8 +21,14 @@ type CloudBillingConfig struct {
 type aliCloudFetcher struct{ inner *aliyun.Fetcher }
 
 func (a *aliCloudFetcher) FetchAccountSummary(ctx context.Context, req FetchAccountSummaryRequest) (*FetchAccountSummaryResponse, error) {
-	// BillingCycle 如 "2025-01"；空时 aliyun 使用当前月
-	res, err := a.inner.FetchBillOverview(ctx, req.BillingCycle)
+	// [Ref: 01_设计 §拉取粒度与落表] day → QueryAccountBill DAILY(BillingDate)；month → QueryBillOverview(BillingCycle)
+	var res *aliyun.BillOverviewResult
+	var err error
+	if req.PeriodType == "day" && req.BillingCycle != "" {
+		res, err = a.inner.FetchBillOverviewByDay(ctx, req.BillingCycle)
+	} else {
+		res, err = a.inner.FetchBillOverview(ctx, req.BillingCycle)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -44,7 +50,7 @@ func (a *aliCloudFetcher) FetchAccountSummary(ctx context.Context, req FetchAcco
 	}, nil
 }
 
-// NewFetcher 根据配置返回 CloudBillingFetcher 实现。aliyun 时从环境变量读取凭证；无凭证或未实现时返回 nil。
+// NewFetcher 根据配置返回 CloudBillingFetcher 实现。aliyun 时从环境变量读取凭证（无后缀）；无凭证或未实现时返回 nil。
 func NewFetcher(cfg CloudBillingConfig) CloudBillingFetcher {
 	switch cfg.Provider {
 	case "aliyun":
@@ -56,4 +62,16 @@ func NewFetcher(cfg CloudBillingConfig) CloudBillingFetcher {
 	default:
 		return nil
 	}
+}
+
+// NewFetcherForEnv 按环境名（POC/FAT/UAT/PROD）从环境变量 ALIBABA_CLOUD_ACCESS_KEY_ID_<env>/SECRET_<env> 创建 Fetcher。[Ref: 01_实践 §3.3(3a) 多账号]
+func NewFetcherForEnv(environment string) CloudBillingFetcher {
+	if environment == "" {
+		return nil
+	}
+	f, ok := aliyun.NewFetcherForEnv(environment)
+	if !ok {
+		return nil
+	}
+	return &aliCloudFetcher{inner: f}
 }

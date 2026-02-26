@@ -229,20 +229,22 @@ type CloudBillSummary struct {
 
 // [Ref: 06_ 成本云账单三表] 日原始表行
 type CloudBillDailyRaw struct {
-	BillDate         time.Time       `json:"bill_date"`
-	TotalAmount      float64         `json:"total_amount"`
+	BillDate         time.Time         `json:"bill_date"`
+	TotalAmount      float64           `json:"total_amount"`
 	ProductBreakdown map[string]float64 `json:"product_breakdown"`
-	SnapshotAt       time.Time       `json:"snapshot_at"`
-	CreatedAt        time.Time       `json:"created_at"`
+	SnapshotAt       time.Time         `json:"snapshot_at"`
+	CreatedAt        time.Time         `json:"created_at"`
+	AccountID        string            `json:"account_id,omitempty"` // 多账号/按环境时填写，与 cost_env_account_config 对应
 }
 
 // [Ref: 06_ 成本云账单三表] 月原始表行
 type CloudBillMonthlyRaw struct {
-	BillingCycle     string          `json:"billing_cycle"`
-	TotalAmount      float64         `json:"total_amount"`
+	BillingCycle     string            `json:"billing_cycle"`
+	TotalAmount      float64           `json:"total_amount"`
 	ProductBreakdown map[string]float64 `json:"product_breakdown"`
-	SnapshotAt       time.Time       `json:"snapshot_at"`
-	CreatedAt        time.Time       `json:"created_at"`
+	SnapshotAt       time.Time         `json:"snapshot_at"`
+	CreatedAt        time.Time         `json:"created_at"`
+	AccountID        string            `json:"account_id,omitempty"` // 多账号/按环境时填写
 }
 
 // [Ref: 06_ 成本云账单三表] 聚合表行；多账号时主键含 account_id，单账号时 AccountID 为空

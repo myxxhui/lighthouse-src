@@ -20,7 +20,8 @@ const (
 	envAccessKeyID         = "ALIBABA_CLOUD_ACCESS_KEY_ID"
 	envAccessKeySecret     = "ALIBABA_CLOUD_ACCESS_KEY_SECRET"
 	envBillingEndpoint     = "ALIBABA_CLOUD_BILLING_ENDPOINT" // 可选；国际站填 business.ap-southeast-1.aliyuncs.com
-	defaultBillingEndpoint = "business.aliyuncs.com"          // 中国站
+	envBillingEndpointAlt  = "CLOUD_BILLING_ENDPOINT"         // 与设计/实践文档一致
+	defaultBillingEndpoint = "business.aliyuncs.com"         // 中国站
 	maxRetries             = 3
 	baseBackoff            = time.Second
 	circuitFailThreshold   = 5
@@ -81,6 +82,43 @@ func NewFetcher(endpoint string) (*Fetcher, bool) {
 	c, err := client.NewClient(cfg)
 	if err != nil {
 		slog.Warn("aliyun billing: NewClient failed", "error", err)
+		return nil, false
+	}
+	return &Fetcher{bssClient: c}, true
+}
+
+// NewFetcherForEnv 按环境名（POC/FAT/UAT/PROD）从环境变量读取 AK/SK 创建 Fetcher。[Ref: 01_实践 §3.3(3a) 变量后缀使用环境名]
+// 变量名：ALIBABA_CLOUD_ACCESS_KEY_ID_<env>、ALIBABA_CLOUD_ACCESS_KEY_SECRET_<env>；可选 CLOUD_BILLING_ENDPOINT_<env>。
+func NewFetcherForEnv(environment string) (*Fetcher, bool) {
+	if environment == "" {
+		return nil, false
+	}
+	ak := os.Getenv(envAccessKeyID + "_" + environment)
+	sk := os.Getenv(envAccessKeySecret + "_" + environment)
+	if ak == "" || sk == "" {
+		return nil, false
+	}
+	endpoint := os.Getenv(envBillingEndpointAlt + "_" + environment)
+	if endpoint == "" {
+		endpoint = os.Getenv(envBillingEndpoint + "_" + environment)
+	}
+	if endpoint == "" {
+		endpoint = os.Getenv(envBillingEndpointAlt)
+	}
+	if endpoint == "" {
+		endpoint = os.Getenv(envBillingEndpoint)
+	}
+	if endpoint == "" {
+		endpoint = defaultBillingEndpoint
+	}
+	cfg := &openapi.Config{
+		AccessKeyId:     tea.String(ak),
+		AccessKeySecret: tea.String(sk),
+		Endpoint:        tea.String(endpoint),
+	}
+	c, err := client.NewClient(cfg)
+	if err != nil {
+		slog.Warn("aliyun billing: NewFetcherForEnv failed", "environment", environment, "error", err)
 		return nil, false
 	}
 	return &Fetcher{bssClient: c}, true
@@ -203,6 +241,90 @@ func (f *Fetcher) queryBillOverview(ctx context.Context, billingCycle string) (*
 		TotalAmount:  total,
 		ByCategory:   byCategory,
 		Items:        items,
+		Currency:     "CNY",
+	}, nil
+}
+
+// FetchBillOverviewByDay 按自然日拉取账单汇总（QueryAccountBill Granularity=DAILY，分页拉全）。[Ref: 01_设计 §拉取粒度与落表、15_]
+// billingDate 格式 YYYY-MM-DD。返回与 FetchBillOverview 同结构的 BillOverviewResult，BillingCycle 字段设为 billingDate。
+func (f *Fetcher) FetchBillOverviewByDay(ctx context.Context, billingDate string) (*BillOverviewResult, error) {
+	f.mu.Lock()
+	if time.Now().Before(f.circuitOpenUntil) {
+		f.mu.Unlock()
+		return nil, ErrCircuitOpen
+	}
+	f.mu.Unlock()
+
+	// 阿里云 API：BillingCycle 为必填；日粒度时需同时传 BillingDate(YYYY-MM-DD) 与 BillingCycle(YYYY-MM)
+	billingCycle := billingDate
+	if len(billingDate) >= 7 {
+		billingCycle = billingDate[:7]
+	}
+	pageSize := int32(300)
+	pageNum := int32(1)
+	var totalAmount float64
+	byCategory := make(map[string]float64)
+	var allItems []BillItemResult
+	for {
+		req := &client.QueryAccountBillRequest{
+			BillingCycle:      tea.String(billingCycle),
+			BillingDate:       tea.String(billingDate),
+			Granularity:       tea.String("DAILY"),
+			IsGroupByProduct:  tea.Bool(true),
+			PageNum:           tea.Int32(pageNum),
+			PageSize:          tea.Int32(pageSize),
+		}
+		resp, err := f.bssClient.QueryAccountBillWithOptions(req, &service.RuntimeOptions{})
+		if err != nil {
+			slog.Warn("aliyun billing: QueryAccountBill failed", "billing_date", billingDate, "page", pageNum, "error", err)
+			return nil, err
+		}
+		if resp == nil || resp.Body == nil || resp.Body.Data == nil {
+			break
+		}
+		data := resp.Body.Data
+		if data.Items == nil || len(data.Items.Item) == 0 {
+			break
+		}
+		for _, it := range data.Items.Item {
+			amount := 0.0
+			if it.PretaxAmount != nil {
+				amount = float64(*it.PretaxAmount)
+			}
+			totalAmount += amount
+			codeStr := "OTHER"
+			if it.PipCode != nil && *it.PipCode != "" {
+				codeStr = strings.ToUpper(strings.TrimSpace(*it.PipCode))
+				domain := "其它"
+				if d, ok := productCodeToDomain[strings.ToLower(*it.PipCode)]; ok {
+					domain = d
+				}
+				byCategory[domain] += amount
+				allItems = append(allItems, BillItemResult{ProductCode: codeStr, Amount: amount, Domain: domain})
+			} else {
+				byCategory["其它"] += amount
+				allItems = append(allItems, BillItemResult{ProductCode: codeStr, Amount: amount, Domain: "其它"})
+			}
+		}
+		total := int32(0)
+		if data.TotalCount != nil {
+			total = *data.TotalCount
+		}
+		if int(pageNum)*int(pageSize) >= int(total) {
+			break
+		}
+		pageNum++
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+	}
+	return &BillOverviewResult{
+		BillingCycle: billingDate,
+		TotalAmount:  totalAmount,
+		ByCategory:   byCategory,
+		Items:        allItems,
 		Currency:     "CNY",
 	}, nil
 }

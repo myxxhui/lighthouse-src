@@ -147,7 +147,8 @@ func (s *HTTPServer) globalCost(c *gin.Context) {
 					"total_optimizable": 0,
 					"global_efficiency": 0,
 					"domain_breakdown":  []interface{}{},
-					"namespaces":         nil,
+					"env_breakdown":     []interface{}{},
+					"namespaces":        nil,
 					"timestamp":         time.Now().UTC(),
 				})
 			}

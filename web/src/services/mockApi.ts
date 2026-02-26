@@ -10,13 +10,19 @@ import {
   ResourceDimension,
 } from '@/types';
 
-// 按时间范围生成确定性的基准倍数（用于区分 1d/7d/30d/month/quarter 数据差异）；custom 按 30d 处理
+// 按时间范围生成确定性的基准倍数（用于区分 1d/这周/近7天/30d/month/quarter 数据差异）；custom 按 30d 处理；这周与近七天须区分
 const periodMultipliers: Record<Exclude<CostTimeRange, 'custom'>, { cost: number; optim: number; efficiency: number }> = {
-  '1d': { cost: 1 / 30, optim: 1 / 30, efficiency: 66 },    // 昨天：约 1/30 月成本
-  '7d': { cost: 0.25, optim: 0.28, efficiency: 68 },       // 近7天：约 1/4 月成本
-  '30d': { cost: 1, optim: 1, efficiency: 70 },           // 近30天：基准
-  'month': { cost: 1.05, optim: 1.02, efficiency: 71 },    // 本月：略高于30天
-  'quarter': { cost: 3.2, optim: 3.1, efficiency: 72 },    // 本季度：约 3 倍月
+  '1d': { cost: 1 / 30, optim: 1 / 30, efficiency: 66 },       // 昨天：约 1/30 月成本
+  'this_week': { cost: 0.18, optim: 0.2, efficiency: 67 },     // 这周：周一至昨日，通常少于 7 天
+  '7d': { cost: 0.25, optim: 0.28, efficiency: 68 },           // 近7天：滚动 7 天
+  '7d_range': { cost: 0.25, optim: 0.28, efficiency: 68 },     // 近七天，同 7d
+  '30d': { cost: 1, optim: 1, efficiency: 70 },                 // 近30天：基准
+  'month': { cost: 1.05, optim: 1.02, efficiency: 71 },        // 本月：略高于30天
+  'quarter': { cost: 3.2, optim: 3.1, efficiency: 72 },        // 本季度：约 3 倍月
+  '90d': { cost: 3, optim: 2.95, efficiency: 72 },             // 近90天
+  'last_week': { cost: 0.25, optim: 0.28, efficiency: 68 },     // 上周
+  'last_month': { cost: 1, optim: 1, efficiency: 69 },          // 上月
+  'last_quarter': { cost: 3.1, optim: 3, efficiency: 71 },     // 上季度
 };
 
 // 上一周期相对本期的固定比例，保证环比可校验：环比 = (本期 - 上期) / 上期 * 100
@@ -51,6 +57,13 @@ const generateMockCostMetrics = (opts?: {
       network: Math.round(15000 * m.cost),
       other: 0,
     },
+    lastUpdatedAt: new Date().toISOString(),
+    envBreakdown: [
+      { environment: 'POC', account_id: 'mock-poc', account_display_name: 'POC 演示账号', total_cost: baseCost, previous_period_cost: opts?.compareMode === 'previous' ? Math.round(baseCost * PREVIOUS_COST_RATIO) : undefined, change_pct: opts?.compareMode === 'previous' ? 6.38 : undefined },
+      { environment: 'FAT', account_id: '', account_display_name: '未配置', total_cost: 0 },
+      { environment: 'UAT', account_id: '', account_display_name: '未配置', total_cost: 0 },
+      { environment: 'PROD', account_id: '', account_display_name: '未配置', total_cost: 0 },
+    ],
   };
 
   if (opts?.compareMode === 'previous') {

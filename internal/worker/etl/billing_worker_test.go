@@ -211,7 +211,7 @@ func TestBillingWorker_RunPipeline_MultiPageDaily(t *testing.T) {
 	if repo.aggregate == nil || repo.aggregate.TotalAmount != 150 {
 		t.Errorf("aggregate not saved or wrong total: %+v", repo.aggregate)
 	}
-	validReportTypes := map[string]bool{"1d": true, "7d": true, "30d": true, "month": true, "quarter": true}
+	validReportTypes := map[string]bool{"1d": true, "7d": true, "30d": true, "month": true, "quarter": true, "90d": true, "last_week": true, "last_month": true, "last_quarter": true}
 	if !validReportTypes[repo.aggregate.ReportType] {
 		t.Errorf("aggregate report_type unexpected: %s", repo.aggregate.ReportType)
 	}

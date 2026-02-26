@@ -27,12 +27,18 @@ import type { CostTimeRange, CostCompareMode } from '@/types';
 import type { DomainBreakdown } from '@/types';
 import { CURRENCY_SYMBOL } from '@/constants';
 
+// [Ref: 01_实践 §3.1 DNA front_end_time_ranges] 昨天、这周、近七天、上周、这月、近30天、上月、这季度、近90天、上季度 + 自定义
 const TIME_RANGE_OPTIONS: { label: string; value: CostTimeRange }[] = [
   { label: '昨天', value: '1d' },
-  { label: '近7天', value: '7d' },
+  { label: '这周', value: 'this_week' },
+  { label: '近七天', value: '7d_range' },
+  { label: '上周', value: 'last_week' },
+  { label: '这月', value: 'month' },
   { label: '近30天', value: '30d' },
-  { label: '本月', value: 'month' },
-  { label: '本季度', value: 'quarter' },
+  { label: '上月', value: 'last_month' },
+  { label: '这季度', value: 'quarter' },
+  { label: '近90天', value: '90d' },
+  { label: '上季度', value: 'last_quarter' },
   { label: '自定义', value: 'custom' },
 ];
 
@@ -324,8 +330,8 @@ const CostOverviewPage: React.FC = () => {
 
       {!useMockData && (
         <Alert
-          message="当前为账期汇总数据（真实数据）"
-          description="为什么所有时间线数据一样？后端当前仅返回整账期汇总（月/季度），不按天切分，所以切换时间范围（昨天/7天/30天/本月/本季度）不会改变结果。对比上一周期：账期汇总模式下暂无上期数据，仅 Mock 数据可展示环比。如需按不同时间范围或对比看到差异，可开启「使用Mock数据」。"
+          message="时间范围与数据来源说明（真实数据）"
+          description="时间范围数据来自聚合表：ETL 每日从日/月原始表预聚合（昨天、近7天、近30天、本月、本季度等）写入 cost_cloud_bill_aggregate，API 按所选时间范围读取对应 report_type/period_key。若当前仅有一日或一月原始数据，多时间范围可能显示相同金额属正常；累积多日后会区分。对比上一周期需聚合表存在上一 period 数据；仅 Mock 时可展示完整环比。"
           type="info"
           showIcon
           style={{ marginBottom: 16 }}
@@ -369,6 +375,11 @@ const CostOverviewPage: React.FC = () => {
             }}
             options={TIME_RANGE_OPTIONS}
           />
+          {!useMockData && costTimeRange === '1d' && (
+            <div style={{ marginTop: 8, color: 'var(--ant-color-text-secondary)', fontSize: 12 }}>
+              若当前仅有一日原始数据，昨日与本月可能显示相同金额，属正常；累积多日后会区分。
+            </div>
+          )}
           <span style={{ marginLeft: 8 }}>对比：</span>
           <Select
             value={costCompareMode}

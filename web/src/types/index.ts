@@ -1,5 +1,17 @@
-/** 成本透视时间范围；'custom' 表示使用自定义日期范围（与 costCustomDateRange 二选一） */
-export type CostTimeRange = '1d' | '7d' | '30d' | 'month' | 'quarter' | 'custom';
+/** 成本透视时间范围 [Ref: 01_实践 front_end_time_ranges]；'custom' 表示使用自定义日期范围（与 costCustomDateRange 二选一）；这周=this_week 与 近七天=7d 必须区分 */
+export type CostTimeRange =
+  | '1d'
+  | 'this_week'  // 这周：ISO 周周一至昨日
+  | '7d'
+  | '7d_range'   // 近七天，API 同 7d
+  | '30d'
+  | 'month'
+  | 'quarter'
+  | '90d'
+  | 'last_week'
+  | 'last_month'
+  | 'last_quarter'
+  | 'custom';
 
 /** 成本对比模式 */
 export type CostCompareMode = 'none' | 'previous';

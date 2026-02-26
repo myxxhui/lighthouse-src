@@ -121,7 +121,11 @@ export const useAppStore = create<AppState>()(
 
         try {
           let data: CostMetrics;
-          const effectivePeriod = costTimeRange === 'custom' ? '30d' : costTimeRange;
+          const effectivePeriod = costTimeRange === 'custom'
+            ? '30d'
+            : costTimeRange === '7d_range'
+              ? '7d'
+              : costTimeRange;
           if (useMockData) {
             data = await mockApi.getGlobalCostMetrics({ period: effectivePeriod, compareMode: costCompareMode });
           } else if (costTimeRange === 'custom' && costCustomDateRange != null && costCustomDateRange[0] && costCustomDateRange[1]) {
@@ -133,6 +137,10 @@ export const useAppStore = create<AppState>()(
             data = await costService.getGlobalCostMetrics({ period: effectivePeriod, compareMode: costCompareMode });
           }
           set({ globalCostMetrics: data, loadingGlobalMetrics: false });
+          // #region agent log
+          const pocCost = data.envBreakdown?.find(e => e.environment === 'POC')?.total_cost;
+          fetch('http://localhost:7370/ingest/822a34d3-40fb-48c1-8a89-5d12dd62b79d', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c39b07' }, body: JSON.stringify({ sessionId: 'c39b07', hypothesisId: 'H2_H4', location: 'store:fetchGlobalCostMetrics', message: 'global cost received', data: { useMockData, hasLastUpdatedAt: !!data.lastUpdatedAt, envBreakdownLen: data.envBreakdown?.length ?? 0, pocTotalCost: pocCost ?? 0 }, timestamp: Date.now() }) }).catch(() => {});
+          // #endregion
         } catch (error) {
           // D8-8：日期选择请求超时提示重试或缩小范围
           const isTimeout =
@@ -150,7 +158,11 @@ export const useAppStore = create<AppState>()(
       fetchNamespaceCosts: async () => {
         const { useMockData, costTimeRange } = get();
         set({ loadingNamespaceCosts: true, errorNamespaceCosts: null });
-        const effectivePeriod = costTimeRange === 'custom' ? '30d' : costTimeRange;
+        const effectivePeriod = costTimeRange === 'custom'
+            ? '30d'
+            : costTimeRange === '7d_range'
+              ? '7d'
+              : costTimeRange;
 
         try {
           const data = useMockData

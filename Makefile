@@ -20,7 +20,7 @@ DEPLOY_DIR := ../lighthouse-deploy
 DOCKER_PLATFORM ?= linux/amd64
 
 .PHONY: help build build-backend build-frontend build-all docker-backend docker-frontend \
-        docker-all run-local run-docker push-images test lint clean clean-env security-scan \
+        docker-all build-images run-local run-docker push-images test lint clean clean-env security-scan \
         verify-build verify-phase1 verify-phase2 verify-phase3 generate-sbom sign-images
 
 # 默认目标：显示帮助
@@ -111,8 +111,10 @@ docker-frontend:
 		$(FRONTEND_DIR)
 	@echo "✅ 前端镜像构建完成: $(PROJECT_NAME)-frontend:$(IMAGE_TAG)"
 
-# 构建所有Docker镜像
+# 构建所有Docker镜像 [Ref: 04_01_成本透视真实数据 附录 一键构建]
 docker-all: docker-backend docker-frontend
+# 与文档附录一致的一键构建入口
+build-images: docker-all
 
 # 本地开发运行
 run-local:

@@ -26,10 +26,12 @@ type DomainBreakdownItem struct {
 	TopProducts      []ProductCostItem  `json:"top_products,omitempty"` // 成本最高的最多 4 个产品，用于详情与跳转
 }
 
-// GlobalCostMetadata D1-3：数据更新至、来源（聚合表/原始表降级）。
+// GlobalCostMetadata D1-3：数据更新至、来源（聚合表/原始表降级）；含 report_type/period_key 便于校验时间范围对应关系。
 type GlobalCostMetadata struct {
 	LastUpdatedAt *time.Time `json:"last_updated_at,omitempty"` // 聚合完成时间，前端展示「数据更新至」
-	DataStatus    string     `json:"data_status,omitempty"`      // "aggregate" | "fallback"
+	DataStatus    string     `json:"data_status,omitempty"`     // "aggregate" | "fallback"
+	ReportType    string     `json:"report_type,omitempty"`     // 1d|7d|30d|month|quarter 等，对应聚合表 report_type
+	PeriodKey     string     `json:"period_key,omitempty"`      // 对应聚合表 period_key，用于校验当前时间范围
 }
 
 // EnvBreakdownItem 按环境（POC/FAT/UAT/PROD）的总账与对比。[Ref: 01_设计 §按环境展示、12_API GlobalCostResponse]
