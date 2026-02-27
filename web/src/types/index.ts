@@ -11,6 +11,8 @@ export type CostTimeRange =
   | 'last_week'
   | 'last_month'
   | 'last_quarter'
+  | 'this_year'   // 今年：1月1日至昨日
+  | 'last_year'   // 去年：上一自然年
   | 'custom';
 
 /** 成本对比模式 */
@@ -66,6 +68,14 @@ export interface CostMetrics {
 export interface ProductCostItem {
   product: string;
   cost: number;
+}
+
+/** 全环境云产品明细项 [Ref: 01_设计 D9-8 GET /api/v1/cost/drilldown/global] */
+export interface CloudProductDrilldownItem {
+  product_code: string;
+  product_name?: string;
+  cost: number;
+  category: string;
 }
 
 export interface DomainBreakdown {

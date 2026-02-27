@@ -95,17 +95,18 @@ CREATE TABLE IF NOT EXISTS cost_cloud_bill_daily_raw (
     region          VARCHAR(32),
     PRIMARY KEY (bill_date)
 );
+-- [Ref: 01_设计 D9-5] 聚合表主键 (report_type, period_key, account_id)；单账号 account_id 占位 ''
 CREATE TABLE IF NOT EXISTS cost_cloud_bill_aggregate (
     report_type     VARCHAR(16) NOT NULL,
     period_key      VARCHAR(32) NOT NULL,
+    account_id      VARCHAR(64) NOT NULL DEFAULT '',
     total_amount    DECIMAL(12, 2) NOT NULL,
     product_breakdown JSONB,
     last_success_at TIMESTAMP,
     created_at      TIMESTAMP DEFAULT NOW(),
     updated_at      TIMESTAMP DEFAULT NOW(),
-    account_id      VARCHAR(64),
     region          VARCHAR(32),
-    PRIMARY KEY (report_type, period_key)
+    PRIMARY KEY (report_type, period_key, account_id)
 );
 CREATE INDEX IF NOT EXISTS idx_cloud_bill_aggregate_period ON cost_cloud_bill_aggregate(report_type, period_key);
 
@@ -119,6 +120,8 @@ CREATE TABLE IF NOT EXISTS cost_env_account_config (
     created_at      TIMESTAMP DEFAULT NOW()
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_env_account ON cost_env_account_config(environment);
+-- [Ref: 01_设计 §环境与云账号配置] 单账号时至少一条映射，供按环境总账展示；多账号可后续插入 FAT/UAT/PROD
+INSERT INTO cost_env_account_config (environment, account_id, display_name, sort_order) VALUES ('POC', 'POC', 'POC 演示账号', 1) ON CONFLICT (environment) DO NOTHING;
 
 -- [Ref: 01_设计 §产品分类与按环境钻取、06_ §2.1] 云产品与成本分类映射
 CREATE TABLE IF NOT EXISTS product_category_mapping (

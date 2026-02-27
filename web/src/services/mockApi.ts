@@ -23,6 +23,8 @@ const periodMultipliers: Record<Exclude<CostTimeRange, 'custom'>, { cost: number
   'last_week': { cost: 0.25, optim: 0.28, efficiency: 68 },     // 上周
   'last_month': { cost: 1, optim: 1, efficiency: 69 },          // 上月
   'last_quarter': { cost: 3.1, optim: 3, efficiency: 71 },     // 上季度
+  'this_year': { cost: 12, optim: 11.5, efficiency: 72 },       // 今年：约 12 倍月
+  'last_year': { cost: 12, optim: 11.5, efficiency: 71 },     // 去年
 };
 
 // 上一周期相对本期的固定比例，保证环比可校验：环比 = (本期 - 上期) / 上期 * 100

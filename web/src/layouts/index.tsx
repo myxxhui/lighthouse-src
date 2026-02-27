@@ -6,7 +6,6 @@ import {
   ClusterOutlined,
   DashboardOutlined,
   SafetyCertificateOutlined,
-  ToolOutlined,
 } from '@ant-design/icons';
 
 const defaultProps = {
@@ -17,7 +16,6 @@ const defaultProps = {
       { path: '/DrilldownPage', name: '成本钻取', icon: <ClusterOutlined /> },
       { path: '/SLODashboard', name: 'SLO 红绿灯', icon: <DashboardOutlined /> },
       { path: '/PreventionPage', name: '智能预防', icon: <SafetyCertificateOutlined /> },
-      { path: '/FaultHandlingPage', name: '智能故障处理', icon: <ToolOutlined /> },
     ],
   },
   location: { pathname: '/' },

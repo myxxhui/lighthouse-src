@@ -3,10 +3,8 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -22,8 +20,8 @@ type CostService struct {
 	repo postgres.Repository
 
 	// [Ref: D8-7] 日期选择叠加结果短时缓存，key=from:to，TTL 1h
-	dateRangeCache   map[string]dateRangeCacheEntry
-	dateRangeCacheMu sync.RWMutex
+	dateRangeCache    map[string]dateRangeCacheEntry
+	dateRangeCacheMu  sync.RWMutex
 	dateRangeCacheTTL time.Duration
 }
 
@@ -53,6 +51,45 @@ func toCostmodelDailyNamespaceCost(p postgres.DailyNamespaceCost) costmodel.Dail
 		NodeCount:     p.NodeCount,
 		WorkloadCount: p.WorkloadCount,
 	}
+}
+
+// domainOrderForBreakdown 成本分解四大类+其他，固定顺序 [Ref: 01_设计 §成本结构、成本分解]。
+var domainOrderForBreakdown = []string{"计算资源", "存储", "网络", "安全", "其他"}
+
+// buildDomainBreakdownNormalized 从 merged（领域/领域:产品码）构建 domain_breakdown：其它→其他，保证含安全（可为 0），按固定顺序返回。[Ref: 01_设计 §成本分解]
+func buildDomainBreakdownNormalized(merged map[string]float64) []dto.DomainBreakdownItem {
+	// 其它 → 其他（领域汇总及 "其它:productCode" 键）
+	if v, ok := merged["其它"]; ok {
+		merged["其他"] += v
+		delete(merged, "其它")
+	}
+	var toOther []string
+	for k := range merged {
+		if strings.HasPrefix(k, "其它:") {
+			toOther = append(toOther, k)
+		}
+	}
+	for _, k := range toOther {
+		suffix := strings.TrimPrefix(k, "其它:")
+		merged["其他:"+suffix] += merged[k]
+		delete(merged, k)
+	}
+	if _, ok := merged["安全"]; !ok {
+		merged["安全"] = 0
+	}
+	out := make([]dto.DomainBreakdownItem, 0, len(domainOrderForBreakdown))
+	for _, domain := range domainOrderForBreakdown {
+		cost := merged[domain]
+		topProducts := topProductsForDomain(&merged, domain, 4)
+		out = append(out, dto.DomainBreakdownItem{
+			Domain:           domain,
+			Cost:             cost,
+			OptimizableSpace: 0,
+			Efficiency:       0,
+			TopProducts:      topProducts,
+		})
+	}
+	return out
 }
 
 // topProductsForDomain 从 productBreakdown 中取 key 为 "domain:ProductCode" 的项，按金额降序取前 n 个 [Ref: 01_成本透视真实数据]。
@@ -206,20 +243,7 @@ func (s *CostService) GetGlobalCostByDateRange(ctx context.Context, from, to tim
 		}
 	}
 
-	domainBreakdown := make([]dto.DomainBreakdownItem, 0)
-	for domain, cost := range merged {
-		if strings.Contains(domain, ":") {
-			continue
-		}
-		topProducts := topProductsForDomain(&merged, domain, 4)
-		domainBreakdown = append(domainBreakdown, dto.DomainBreakdownItem{
-			Domain:           domain,
-			Cost:             cost,
-			OptimizableSpace: 0,
-			Efficiency:       0,
-			TopProducts:      topProducts,
-		})
-	}
+	domainBreakdown := buildDomainBreakdownNormalized(merged)
 	// 自定义日期路径无聚合表，env_breakdown 暂返回空；按环境汇总需日原始表带 account_id 后实现 [Ref: 01_设计 §展示与延迟]
 	resp := &dto.GlobalCostResponse{
 		TotalCost:        total,
@@ -245,7 +269,6 @@ const FallbackQueryTimeout = 5 * time.Second
 // reportTypeAndPeriodKey 返回常规 period 对应的聚合表 (report_type, period_key)。[Ref: 04_01_成本透视真实数据 展示与延迟说明、01_设计 report_type 与 period_key]
 func reportTypeAndPeriodKey(period string, now time.Time) (reportType, periodKey string) {
 	yesterday := now.AddDate(0, 0, -1)
-	today := now.Format("2006-01-02")
 	yesterdayStr := yesterday.Format("2006-01-02")
 	month := now.Format("2006-01")
 	prevMonth := now.AddDate(0, -1, 0).Format("2006-01")
@@ -266,8 +289,8 @@ func reportTypeAndPeriodKey(period string, now time.Time) (reportType, periodKey
 		year, week := now.ISOWeek()
 		return "this_week", fmt.Sprintf("%04d-W%02d", year, week)
 	case "7d", "7d_range":
-		// 近七天：滚动 7 天，与「这周」区分 [Ref: 01_设计 report_type 与 period_key]
-		return "7d", today
+		// 近七天：结束日固定昨日（T+1）[Ref: 01_设计 D9-7、误区六]
+		return "7d", yesterdayStr
 	case "last_week":
 		// 上周结束日（昨日或上周日）
 		weekday := int(now.Weekday())
@@ -277,9 +300,13 @@ func reportTypeAndPeriodKey(period string, now time.Time) (reportType, periodKey
 		lastWeekEnd := now.AddDate(0, 0, -weekday)
 		return "last_week", lastWeekEnd.Format("2006-01-02")
 	case "30d", "":
-		return "30d", today
+		return "30d", yesterdayStr
 	case "90d":
-		return "90d", today
+		return "90d", yesterdayStr
+	case "this_year":
+		return "this_year", now.Format("2006")
+	case "last_year":
+		return "last_year", now.AddDate(-1, 0, 0).Format("2006")
 	case "month":
 		return "month", month
 	case "last_month":
@@ -308,9 +335,12 @@ func previousPeriodKey(reportType, periodKey string, now time.Time) string {
 			return fmt.Sprintf("%04d-W%02d", y, w-1)
 		}
 		return fmt.Sprintf("%04d-W52", y-1) // 上一周为去年最后一周
-	case "7d", "30d":
+	case "7d":
 		t, _ := time.Parse("2006-01-02", periodKey)
 		return t.AddDate(0, 0, -7).Format("2006-01-02")
+	case "30d":
+		t, _ := time.Parse("2006-01-02", periodKey)
+		return t.AddDate(0, 0, -30).Format("2006-01-02")
 	case "last_week":
 		t, _ := time.Parse("2006-01-02", periodKey)
 		return t.AddDate(0, 0, -7).Format("2006-01-02")
@@ -328,6 +358,12 @@ func previousPeriodKey(reportType, periodKey string, now time.Time) string {
 			return fmt.Sprintf("%d-Q4", y-1)
 		}
 		return fmt.Sprintf("%d-Q%d", y, q-1)
+	case "this_year", "last_year":
+		var y int
+		if _, err := fmt.Sscanf(periodKey, "%d", &y); err == nil {
+			return fmt.Sprintf("%d", y-1)
+		}
+		return ""
 	default:
 		return ""
 	}
@@ -366,9 +402,15 @@ func (s *CostService) buildEnvBreakdown(ctx context.Context, reportType, periodK
 		if total == 0 {
 			total = curByAccount[c.Environment] // 单账号时 ETL 可能写入 environment 名（如 POC），与 config.account_id 不一致时用环境名回退 [Ref: 01_设计 §按环境展示]
 		}
+		if total == 0 && curByAccount[""] > 0 {
+			total = curByAccount[""] // 单账号占位符 '' 时，将总账归入该已配置环境 [Ref: 01_设计 §按环境展示、D1 排查]
+		}
 		prev := prevByAccount[c.AccountID]
 		if prev == 0 {
 			prev = prevByAccount[c.Environment]
+		}
+		if prev == 0 && prevByAccount[""] > 0 {
+			prev = prevByAccount[""]
 		}
 		changePct := 0.0
 		if prev > 0 {
@@ -412,41 +454,13 @@ func (s *CostService) GetGlobalCost(ctx context.Context, period string) (*dto.Gl
 				}
 			}
 			if totalAmount > 0 || len(merged) > 0 {
-				domainBreakdown := make([]dto.DomainBreakdownItem, 0)
-				for domain, cost := range merged {
-					if strings.Contains(domain, ":") {
-						continue
-					}
-					topProducts := topProductsForDomain(&merged, domain, 4)
-					domainBreakdown = append(domainBreakdown, dto.DomainBreakdownItem{
-						Domain:           domain,
-						Cost:             cost,
-						OptimizableSpace: 0,
-						Efficiency:       0,
-						TopProducts:      topProducts,
-					})
-				}
+				domainBreakdown := buildDomainBreakdownNormalized(merged)
 				prevKey := previousPeriodKey(reportType, periodKey, now)
 				envBreakdown := s.buildEnvBreakdown(ctx, reportType, periodKey, prevKey)
 				meta := &dto.GlobalCostMetadata{DataStatus: "aggregate", ReportType: reportType, PeriodKey: periodKey}
 				if lastSuccessAt != nil {
 					meta.LastUpdatedAt = lastSuccessAt
 				}
-				// #region agent log
-				pocTotal := 0.0
-				for _, e := range envBreakdown {
-					if e.Environment == "POC" {
-						pocTotal = e.TotalCost
-						break
-					}
-				}
-				if b, _ := json.Marshal(map[string]interface{}{"hypothesisId": "H1_H3", "location": "cost_service.go:GetGlobalCost:aggregate", "message": "global cost response", "data": map[string]interface{}{"has_meta_last_updated": meta.LastUpdatedAt != nil, "env_breakdown_len": len(envBreakdown), "poc_total": pocTotal}, "timestamp": time.Now().UnixMilli()}); len(b) > 0 {
-					if f, err := os.OpenFile("/root/work/lighthouse/.cursor/debug-c39b07.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
-						f.Write(append(b, '\n'))
-						f.Close()
-					}
-				}
-				// #endregion
 				return &dto.GlobalCostResponse{
 					TotalCost:        totalAmount,
 					TotalOptimizable: 0,
@@ -459,14 +473,14 @@ func (s *CostService) GetGlobalCost(ctx context.Context, period string) (*dto.Gl
 				}, nil
 			}
 		}
-		// 聚合表无数据时从日原始表降级：1d/this_week/7d/7d_range/30d 按对应区间聚合 [Ref: 01_实践 展示与延迟说明]
+		// 聚合表无数据时从日原始表降级：1d/this_week/7d/7d_range/30d 按对应区间聚合 [Ref: 01_实践 展示与延迟说明]；7d/30d 结束日为昨日（D9-7）
 		if period == "1d" || period == "this_week" || period == "7d" || period == "7d_range" || period == "30d" || period == "" {
 			ctxFallback, cancel := context.WithTimeout(ctx, FallbackQueryTimeout)
+			yesterday := now.AddDate(0, 0, -1).Truncate(24 * time.Hour)
 			var from, to time.Time
 			switch period {
 			case "1d":
-				y := now.AddDate(0, 0, -1)
-				from, to = y.Truncate(24*time.Hour), y.Truncate(24*time.Hour)
+				from, to = yesterday, yesterday
 			case "this_week":
 				// 这周：本周一 00:00 至昨日（ISO 周周一为第一天）
 				wd := now.Weekday()
@@ -475,14 +489,13 @@ func (s *CostService) GetGlobalCost(ctx context.Context, period string) (*dto.Gl
 				}
 				daysBack := int(wd - 1)
 				thisWeekMonday := now.AddDate(0, 0, -daysBack).Truncate(24 * time.Hour)
-				yesterday := now.AddDate(0, 0, -1).Truncate(24 * time.Hour)
 				from, to = thisWeekMonday, yesterday
 			case "7d", "7d_range":
-				to = now.Truncate(24 * time.Hour)
+				to = yesterday
 				from = to.AddDate(0, 0, -6)
 			default:
 				from = now.AddDate(0, 0, -30)
-				to = now
+				to = yesterday
 			}
 			rows, err := s.repo.ListCloudBillDailyRawFromTo(ctxFallback, from, to)
 			cancel()
@@ -499,39 +512,18 @@ func (s *CostService) GetGlobalCost(ctx context.Context, period string) (*dto.Gl
 						merged[k] += v
 					}
 				}
-				domainBreakdown := make([]dto.DomainBreakdownItem, 0)
-				for domain, cost := range merged {
-					if strings.Contains(domain, ":") {
-						continue
-					}
-					topProducts := topProductsForDomain(&merged, domain, 4)
-					domainBreakdown = append(domainBreakdown, dto.DomainBreakdownItem{
-						Domain:           domain,
-						Cost:             cost,
-						OptimizableSpace: 0,
-						Efficiency:       0,
-						TopProducts:      topProducts,
-					})
-				}
-				rType, pKey := "30d", now.Format("2006-01-02")
+				domainBreakdown := buildDomainBreakdownNormalized(merged)
+				rType, pKey := "30d", yesterday.Format("2006-01-02")
 				if period == "1d" {
-					rType, pKey = "1d", now.AddDate(0, 0, -1).Format("2006-01-02")
+					rType, pKey = "1d", yesterday.Format("2006-01-02")
 				} else if period == "this_week" {
 					year, week := now.ISOWeek()
 					rType, pKey = "this_week", fmt.Sprintf("%04d-W%02d", year, week)
 				} else if period == "7d" || period == "7d_range" {
-					rType, pKey = "7d", now.Format("2006-01-02")
+					rType, pKey = "7d", yesterday.Format("2006-01-02")
 				}
 				prevKey := previousPeriodKey(rType, pKey, now)
 				envBreakdown := s.buildEnvBreakdown(ctx, rType, pKey, prevKey)
-				// #region agent log
-				if b, _ := json.Marshal(map[string]interface{}{"hypothesisId": "H1_H5", "location": "cost_service.go:GetGlobalCost:fallback_daily", "message": "fallback path no last_updated_at", "data": map[string]interface{}{"env_breakdown_len": len(envBreakdown)}, "timestamp": time.Now().UnixMilli()}); len(b) > 0 {
-					if f, err := os.OpenFile("/root/work/lighthouse/.cursor/debug-c39b07.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
-						f.Write(append(b, '\n'))
-						f.Close()
-					}
-				}
-				// #endregion
 				metaFallback := &dto.GlobalCostMetadata{DataStatus: "fallback", ReportType: rType, PeriodKey: pKey}
 				metaFallback.LastUpdatedAt = &now
 				return &dto.GlobalCostResponse{
@@ -550,31 +542,10 @@ func (s *CostService) GetGlobalCost(ctx context.Context, period string) (*dto.Gl
 	// 聚合表无数据时降级：cost_cloud_bill_summary（账期汇总）
 	cloud, totalAmount, productBreakdown := s.aggregateCloudBillByPeriod(ctx, period)
 	if cloud && productBreakdown != nil {
-		domainBreakdown := make([]dto.DomainBreakdownItem, 0)
-		for domain, cost := range *productBreakdown {
-			if strings.Contains(domain, ":") {
-				continue
-			}
-			topProducts := topProductsForDomain(productBreakdown, domain, 4)
-			domainBreakdown = append(domainBreakdown, dto.DomainBreakdownItem{
-				Domain:           domain,
-				Cost:             cost,
-				OptimizableSpace: 0,
-				Efficiency:       0,
-				TopProducts:      topProducts,
-			})
-		}
+		domainBreakdown := buildDomainBreakdownNormalized(*productBreakdown)
 		if reportType, periodKey := reportTypeAndPeriodKey(period, now); reportType != "" {
 			prevKey := previousPeriodKey(reportType, periodKey, now)
 			envBreakdown := s.buildEnvBreakdown(ctx, reportType, periodKey, prevKey)
-			// #region agent log
-			if b, _ := json.Marshal(map[string]interface{}{"hypothesisId": "H1_H5", "location": "cost_service.go:GetGlobalCost:fallback_summary", "message": "fallback summary no last_updated_at", "data": map[string]interface{}{"env_breakdown_len": len(envBreakdown)}, "timestamp": time.Now().UnixMilli()}); len(b) > 0 {
-				if f, err := os.OpenFile("/root/work/lighthouse/.cursor/debug-c39b07.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
-					f.Write(append(b, '\n'))
-					f.Close()
-				}
-			}
-			// #endregion
 			metaFallback := &dto.GlobalCostMetadata{DataStatus: "fallback", ReportType: reportType, PeriodKey: periodKey}
 			metaFallback.LastUpdatedAt = &now
 			return &dto.GlobalCostResponse{
@@ -761,12 +732,17 @@ func (s *CostService) GetEnvDrilldown(ctx context.Context, envId, reportType, pe
 	if pb == nil {
 		return []dto.EnvDrilldownItem{}, nil
 	}
-	// 从 product_breakdown 按产品汇总：key 形如 "domain:ProductCode"
+	// 从 product_breakdown 按产品汇总：key 形如 "domain:ProductCode"；方案 B 键前缀映射 category [Ref: 01_设计 §产品分类 方案 B]
 	productCosts := make(map[string]float64)
+	categoryFromPrefix := make(map[string]string)
 	for k, cost := range pb {
 		if idx := strings.Index(k, ":"); idx >= 0 && idx < len(k)-1 {
 			code := k[idx+1:]
 			productCosts[code] += cost
+			prefix := k[:idx]
+			if cat := domainPrefixToCategory(prefix); cat != "" && categoryFromPrefix[code] == "" {
+				categoryFromPrefix[code] = cat
+			}
 		}
 	}
 	var out []dto.EnvDrilldownItem
@@ -774,10 +750,7 @@ func (s *CostService) GetEnvDrilldown(ctx context.Context, envId, reportType, pe
 		if cost <= 0 {
 			continue
 		}
-		cat, _ := s.repo.GetProductCategory(ctx, code)
-		if cat == "" {
-			cat = "other"
-		}
+		cat := s.resolveDrilldownCategory(ctx, code, categoryFromPrefix[code])
 		if category != "" && cat != category {
 			continue
 		}
@@ -794,4 +767,217 @@ func (s *CostService) GetEnvDrilldown(ctx context.Context, envId, reportType, pe
 		sort.Slice(out, func(i, j int) bool { return out[i].Cost < out[j].Cost })
 	}
 	return out, nil
+}
+
+// domainPrefixToCategory 方案 B：product_breakdown 键前缀（中文领域）映射为 API category。[Ref: 01_设计 §产品分类 四大类数据来源方案 B]
+func domainPrefixToCategory(prefix string) string {
+	switch prefix {
+	case "计算资源":
+		return "compute"
+	case "存储":
+		return "storage"
+	case "网络":
+		return "network"
+	case "安全":
+		return "security"
+	case "其它", "其他":
+		return "other"
+	default:
+		return ""
+	}
+}
+
+// resolveDrilldownCategory 方案 B：前缀优先，否则查 product_category_mapping。[Ref: 01_设计 §产品分类 方案 B]
+func (s *CostService) resolveDrilldownCategory(ctx context.Context, code string, categoryFromPrefix string) string {
+	if categoryFromPrefix != "" {
+		return categoryFromPrefix
+	}
+	cat, _ := s.repo.GetProductCategory(ctx, code)
+	if cat != "" {
+		return cat
+	}
+	return "other"
+}
+
+// GetGlobalDrilldown 全环境云产品明细：合并所有 account 的 product_breakdown 按产品汇总并打 category；env 非 all 时仅汇总该环境对应 account_id。[Ref: 01_设计 D9-8、D6 云产品成本明细索引、12_API；方案 B 键前缀映射]
+func (s *CostService) GetGlobalDrilldown(ctx context.Context, reportType, periodKey, category, sortOrder, env string) ([]dto.EnvDrilldownItem, error) {
+	list, err := s.repo.ListCloudBillAggregateForReportPeriod(ctx, reportType, periodKey)
+	if err != nil || len(list) == 0 {
+		return []dto.EnvDrilldownItem{}, nil
+	}
+	var accountIDs map[string]bool // env != "all" 时仅包含该环境映射的 account_id
+	if env != "" && env != "all" {
+		configs, err := s.repo.ListEnvAccountConfig(ctx)
+		if err != nil {
+			return nil, err
+		}
+		accountIDs = make(map[string]bool)
+		for _, c := range configs {
+			if c.Environment == env {
+				accountIDs[c.AccountID] = true
+				break
+			}
+		}
+		if len(accountIDs) == 0 {
+			return []dto.EnvDrilldownItem{}, nil
+		}
+	}
+	productCosts := make(map[string]float64)
+	categoryFromPrefix := make(map[string]string)
+	for _, a := range list {
+		if accountIDs != nil && !accountIDs[a.AccountID] {
+			continue
+		}
+		for k, cost := range a.ProductBreakdown {
+			if idx := strings.Index(k, ":"); idx >= 0 && idx < len(k)-1 {
+				code := k[idx+1:]
+				productCosts[code] += cost
+				prefix := k[:idx]
+				if cat := domainPrefixToCategory(prefix); cat != "" && categoryFromPrefix[code] == "" {
+					categoryFromPrefix[code] = cat
+				}
+			}
+		}
+	}
+	var out []dto.EnvDrilldownItem
+	for code, cost := range productCosts {
+		if cost <= 0 {
+			continue
+		}
+		cat := s.resolveDrilldownCategory(ctx, code, categoryFromPrefix[code])
+		if category != "" && cat != category {
+			continue
+		}
+		out = append(out, dto.EnvDrilldownItem{
+			ProductCode: code,
+			ProductName: code,
+			Cost:        cost,
+			Category:    cat,
+		})
+	}
+	if sortOrder != "cost_asc" {
+		sort.Slice(out, func(i, j int) bool { return out[i].Cost > out[j].Cost })
+	} else {
+		sort.Slice(out, func(i, j int) bool { return out[i].Cost < out[j].Cost })
+	}
+	return out, nil
+}
+
+// GetGlobalDrilldownByDateRange 全环境云产品明细（自定义日期）：从日原始表按 [from,to] 聚合并打 category；env 参数保留，方案 B 日表无 account_id 时忽略（仅返回全环境）。[Ref: 01_设计 GET /api/v1/cost/drilldown/global date_from/date_to；方案 B 键前缀映射]
+func (s *CostService) GetGlobalDrilldownByDateRange(ctx context.Context, from, to time.Time, category, sortOrder, env string) ([]dto.EnvDrilldownItem, error) {
+	const maxMonths = 6
+	if to.Before(from) {
+		from, to = to, from
+	}
+	if to.Sub(from) > maxMonths*30*24*time.Hour {
+		return []dto.EnvDrilldownItem{}, nil
+	}
+	rows, err := s.repo.ListCloudBillDailyRawFromTo(ctx, from, to)
+	if err != nil || len(rows) == 0 {
+		return []dto.EnvDrilldownItem{}, nil
+	}
+	productCosts := make(map[string]float64)
+	categoryFromPrefix := make(map[string]string)
+	for _, r := range rows {
+		for k, cost := range r.ProductBreakdown {
+			if idx := strings.Index(k, ":"); idx >= 0 && idx < len(k)-1 {
+				code := k[idx+1:]
+				productCosts[code] += cost
+				prefix := k[:idx]
+				if cat := domainPrefixToCategory(prefix); cat != "" && categoryFromPrefix[code] == "" {
+					categoryFromPrefix[code] = cat
+				}
+			}
+		}
+	}
+	var out []dto.EnvDrilldownItem
+	for code, cost := range productCosts {
+		if cost <= 0 {
+			continue
+		}
+		cat := s.resolveDrilldownCategory(ctx, code, categoryFromPrefix[code])
+		if category != "" && cat != category {
+			continue
+		}
+		out = append(out, dto.EnvDrilldownItem{
+			ProductCode: code,
+			ProductName: code,
+			Cost:        cost,
+			Category:    cat,
+		})
+	}
+	if sortOrder != "cost_asc" {
+		sort.Slice(out, func(i, j int) bool { return out[i].Cost > out[j].Cost })
+	} else {
+		sort.Slice(out, func(i, j int) bool { return out[i].Cost < out[j].Cost })
+	}
+	return out, nil
+}
+
+// CostTrendMaxDays 趋势 API 最大天数 [Ref: 12_API GET /api/v1/cost/trend]
+const CostTrendMaxDays = 90
+
+// CostTrendTimeout 趋势查询超时 [Ref: 01_设计 §成本趋势 API]
+const CostTrendTimeout = 10 * time.Second
+
+// GetCostTrend 成本结构趋势：从日原始表按 [start,end] 聚合，返回按日序列；最大 90 天、超时 10s。[Ref: 01_设计 D9-9、12_API GET /api/v1/cost/trend]
+func (s *CostService) GetCostTrend(ctx context.Context, period string, dateFrom, dateTo *time.Time) (*dto.CostTrendResponse, error) {
+	var from, to time.Time
+	if dateFrom != nil && dateTo != nil {
+		from = dateFrom.Truncate(24 * time.Hour)
+		to = dateTo.Truncate(24 * time.Hour)
+	} else {
+		now := time.Now().UTC().Truncate(24 * time.Hour)
+		yesterday := now.AddDate(0, 0, -1)
+		switch period {
+		case "7d", "7d_range":
+			to = yesterday
+			from = to.AddDate(0, 0, -6)
+		case "30d":
+			to = yesterday
+			from = to.AddDate(0, 0, -29)
+		case "90d":
+			to = yesterday
+			from = to.AddDate(0, 0, -89)
+		default:
+			to = yesterday
+			from = to.AddDate(0, 0, -29)
+		}
+	}
+	if to.Sub(from) > CostTrendMaxDays*24*time.Hour {
+		from = to.AddDate(0, 0, -CostTrendMaxDays+1)
+	}
+	ctxTrend, cancel := context.WithTimeout(ctx, CostTrendTimeout)
+	defer cancel()
+	rows, err := s.repo.ListCloudBillDailyRawFromTo(ctxTrend, from, to)
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return nil, ErrFallbackTimeout
+		}
+		return nil, err
+	}
+	byDate := make(map[string]*dto.CostTrendDataPoint)
+	for _, r := range rows {
+		d := r.BillDate.Format("2006-01-02")
+		if byDate[d] == nil {
+			byDate[d] = &dto.CostTrendDataPoint{Date: d, ByDomain: make(map[string]float64)}
+		}
+		byDate[d].TotalCost += r.TotalAmount
+		for domain, cost := range r.ProductBreakdown {
+			if strings.Contains(domain, ":") {
+				continue
+			}
+			byDate[d].ByDomain[domain] += cost
+		}
+	}
+	var data []dto.CostTrendDataPoint
+	for t := from; !t.After(to); t = t.AddDate(0, 0, 1) {
+		d := t.Format("2006-01-02")
+		if p, ok := byDate[d]; ok {
+			data = append(data, *p)
+		} else {
+			data = append(data, dto.CostTrendDataPoint{Date: d, TotalCost: 0, ByDomain: nil})
+		}
+	}
+	return &dto.CostTrendResponse{Data: data}, nil
 }

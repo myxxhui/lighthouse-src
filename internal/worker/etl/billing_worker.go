@@ -165,6 +165,16 @@ func (w *BillingWorker) RunPipeline(ctx context.Context) error {
 			slog.Warn("billing ETL pipeline: step1 save daily raw failed", "error", err)
 		} else {
 			slog.Info("billing ETL pipeline: step1 saved daily raw", "bill_date", yesterday.Format("2006-01-02"), "total", respDay.TotalAmount)
+			// [Ref: 01_实践 D4-3 必选] 落库后校验当日 Items 条数，异常告警
+			itemCount := len(respDay.Items)
+			if respDay.TotalAmount > 0 && itemCount == 0 {
+				slog.Warn("billing ETL pipeline: step1 daily items count is 0 but total_amount > 0", "bill_date", yesterday.Format("2006-01-02"))
+				if w.OnPipelineFailAlert != nil {
+					w.OnPipelineFailAlert("daily_items_check", fmt.Errorf("daily items count 0 with total_amount %.2f", respDay.TotalAmount))
+				}
+			} else {
+				slog.Debug("billing ETL pipeline: step1 daily items count", "bill_date", yesterday.Format("2006-01-02"), "items", itemCount)
+			}
 		}
 	}
 
@@ -220,32 +230,26 @@ func (w *BillingWorker) RunPipeline(ctx context.Context) error {
 			slog.Warn("billing ETL pipeline: step4 save monthly raw failed", "error", err)
 		} else {
 			slog.Info("billing ETL pipeline: step4 saved monthly raw", "billing_cycle", respMon.BillingCycle, "total", respMon.TotalAmount)
+			// [Ref: 01_实践 D4-3 必选] 落库后校验当月 Items 条数，异常告警
+			itemCount := len(respMon.Items)
+			if respMon.TotalAmount > 0 && itemCount == 0 {
+				slog.Warn("billing ETL pipeline: step4 monthly items count is 0 but total_amount > 0", "billing_cycle", respMon.BillingCycle)
+				if w.OnPipelineFailAlert != nil {
+					w.OnPipelineFailAlert("monthly_items_check", fmt.Errorf("monthly items count 0 with total_amount %.2f", respMon.TotalAmount))
+				}
+			} else {
+				slog.Debug("billing ETL pipeline: step4 monthly items count", "billing_cycle", respMon.BillingCycle, "items", itemCount)
+			}
 		}
 	}
 
-	// ⑤ 触发聚合 [Ref: 04_01_成本透视真实数据 展示与延迟说明]：1d/7d/30d/month/quarter 写入 cost_cloud_bill_aggregate，API 常规展示仅读此表
+	// ⑤ 触发聚合 [Ref: 04_01_成本透视真实数据 展示与延迟说明]：1d/7d/30d/month/quarter 写入 cost_cloud_bill_aggregate，API 常规展示仅读此表；yesterday/periodDay 已在上方定义
 	successAt := time.Now()
-	today := now.Format("2006-01-02")
-	yesterdayStr := now.AddDate(0, 0, -1).Format("2006-01-02")
+	yesterdayStr := periodDay
 	month := now.Format("2006-01")
 	q := (int(now.Month())-1)/3 + 1
 	quarterKey := fmt.Sprintf("%s-Q%d", now.Format("2006"), q)
 
-	saveAgg := func(reportType, periodKey string, total float64, byCat map[string]float64) error {
-		if err := w.pipelineRepo.SaveCloudBillAggregate(ctx, postgres.CloudBillAggregate{
-			ReportType:       reportType,
-			PeriodKey:        periodKey,
-			TotalAmount:      total,
-			ProductBreakdown: byCat,
-			LastSuccessAt:    &successAt,
-			CreatedAt:        successAt,
-			UpdatedAt:        successAt,
-			AccountID:        w.AccountID,
-		}); err != nil {
-			return err
-		}
-		return w.pipelineRepo.DeleteCloudBillAggregateExcept(ctx, reportType, []string{periodKey})
-	}
 	// saveAggWithPrev 写入当前与上一周期并保留两行，供 compare_mode=previous 使用 [Ref: 01_设计 §上一周期推导规则]
 	saveAggWithPrev := func(reportType, curKey string, curTotal float64, curByCat map[string]float64, prevKey string, prevTotal float64, prevByCat map[string]float64) error {
 		if err := w.pipelineRepo.SaveCloudBillAggregate(ctx, postgres.CloudBillAggregate{
@@ -283,26 +287,26 @@ func (w *BillingWorker) RunPipeline(ctx context.Context) error {
 
 	var pipelineErr error
 
-	// 30d：最近 30 天
-	from30 := now.AddDate(0, 0, -30)
-	rows30, err := w.pipelineRepo.ListCloudBillDailyRawFromTo(ctx, from30, now)
+	// 30d：近30天，结束日昨日（T+1）[Ref: 01_设计 D9-7]
+	from30 := yesterday.AddDate(0, 0, -29)
+	rows30, err := w.pipelineRepo.ListCloudBillDailyRawFromTo(ctx, from30, yesterday)
 	if err != nil {
 		slog.Warn("billing ETL pipeline: step5 list daily raw failed", "error", err, "error_code", errCode(err))
 		return nil
 	}
 	total30, byCat30 := mergeDailyRows(rows30)
-	from30Prev := now.AddDate(0, 0, -60)
-	to30Prev := now.AddDate(0, 0, -30)
+	from30Prev := yesterday.AddDate(0, 0, -59)
+	to30Prev := yesterday.AddDate(0, 0, -30)
 	rows30Prev, _ := w.pipelineRepo.ListCloudBillDailyRawFromTo(ctx, from30Prev, to30Prev)
 	total30Prev, byCat30Prev := mergeDailyRows(rows30Prev)
-	if err := saveAggWithPrev("30d", today, total30, byCat30, to30Prev.Format("2006-01-02"), total30Prev, byCat30Prev); err != nil {
+	if err := saveAggWithPrev("30d", yesterdayStr, total30, byCat30, to30Prev.Format("2006-01-02"), total30Prev, byCat30Prev); err != nil {
 		slog.Warn("billing ETL pipeline: step5 save aggregate 30d failed", "error", err)
 		pipelineErr = err
 		if w.OnPipelineFailAlert != nil {
 			w.OnPipelineFailAlert("aggregate", err)
 		}
 	} else {
-		slog.Info("billing ETL pipeline: step5 saved aggregate", "report_type", "30d", "period_key", today, "total", total30, "rows_processed", len(rows30))
+		slog.Info("billing ETL pipeline: step5 saved aggregate", "report_type", "30d", "period_key", yesterdayStr, "total", total30, "rows_processed", len(rows30))
 	}
 
 	// 1d：昨日；保留上一日供对比
@@ -314,15 +318,15 @@ func (w *BillingWorker) RunPipeline(ctx context.Context) error {
 	total1dPrev, byCat1dPrev := mergeDailyRows(rows1dPrev)
 	_ = saveAggWithPrev("1d", yesterdayStr, total1d, byCat1d, dayBefore.Format("2006-01-02"), total1dPrev, byCat1dPrev)
 
-	// 7d：近 7 天；保留上一段 7 天供对比
-	from7 := now.AddDate(0, 0, -7)
-	rows7, _ := w.pipelineRepo.ListCloudBillDailyRawFromTo(ctx, from7, now)
+	// 7d：近7天，结束日昨日（T+1）[Ref: 01_设计 D9-7]
+	from7 := yesterday.AddDate(0, 0, -6)
+	rows7, _ := w.pipelineRepo.ListCloudBillDailyRawFromTo(ctx, from7, yesterday)
 	total7, byCat7 := mergeDailyRows(rows7)
-	from7Prev := now.AddDate(0, 0, -14)
-	to7Prev := now.AddDate(0, 0, -7)
+	from7Prev := yesterday.AddDate(0, 0, -13)
+	to7Prev := yesterday.AddDate(0, 0, -7)
 	rows7Prev, _ := w.pipelineRepo.ListCloudBillDailyRawFromTo(ctx, from7Prev, to7Prev)
 	total7Prev, byCat7Prev := mergeDailyRows(rows7Prev)
-	_ = saveAggWithPrev("7d", today, total7, byCat7, to7Prev.Format("2006-01-02"), total7Prev, byCat7Prev)
+	_ = saveAggWithPrev("7d", yesterdayStr, total7, byCat7, to7Prev.Format("2006-01-02"), total7Prev, byCat7Prev)
 
 	// 上周（ISO 周）日期范围，供 this_week 上一周期与 last_week 使用
 	weekday := int(now.Weekday())
@@ -357,38 +361,22 @@ func (w *BillingWorker) RunPipeline(ctx context.Context) error {
 	totalLastWeek2, byCatLastWeek2 := mergeDailyRows(rowsLastWeek2)
 	_ = saveAggWithPrev("last_week", lastWeekEndStr, totalLastWeek, byCatLastWeek, lastWeekEnd2.Format("2006-01-02"), totalLastWeek2, byCatLastWeek2)
 
-	// month：当月 1 日至昨日，日原始表叠加 [Ref: 01_设计 §后端数据聚合与存储方案 这月数据来源日原始表]
+	// month：当月 1 日至昨日，日原始表叠加；写入上一周期供 compare [Ref: 01_设计 §后端数据聚合与存储方案、所有时间范围均须 ETL 写入上一周期]
 	firstOfMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
 	rowsMonth, _ := w.pipelineRepo.ListCloudBillDailyRawFromTo(ctx, firstOfMonth, yesterdayT)
 	totalMonth, byCatMonth := mergeDailyRows(rowsMonth)
-	if totalMonth > 0 || len(byCatMonth) > 0 {
-		_ = saveAgg("month", month, totalMonth, byCatMonth)
-	}
-
-	// quarter：本季度 1 日至昨日，日原始表叠加 [Ref: 01_设计 §后端数据聚合与存储方案 这季度数据来源日原始表]
-	firstOfQuarter := time.Date(now.Year(), time.Month((q-1)*3+1), 1, 0, 0, 0, 0, time.UTC)
-	if firstOfQuarter.After(yesterdayT) {
-		firstOfQuarter = time.Date(now.Year()-1, 10, 1, 0, 0, 0, 0, time.UTC) // 本季首日未到则用上季（不应出现）
-	}
-	rowsQuarter, _ := w.pipelineRepo.ListCloudBillDailyRawFromTo(ctx, firstOfQuarter, yesterdayT)
-	totalQ, byCatQ := mergeDailyRows(rowsQuarter)
-	if totalQ > 0 || len(byCatQ) > 0 {
-		_ = saveAgg("quarter", quarterKey, totalQ, byCatQ)
-	}
-
-	// 90d：近 90 天 [Ref: 01_设计 report_type 与 period_key]
-	from90 := now.AddDate(0, 0, -90)
-	rows90, _ := w.pipelineRepo.ListCloudBillDailyRawFromTo(ctx, from90, now)
-	total90, byCat90 := mergeDailyRows(rows90)
-	_ = saveAgg("90d", today, total90, byCat90)
-
-	// last_month：上月（月原始表）[Ref: 01_设计 §后端数据聚合与存储方案]
 	prevMonth := now.AddDate(0, -1, 0).Format("2006-01")
-	if mon, _ := w.pipelineRepo.GetCloudBillMonthlyRaw(ctx, prevMonth); mon != nil && (mon.TotalAmount > 0 || len(mon.ProductBreakdown) > 0) {
-		_ = saveAgg("last_month", prevMonth, mon.TotalAmount, mon.ProductBreakdown)
+	var totalPrevMonth float64
+	byCatPrevMonth := make(map[string]float64)
+	if mon, _ := w.pipelineRepo.GetCloudBillMonthlyRaw(ctx, prevMonth); mon != nil {
+		totalPrevMonth = mon.TotalAmount
+		for k, v := range mon.ProductBreakdown {
+			byCatPrevMonth[k] = v
+		}
 	}
+	_ = saveAggWithPrev("month", month, totalMonth, byCatMonth, prevMonth, totalPrevMonth, byCatPrevMonth)
 
-	// last_quarter：上季度三月汇总
+	// last_quarter 数据先算，供 quarter 的上一周期及 last_quarter 使用 [Ref: 01_设计 report_type 与 period_key]
 	prevCycles := []string{now.AddDate(0, -1, 0).Format("2006-01"), now.AddDate(0, -2, 0).Format("2006-01"), now.AddDate(0, -3, 0).Format("2006-01")}
 	var totalPrevQ float64
 	byCatPrevQ := make(map[string]float64)
@@ -409,9 +397,111 @@ func (w *BillingWorker) RunPipeline(ctx context.Context) error {
 		prevY = now.Year() - 1
 	}
 	prevQuarterKey := fmt.Sprintf("%d-Q%d", prevY, prevQ)
-	if totalPrevQ > 0 || len(byCatPrevQ) > 0 {
-		_ = saveAgg("last_quarter", prevQuarterKey, totalPrevQ, byCatPrevQ)
+
+	// quarter：本季度 1 日至昨日，日原始表叠加；写入上一周期供 compare [Ref: 01_设计 §后端数据聚合与存储方案]
+	firstOfQuarter := time.Date(now.Year(), time.Month((q-1)*3+1), 1, 0, 0, 0, 0, time.UTC)
+	if firstOfQuarter.After(yesterdayT) {
+		firstOfQuarter = time.Date(now.Year()-1, 10, 1, 0, 0, 0, 0, time.UTC) // 本季首日未到则用上季（不应出现）
 	}
+	rowsQuarter, _ := w.pipelineRepo.ListCloudBillDailyRawFromTo(ctx, firstOfQuarter, yesterdayT)
+	totalQ, byCatQ := mergeDailyRows(rowsQuarter)
+	_ = saveAggWithPrev("quarter", quarterKey, totalQ, byCatQ, prevQuarterKey, totalPrevQ, byCatPrevQ)
+
+	// 90d：近90天，结束日昨日（T+1）；上一周期 [昨日-90, 昨日-1] 供对比 [Ref: 01_设计 D9-7、D9-6]
+	from90 := yesterday.AddDate(0, 0, -89)
+	rows90, _ := w.pipelineRepo.ListCloudBillDailyRawFromTo(ctx, from90, yesterday)
+	total90, byCat90 := mergeDailyRows(rows90)
+	from90Prev := yesterday.AddDate(0, 0, -179)
+	to90Prev := yesterday.AddDate(0, 0, -90)
+	rows90Prev, _ := w.pipelineRepo.ListCloudBillDailyRawFromTo(ctx, from90Prev, to90Prev)
+	total90Prev, byCat90Prev := mergeDailyRows(rows90Prev)
+	_ = saveAggWithPrev("90d", yesterdayStr, total90, byCat90, to90Prev.Format("2006-01-02"), total90Prev, byCat90Prev)
+
+	// last_month：上月（月原始表）；写入上上月供 compare [Ref: 01_设计 §后端数据聚合与存储方案]
+	prevPrevMonth := now.AddDate(0, -2, 0).Format("2006-01")
+	var totalPrevPrevMonth float64
+	byCatPrevPrevMonth := make(map[string]float64)
+	if monPrevPrev, _ := w.pipelineRepo.GetCloudBillMonthlyRaw(ctx, prevPrevMonth); monPrevPrev != nil {
+		totalPrevPrevMonth = monPrevPrev.TotalAmount
+		for k, v := range monPrevPrev.ProductBreakdown {
+			byCatPrevPrevMonth[k] = v
+		}
+	}
+	if mon, _ := w.pipelineRepo.GetCloudBillMonthlyRaw(ctx, prevMonth); mon != nil && (mon.TotalAmount > 0 || len(mon.ProductBreakdown) > 0) {
+		_ = saveAggWithPrev("last_month", prevMonth, mon.TotalAmount, mon.ProductBreakdown, prevPrevMonth, totalPrevPrevMonth, byCatPrevPrevMonth)
+	}
+
+	// last_quarter：上季度三月汇总；写入上上季度供 compare
+	prevPrevQ := prevQ - 1
+	prevPrevY := prevY
+	if prevPrevQ <= 0 {
+		prevPrevQ = 4
+		prevPrevY = prevY - 1
+	}
+	prevPrevQuarterKey := fmt.Sprintf("%d-Q%d", prevPrevY, prevPrevQ)
+	var totalPrevPrevQ float64
+	byCatPrevPrevQ := make(map[string]float64)
+	for _, c := range []string{now.AddDate(0, -4, 0).Format("2006-01"), now.AddDate(0, -5, 0).Format("2006-01"), now.AddDate(0, -6, 0).Format("2006-01")} {
+		m, _ := w.pipelineRepo.GetCloudBillMonthlyRaw(ctx, c)
+		if m != nil {
+			totalPrevPrevQ += m.TotalAmount
+			for k, v := range m.ProductBreakdown {
+				byCatPrevPrevQ[k] += v
+			}
+		}
+	}
+	if totalPrevQ > 0 || len(byCatPrevQ) > 0 {
+		_ = saveAggWithPrev("last_quarter", prevQuarterKey, totalPrevQ, byCatPrevQ, prevPrevQuarterKey, totalPrevPrevQ, byCatPrevPrevQ)
+	}
+
+	// this_year / last_year：从月原始表汇总 [Ref: 01_设计 D9-10、§后端数据聚合与存储方案]
+	thisYearKey := now.Format("2006")
+	var totalThisYear, totalLastYear float64
+	byCatThisYear := make(map[string]float64)
+	byCatLastYear := make(map[string]float64)
+	for m := 1; m <= 12; m++ {
+		cycle := fmt.Sprintf("%04d-%02d", now.Year(), m)
+		if mon, _ := w.pipelineRepo.GetCloudBillMonthlyRaw(ctx, cycle); mon != nil {
+			totalThisYear += mon.TotalAmount
+			for k, v := range mon.ProductBreakdown {
+				byCatThisYear[k] += v
+			}
+		}
+		cycleLast := fmt.Sprintf("%04d-%02d", now.Year()-1, m)
+		if mon, _ := w.pipelineRepo.GetCloudBillMonthlyRaw(ctx, cycleLast); mon != nil {
+			totalLastYear += mon.TotalAmount
+			for k, v := range mon.ProductBreakdown {
+				byCatLastYear[k] += v
+			}
+		}
+	}
+	if totalThisYear > 0 || len(byCatThisYear) > 0 {
+		lastYearKey := fmt.Sprintf("%d", now.Year()-1)
+		_ = saveAggWithPrev("this_year", thisYearKey, totalThisYear, byCatThisYear, lastYearKey, totalLastYear, byCatLastYear)
+	}
+	if totalLastYear > 0 || len(byCatLastYear) > 0 {
+		lastYearKey := fmt.Sprintf("%d", now.Year()-1)
+		prevYearKey := fmt.Sprintf("%d", now.Year()-2)
+		var totalPrevYear float64
+		byCatPrevYear := make(map[string]float64)
+		for m := 1; m <= 12; m++ {
+			cycle := fmt.Sprintf("%04d-%02d", now.Year()-2, m)
+			if mon, _ := w.pipelineRepo.GetCloudBillMonthlyRaw(ctx, cycle); mon != nil {
+				totalPrevYear += mon.TotalAmount
+				for k, v := range mon.ProductBreakdown {
+					byCatPrevYear[k] += v
+				}
+			}
+		}
+		_ = saveAggWithPrev("last_year", lastYearKey, totalLastYear, byCatLastYear, prevYearKey, totalPrevYear, byCatPrevYear)
+	}
+
+	// [Ref: 01_实践 D7-3 必选] 审计日志：每次 ETL 流水线结束记录结果便于回放
+	result := "ok"
+	if pipelineErr != nil {
+		result = "fail"
+	}
+	slog.Info("billing ETL audit: pipeline", "type", "pipeline", "result", result, "error", pipelineErr, "yesterday", yesterdayStr)
 
 	return pipelineErr
 }
@@ -544,39 +634,13 @@ func (w *BillingWorker) RunFullBackfill(ctx context.Context) error {
 		time.Sleep(FullBackfillRateLimit)
 	}
 
-	// 一次聚合：最近 30 天 → 30d
-	from30 := now.AddDate(0, 0, -30)
-	rows, err := w.pipelineRepo.ListCloudBillDailyRawFromTo(ctx, from30, now)
-	if err != nil {
-		slog.Warn("billing full backfill: list daily for aggregate failed", "error", err)
+	// 全量聚合：执行 RunPipeline 的 step5，写入全部 report_type 及对比周期 [Ref: 01_设计 §展示与延迟、首次回填与常规部署]
+	yesterday := now.AddDate(0, 0, -1).Truncate(24 * time.Hour)
+	if err := w.RunPipeline(ctx); err != nil {
+		slog.Warn("billing full backfill: pipeline after backfill failed", "error", err)
 		return err
 	}
-	var total float64
-	byCat := make(map[string]float64)
-	for _, r := range rows {
-		total += r.TotalAmount
-		for k, v := range r.ProductBreakdown {
-			byCat[k] += v
-		}
-	}
-	successAt := time.Now()
-	if err := w.pipelineRepo.SaveCloudBillAggregate(ctx, postgres.CloudBillAggregate{
-		ReportType:       "30d",
-		PeriodKey:        now.Format("2006-01-02"),
-		TotalAmount:      total,
-		ProductBreakdown: byCat,
-		LastSuccessAt:    &successAt,
-		CreatedAt:        successAt,
-		UpdatedAt:        successAt,
-		AccountID:        w.AccountID,
-	}); err != nil {
-		slog.Warn("billing full backfill: save aggregate failed", "error", err)
-		return err
-	}
-	slog.Info("billing full backfill: aggregate saved", "report_type", "30d", "rows", len(rows), "total", total)
-	if err := w.pipelineRepo.DeleteCloudBillAggregateExcept(ctx, "30d", []string{now.Format("2006-01-02")}); err != nil {
-		slog.Warn("billing full backfill: delete old aggregate failed", "error", err)
-	}
+	slog.Info("billing full backfill: pipeline completed", "yesterday", yesterday.Format("2006-01-02"))
 	return nil
 }
 
@@ -584,7 +648,7 @@ func (w *BillingWorker) RunFullBackfill(ctx context.Context) error {
 const ReconcileThreshold = 0.01
 
 // RunReconcile 每日对账：日原始表当月 sum(total_amount) vs 月原始表该月 total_amount；偏差 >1% 告警并记日志（D3-1）。
-// 可选：聚合表「本月」= 当月1日至昨日日表叠加 [Ref: 01_设计]，与日表当月1日至昨日 sum 交叉校验。
+// [Ref: 01_实践 D3-2、D7-3 必选] 聚合表「本月」与日表交叉校验；审计日志记录校验结果便于回放。
 func (w *BillingWorker) RunReconcile(ctx context.Context) error {
 	if w.pipelineRepo == nil {
 		return nil
@@ -625,11 +689,29 @@ func (w *BillingWorker) RunReconcile(ctx context.Context) error {
 			daySumToYesterday += r.TotalAmount
 		}
 	}
+	aggPct := 0.0
+	aggTotal := 0.0
+	// [Ref: 01_实践 D3-2 必选] 聚合表「本月」与日表当月1日至昨日 sum 交叉校验；偏差 >1% 告警
 	if agg, _ := w.pipelineRepo.GetCloudBillAggregate(ctx, "month", cycle); agg != nil && agg.TotalAmount > 0 {
-		aggPct := math.Abs(daySumToYesterday-agg.TotalAmount) / agg.TotalAmount
+		aggTotal = agg.TotalAmount
+		aggPct = math.Abs(daySumToYesterday-agg.TotalAmount) / agg.TotalAmount
 		if aggPct > ReconcileThreshold {
 			slog.Warn("billing reconcile: aggregate month vs daily sum (to yesterday) diff over 1%", "daily_sum_to_yesterday", daySumToYesterday, "aggregate_total", agg.TotalAmount, "diff_pct", aggPct)
+			if w.OnReconcileAlert != nil {
+				w.OnReconcileAlert(daySumToYesterday, agg.TotalAmount, aggPct)
+			}
 		}
 	}
+	// [Ref: 01_实践 D7-3 必选] 审计日志：每次 ETL 校验结果便于回放
+	slog.Info("billing ETL audit: reconcile",
+		"billing_cycle", cycle,
+		"daily_sum", daySum,
+		"month_total", monthTotal,
+		"diff_pct", diffPct,
+		"daily_sum_to_yesterday", daySumToYesterday,
+		"aggregate_total", aggTotal,
+		"aggregate_diff_pct", aggPct,
+		"day_month_ok", diffPct <= ReconcileThreshold,
+		"agg_ok", aggPct <= ReconcileThreshold)
 	return nil
 }

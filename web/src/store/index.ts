@@ -10,6 +10,7 @@ import {
   CostTimeRange,
   CostCompareMode,
   ResourceDimension,
+  CloudProductDrilldownItem,
 } from '@/types';
 import { costService } from '@/services/costService';
 import { mockApi } from '@/services/mockApi';
@@ -20,10 +21,17 @@ interface AppState {
   loadingGlobalMetrics: boolean;
   errorGlobalMetrics: string | null;
 
-  // Namespace成本数据
+  // Namespace成本数据（Mock 或 L1 钻取）
   namespaceCosts: NamespaceCost[] | null;
   loadingNamespaceCosts: boolean;
   errorNamespaceCosts: string | null;
+
+  // 全环境云产品明细 [Ref: 01_设计 D9-8 GET /api/v1/cost/drilldown/global]
+  drilldownGlobalProducts: CloudProductDrilldownItem[] | null;
+  /** 环比：上期云产品明细，用于表格环比列 */
+  drilldownGlobalProductsPrev: CloudProductDrilldownItem[] | null;
+  loadingDrilldownGlobal: boolean;
+  errorDrilldownGlobal: string | null;
 
   // 钻取数据
   currentDrilldownItem: DrilldownItem | null;
@@ -41,6 +49,12 @@ interface AppState {
   loadingROI: boolean;
   errorROI: string | null;
 
+  /** [Ref: 01_设计 D9-16] 成本结构趋势（云产品明细索引区趋势图） */
+  costTrendData: Array<{ date: string; total_cost: number }> | null;
+  costTrendDataPrev: Array<{ date: string; total_cost: number }> | null; // 环比：上一周期
+  loadingCostTrend: boolean;
+  errorCostTrend: string | null;
+
   // 成本透视时间与对比
   costTimeRange: CostTimeRange;
   costCompareMode: CostCompareMode;
@@ -56,9 +70,15 @@ interface AppState {
   selectedWorkload: string | null;
   selectedPod: string | null;
 
+  /** [Ref: 01_实践 深色主题必选] 主题：light | dark */
+  theme: 'light' | 'dark';
+
   // Actions
+  setTheme: (theme: 'light' | 'dark') => void;
   fetchGlobalCostMetrics: () => Promise<void>;
   fetchNamespaceCosts: () => Promise<void>;
+  /** [Ref: 01_设计 §云产品成本明细索引 索引区时间范围] override 为索引区独立时间范围；withCompare 为 true 时再拉上期明细填 drilldownGlobalProductsPrev */
+  fetchDrilldownGlobal: (env?: string, category?: string, sort?: string, override?: { period: CostTimeRange; dateRange: [string, string] | null }, withCompare?: boolean) => Promise<void>;
   fetchDrilldownData: (
     type: string,
     id: string,
@@ -67,6 +87,7 @@ interface AppState {
   setSelectedDimension: (dimension: ResourceDimension) => void;
   fetchSLOStatus: (scope?: SLOScope) => Promise<void>;
   fetchROITrends: () => Promise<void>;
+  fetchCostTrend: (params?: { period?: string; date_from?: string; date_to?: string }, withCompare?: boolean) => Promise<void>;
   setCostTimeRange: (range: CostTimeRange) => void;
   setCostCompareMode: (mode: CostCompareMode) => void;
   setCostCustomDateRange: (range: [string, string] | null) => void;
@@ -91,6 +112,11 @@ export const useAppStore = create<AppState>()(
       loadingNamespaceCosts: false,
       errorNamespaceCosts: null,
 
+      drilldownGlobalProducts: null,
+      drilldownGlobalProductsPrev: null,
+      loadingDrilldownGlobal: false,
+      errorDrilldownGlobal: null,
+
       currentDrilldownItem: null,
       drilldownPath: [],
       loadingDrilldown: false,
@@ -104,6 +130,11 @@ export const useAppStore = create<AppState>()(
       loadingROI: false,
       errorROI: null,
 
+      costTrendData: null,
+      costTrendDataPrev: null,
+      loadingCostTrend: false,
+      errorCostTrend: null,
+
       costTimeRange: '30d',
       costCompareMode: 'none',
       costCustomDateRange: null,
@@ -114,7 +145,11 @@ export const useAppStore = create<AppState>()(
       selectedWorkload: null,
       selectedPod: null,
 
+      theme: 'light',
+
       // Actions
+      setTheme: (theme: 'light' | 'dark') => set({ theme }),
+
       fetchGlobalCostMetrics: async () => {
         const { useMockData, costTimeRange, costCompareMode, costCustomDateRange } = get();
         set({ loadingGlobalMetrics: true, errorGlobalMetrics: null });
@@ -172,6 +207,85 @@ export const useAppStore = create<AppState>()(
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : '获取命名空间成本失败';
           set({ errorNamespaceCosts: errorMessage, loadingNamespaceCosts: false });
+        }
+      },
+
+      fetchDrilldownGlobal: async (env?: string, category?: string, sort?: string, override?: { period: CostTimeRange; dateRange: [string, string] | null }, withCompare?: boolean) => {
+        const { useMockData, costTimeRange, costCustomDateRange } = get();
+        const period = override?.period ?? costTimeRange;
+        const dateRange = override?.dateRange ?? costCustomDateRange;
+        const envFilter = env ?? 'all';
+        const sortOrder = sort ?? 'cost_desc';
+        set({ loadingDrilldownGlobal: true, errorDrilldownGlobal: null, drilldownGlobalProductsPrev: null });
+        try {
+          if (useMockData) {
+            set({ drilldownGlobalProducts: [], loadingDrilldownGlobal: false });
+            return;
+          }
+          const yesterday = new Date();
+          yesterday.setDate(yesterday.getDate() - 1);
+          const yesterdayStr = yesterday.toISOString().slice(0, 10);
+          const now = new Date();
+          const monthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+          const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+          const prevMonthStr = `${prevMonth.getFullYear()}-${String(prevMonth.getMonth() + 1).padStart(2, '0')}`;
+          const q = Math.floor(now.getMonth() / 3) + 1;
+          const quarterKey = `${now.getFullYear()}-Q${q}`;
+          const prevQ = q <= 1 ? 4 : q - 1;
+          const prevY = q <= 1 ? now.getFullYear() - 1 : now.getFullYear();
+          const prevQuarterKey = `${prevY}-Q${prevQ}`;
+          const reportTypeMap: Record<string, string> = {
+            '1d': '1d', this_week: 'this_week', '7d_range': '7d', '7d': '7d', last_week: 'last_week',
+            '30d': '30d', month: 'month', quarter: 'quarter', '90d': '90d',
+            last_month: 'last_month', last_quarter: 'last_quarter', this_year: 'this_year', last_year: 'last_year',
+          };
+          const periodKeyMap: Record<string, string> = {
+            '1d': yesterdayStr, '7d': yesterdayStr, '7d_range': yesterdayStr, '30d': yesterdayStr, '90d': yesterdayStr,
+            this_week: yesterdayStr, last_week: yesterdayStr,
+            month: monthStr, last_month: prevMonthStr, quarter: quarterKey, last_quarter: prevQuarterKey,
+            this_year: String(now.getFullYear()), last_year: String(now.getFullYear() - 1),
+          };
+          if (period === 'custom' && dateRange?.[0] && dateRange?.[1]) {
+            const data = await costService.getDrilldownGlobal({
+              date_from: dateRange[0],
+              date_to: dateRange[1],
+              env: envFilter,
+              category: category || undefined,
+              sort: sortOrder,
+            });
+            set({ drilldownGlobalProducts: data, loadingDrilldownGlobal: false });
+            if (withCompare) {
+              const from = new Date(dateRange[0]);
+              const to = new Date(dateRange[1]);
+              const days = Math.round((to.getTime() - from.getTime()) / 86400000) + 1;
+              const prevEnd = new Date(from);
+              prevEnd.setDate(prevEnd.getDate() - 1);
+              const prevStart = new Date(prevEnd);
+              prevStart.setDate(prevStart.getDate() - days + 1);
+              const prevFrom = prevStart.toISOString().slice(0, 10);
+              const prevTo = prevEnd.toISOString().slice(0, 10);
+              const prevData = await costService.getDrilldownGlobal({ date_from: prevFrom, date_to: prevTo, env: envFilter, category: category || undefined, sort: sortOrder });
+              set(state => ({ ...state, drilldownGlobalProductsPrev: prevData }));
+            }
+            return;
+          }
+          const report_type = reportTypeMap[period] ?? '30d';
+          const period_key = periodKeyMap[period] ?? yesterdayStr;
+          const data = await costService.getDrilldownGlobal({ report_type, period_key, env: envFilter, category: category || undefined, sort: sortOrder });
+          set({ drilldownGlobalProducts: data, loadingDrilldownGlobal: false });
+          if (withCompare) {
+            const periodLen = period === '7d' || period === '7d_range' ? 7 : period === '90d' ? 90 : 30;
+            const end = new Date(yesterdayStr);
+            const startPrev = new Date(end);
+            startPrev.setDate(startPrev.getDate() - periodLen * 2 + 1);
+            const prevFrom = startPrev.toISOString().slice(0, 10);
+            const prevTo = new Date(end.getTime() - periodLen * 86400000).toISOString().slice(0, 10);
+            const prevData = await costService.getDrilldownGlobal({ date_from: prevFrom, date_to: prevTo, env: envFilter, category: category || undefined, sort: sortOrder });
+            set(state => ({ ...state, drilldownGlobalProductsPrev: prevData }));
+          }
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : '获取云产品明细失败';
+          set({ errorDrilldownGlobal: msg, loadingDrilldownGlobal: false });
         }
       },
 
@@ -247,6 +361,45 @@ export const useAppStore = create<AppState>()(
         }
       },
 
+      fetchCostTrend: async (params?: { period?: string; date_from?: string; date_to?: string }, withCompare?: boolean) => {
+        set({ loadingCostTrend: true, errorCostTrend: null, costTrendDataPrev: null });
+        try {
+          const res = await costService.getCostTrend(params);
+          const list = (res?.data ?? []).map(d => ({ date: d.date, total_cost: d.total_cost }));
+          set(state => ({ ...state, costTrendData: list, loadingCostTrend: false }));
+          if (withCompare && (params?.period || (params?.date_from && params?.date_to))) {
+            let prevFrom: string | undefined;
+            let prevTo: string | undefined;
+            if (params?.date_from && params?.date_to) {
+              const from = new Date(params.date_from);
+              const to = new Date(params.date_to);
+              const days = Math.round((to.getTime() - from.getTime()) / 86400000) + 1;
+              const prevEnd = new Date(from);
+              prevEnd.setDate(prevEnd.getDate() - 1);
+              const prevStart = new Date(prevEnd);
+              prevStart.setDate(prevStart.getDate() - days + 1);
+              prevFrom = prevStart.toISOString().slice(0, 10);
+              prevTo = prevEnd.toISOString().slice(0, 10);
+            } else {
+              const period = params?.period ?? '30d';
+              const len = period === '7d' || period === '7d_range' ? 7 : period === '90d' ? 90 : 30;
+              const end = new Date();
+              end.setDate(end.getDate() - 1);
+              const startPrev = new Date(end);
+              startPrev.setDate(startPrev.getDate() - len * 2 + 1);
+              prevFrom = startPrev.toISOString().slice(0, 10);
+              prevTo = new Date(end.getTime() - len * 86400000).toISOString().slice(0, 10);
+            }
+            const resPrev = await costService.getCostTrend(prevFrom && prevTo ? { date_from: prevFrom, date_to: prevTo } : { period: params?.period });
+            const listPrev = (resPrev?.data ?? []).map(d => ({ date: d.date, total_cost: d.total_cost }));
+            set(state => ({ ...state, costTrendDataPrev: listPrev }));
+          }
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : '获取成本趋势失败';
+          set({ errorCostTrend: msg, loadingCostTrend: false });
+        }
+      },
+
       setCostTimeRange: range => {
         set({ costTimeRange: range });
       },
@@ -294,6 +447,7 @@ export const useAppStore = create<AppState>()(
         set({
           errorGlobalMetrics: null,
           errorNamespaceCosts: null,
+          errorDrilldownGlobal: null,
           errorDrilldown: null,
           errorSLO: null,
           errorROI: null,
@@ -311,6 +465,7 @@ export const useAppStore = create<AppState>()(
         selectedNode: state.selectedNode,
         selectedWorkload: state.selectedWorkload,
         selectedPod: state.selectedPod,
+        theme: state.theme,
       }),
     },
   ),

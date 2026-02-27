@@ -22,10 +22,11 @@ func (m *mockBillingRepo) SaveCloudBillSummary(ctx context.Context, s postgres.C
 // mockPipelineRepo 实现 CloudBillPipelineRepository，记录日原始与聚合写入以便 D4-2 等多页/落库校验。
 type mockPipelineRepo struct {
 	mockBillingRepo
-	dailyRaw    postgres.CloudBillDailyRaw
-	dailyRawCnt int
-	monthlyRaw  *postgres.CloudBillMonthlyRaw
-	aggregate   *postgres.CloudBillAggregate
+	dailyRaw     postgres.CloudBillDailyRaw
+	dailyRawCnt  int
+	monthlyRaw   *postgres.CloudBillMonthlyRaw
+	aggregate    *postgres.CloudBillAggregate // 最后一次写入的聚合（兼容单次断言）
+	aggregates   []postgres.CloudBillAggregate // 全部写入的聚合（D9-6 多周期/对比会多次写入）
 }
 
 func (m *mockPipelineRepo) SaveCloudBillDailyRaw(ctx context.Context, r postgres.CloudBillDailyRaw) error {
@@ -58,6 +59,7 @@ func (m *mockPipelineRepo) GetCloudBillMonthlyRaw(ctx context.Context, billingCy
 }
 func (m *mockPipelineRepo) SaveCloudBillAggregate(ctx context.Context, a postgres.CloudBillAggregate) error {
 	m.aggregate = &a
+	m.aggregates = append(m.aggregates, a)
 	return nil
 }
 func (m *mockPipelineRepo) GetCloudBillAggregate(ctx context.Context, reportType, periodKey string) (*postgres.CloudBillAggregate, error) {
@@ -207,12 +209,17 @@ func TestBillingWorker_RunPipeline_MultiPageDaily(t *testing.T) {
 	if len(repo.dailyRaw.ProductBreakdown) < 5 {
 		t.Errorf("daily raw product_breakdown keys: got %v, want >= 5 (multi-page merged)", len(repo.dailyRaw.ProductBreakdown))
 	}
-	// 聚合 step5 会写入 1d/7d/30d/month/quarter 等；mock 只保留最后一次，故任一有效 report_type 即可 [Ref: 04_01_成本透视真实数据]
-	if repo.aggregate == nil || repo.aggregate.TotalAmount != 150 {
-		t.Errorf("aggregate not saved or wrong total: %+v", repo.aggregate)
+	// 聚合 step5 会写入 1d/7d/30d/90d/month/quarter 及对比周期；至少有一条 total=150、report_type 有效 [Ref: 04_01_成本透视真实数据、D9-6]
+	var found150 bool
+	validReportTypes := map[string]bool{"1d": true, "7d": true, "30d": true, "month": true, "quarter": true, "90d": true, "last_week": true, "last_month": true, "last_quarter": true, "this_year": true, "last_year": true}
+	for i := range repo.aggregates {
+		a := &repo.aggregates[i]
+		if a.TotalAmount == 150 && validReportTypes[a.ReportType] {
+			found150 = true
+			break
+		}
 	}
-	validReportTypes := map[string]bool{"1d": true, "7d": true, "30d": true, "month": true, "quarter": true, "90d": true, "last_week": true, "last_month": true, "last_quarter": true}
-	if !validReportTypes[repo.aggregate.ReportType] {
-		t.Errorf("aggregate report_type unexpected: %s", repo.aggregate.ReportType)
+	if !found150 {
+		t.Errorf("aggregate not saved or wrong total: no row with TotalAmount=150 in %d saves; last: %+v", len(repo.aggregates), repo.aggregate)
 	}
 }

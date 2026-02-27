@@ -76,6 +76,31 @@ export const costService = {
     }
   },
 
+  /** 全环境云产品明细 [Ref: 01_设计 D9-8、D6 索引 env] GET /api/v1/cost/drilldown/global */
+  async getDrilldownGlobal(params?: {
+    report_type?: string;
+    period_key?: string;
+    category?: string;
+    sort?: string;
+    env?: string;
+    date_from?: string;
+    date_to?: string;
+  }): Promise<EnvDrilldownApiItem[]> {
+    const query: Record<string, string> = {};
+    if (params?.report_type) query.report_type = params.report_type;
+    if (params?.period_key) query.period_key = params.period_key;
+    if (params?.category) query.category = params.category;
+    if (params?.sort) query.sort = params.sort ?? 'cost_desc';
+    if (params?.env) query.env = params.env;
+    if (params?.date_from) query.date_from = params.date_from;
+    if (params?.date_to) query.date_to = params.date_to;
+    const response = await apiClient.get<EnvDrilldownApiItem[]>(
+      `${COST_API_PREFIX}/drilldown/global`,
+      { params: query },
+    );
+    return Array.isArray(response.data) ? response.data : [];
+  },
+
   /** 按环境云产品钻取 [Ref: 01_设计 D9-4] GET /api/v1/cost/drilldown/env/:envId */
   async getEnvDrilldown(
     envId: string,
@@ -124,6 +149,30 @@ export const costService = {
       console.error('Failed to fetch SLO status:', error);
       throw error;
     }
+  },
+
+  /** [Ref: 01_设计 D9-16] 成本结构趋势 GET /api/v1/cost/trend，用于云产品明细索引区趋势图 */
+  async getCostTrend(params?: {
+    period?: string;
+    date_from?: string;
+    date_to?: string;
+  }): Promise<{ data: Array<{ date: string; total_cost: number; by_domain?: Record<string, number> }> }> {
+    const query: Record<string, string> = {};
+    if (params?.period) query.period = params.period;
+    if (params?.date_from) query.date_from = params.date_from;
+    if (params?.date_to) query.date_to = params.date_to;
+    const response = await apiClient.get<{ data: Array<{ date: string; total_cost?: number; by_domain?: Record<string, number> }> }>(
+      `${COST_API_PREFIX}/trend`,
+      { params: query, timeout: 15000 },
+    );
+    const data = response.data?.data ?? [];
+    return {
+      data: data.map((d: { date: string; total_cost?: number; by_domain?: Record<string, number> }) => ({
+        date: d.date,
+        total_cost: d.total_cost ?? 0,
+        by_domain: d.by_domain,
+      })),
+    };
   },
 
   // 获取ROI趋势数据 (GET /api/v1/roi/dashboard)

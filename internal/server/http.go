@@ -102,8 +102,12 @@ func (s *HTTPServer) registerCostRoutes(group *gin.RouterGroup) {
 	group.GET("/namespace/:namespace", s.namespaceCost)
 	// 按环境云产品钻取 [Ref: 01_设计 D9-4、12_API]
 	group.GET("/drilldown/env/:envId", s.drilldownEnvCost)
+	// 全环境云产品明细（方案 A）[Ref: 01_设计 D9-8、12_API]；须在 /drilldown/:level/:identifier 之前注册
+	group.GET("/drilldown/global", s.drilldownGlobalCost)
 	// Drilldown
 	group.GET("/drilldown/:level/:identifier", s.drilldownCost)
+	// 成本结构趋势 [Ref: 01_设计 D9-9、12_API]
+	group.GET("/trend", s.costTrend)
 }
 
 // registerSLORoutes registers SLO-related routes (temporary implementation).
@@ -234,17 +238,36 @@ var levelToType = map[string]string{
 	"L1": "namespace", "L2": "node", "L3": "workload", "L4": "pod",
 }
 
-// drilldownEnvCost handles GET /api/v1/cost/drilldown/env/:envId?report_type=&period_key=&category=&sort=
+// drilldownEnvCost handles GET /api/v1/cost/drilldown/env/:envId?report_type=&period_key=&category=&sort= 或 date_from=&date_to= [Ref: 01_设计 D8 自定义日期下环境钻取]
 func (s *HTTPServer) drilldownEnvCost(c *gin.Context) {
 	envId := c.Param("envId")
+	category := c.Query("category")
+	sortOrder := c.DefaultQuery("sort", "cost_desc")
+	dateFromStr := c.Query("date_from")
+	dateToStr := c.Query("date_to")
+	if s.costService != nil && dateFromStr != "" && dateToStr != "" {
+		if from, err := time.Parse("2006-01-02", dateFromStr); err == nil {
+			if to, err := time.Parse("2006-01-02", dateToStr); err == nil {
+				// 自定义日期：方案 B 日表无 account_id 时返回全环境聚合；方案 A 时可按 env 过滤
+				list, err := s.costService.GetGlobalDrilldownByDateRange(c.Request.Context(), from, to, category, sortOrder, envId)
+				if err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+					return
+				}
+				if list == nil {
+					list = []dto.EnvDrilldownItem{}
+				}
+				c.JSON(http.StatusOK, list)
+				return
+			}
+		}
+	}
 	reportType := c.DefaultQuery("report_type", "30d")
 	periodKey := c.Query("period_key")
 	if periodKey == "" {
 		now := time.Now().UTC()
-		periodKey = now.Format("2006-01-02")
+		periodKey = now.AddDate(0, 0, -1).Format("2006-01-02")
 	}
-	category := c.Query("category")
-	sortOrder := c.DefaultQuery("sort", "cost_desc")
 	if s.costService != nil {
 		list, err := s.costService.GetEnvDrilldown(c.Request.Context(), envId, reportType, periodKey, category, sortOrder)
 		if err != nil {
@@ -258,6 +281,82 @@ func (s *HTTPServer) drilldownEnvCost(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, []dto.EnvDrilldownItem{})
+}
+
+// drilldownGlobalCost handles GET /api/v1/cost/drilldown/global?report_type=&period_key=&category=&sort=&env= [Ref: 01_设计 D9-8、D6 云产品成本明细索引、12_API]
+func (s *HTTPServer) drilldownGlobalCost(c *gin.Context) {
+	category := c.Query("category")
+	sortOrder := c.DefaultQuery("sort", "cost_desc")
+	env := c.DefaultQuery("env", "all") // all | POC | FAT | UAT | PROD
+	dateFromStr := c.Query("date_from")
+	dateToStr := c.Query("date_to")
+	if s.costService != nil && dateFromStr != "" && dateToStr != "" {
+		if from, err := time.Parse("2006-01-02", dateFromStr); err == nil {
+			if to, err := time.Parse("2006-01-02", dateToStr); err == nil {
+				list, err := s.costService.GetGlobalDrilldownByDateRange(c.Request.Context(), from, to, category, sortOrder, env)
+				if err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+					return
+				}
+				if list == nil {
+					list = []dto.EnvDrilldownItem{}
+				}
+				c.JSON(http.StatusOK, list)
+				return
+			}
+		}
+	}
+	reportType := c.DefaultQuery("report_type", "30d")
+	periodKey := c.Query("period_key")
+	if periodKey == "" {
+		periodKey = time.Now().UTC().AddDate(0, 0, -1).Format("2006-01-02")
+	}
+	if s.costService != nil {
+		list, err := s.costService.GetGlobalDrilldown(c.Request.Context(), reportType, periodKey, category, sortOrder, env)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if list == nil {
+			list = []dto.EnvDrilldownItem{}
+		}
+		c.JSON(http.StatusOK, list)
+		return
+	}
+	c.JSON(http.StatusOK, []dto.EnvDrilldownItem{})
+}
+
+// costTrend handles GET /api/v1/cost/trend?period=7d|30d|90d 或 date_from=YYYY-MM-DD&date_to=YYYY-MM-DD [Ref: 01_设计 D9-9、12_API]
+func (s *HTTPServer) costTrend(c *gin.Context) {
+	period := c.Query("period")
+	dateFromStr := c.Query("date_from")
+	dateToStr := c.Query("date_to")
+	var dateFrom, dateTo *time.Time
+	if dateFromStr != "" && dateToStr != "" {
+		if from, err := time.Parse("2006-01-02", dateFromStr); err == nil {
+			dateFrom = &from
+		}
+		if to, err := time.Parse("2006-01-02", dateToStr); err == nil {
+			dateTo = &to
+		}
+	}
+	if s.costService != nil {
+		resp, err := s.costService.GetCostTrend(c.Request.Context(), period, dateFrom, dateTo)
+		if err != nil {
+			if errors.Is(err, service.ErrFallbackTimeout) {
+				c.JSON(http.StatusServiceUnavailable, gin.H{"error": "cost trend query timeout"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if resp == nil {
+			resp = &dto.CostTrendResponse{Data: []dto.CostTrendDataPoint{}}
+		}
+		c.JSON(http.StatusOK, resp)
+		return
+	}
+	c.JSON(http.StatusOK, dto.CostTrendResponse{Data: []dto.CostTrendDataPoint{}})
 }
 
 // drilldownCost handles GET /api/v1/cost/drilldown/:level/:identifier

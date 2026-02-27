@@ -64,6 +64,18 @@ type EnvDrilldownItem struct {
 	Category    string  `json:"category"` // compute|network|storage|security|other
 }
 
+// CostTrendDataPoint 成本趋势按日数据点。[Ref: 12_API GET /api/v1/cost/trend]
+type CostTrendDataPoint struct {
+	Date       string             `json:"date"`        // YYYY-MM-DD
+	TotalCost  float64            `json:"total_cost,omitempty"`
+	ByDomain   map[string]float64 `json:"by_domain,omitempty"`
+}
+
+// CostTrendResponse 成本结构趋势响应；最大 90 天、超时 10s。[Ref: 01_设计 §成本趋势 API、12_API]
+type CostTrendResponse struct {
+	Data []CostTrendDataPoint `json:"data"`
+}
+
 // NamespaceCostSummary represents a summary of cost for a namespace.
 type NamespaceCostSummary struct {
 	Name      string  `json:"name"`

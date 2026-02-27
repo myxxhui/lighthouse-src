@@ -305,15 +305,15 @@ func (p *PGRepository) GetCloudBillMonthlyRaw(ctx context.Context, billingCycle 
 func (p *PGRepository) SaveCloudBillAggregate(ctx context.Context, a CloudBillAggregate) error {
 	js, _ := json.Marshal(a.ProductBreakdown)
 	now := time.Now()
-	var accID interface{} = a.AccountID
-	if a.AccountID == "" {
-		accID = nil
+	accID := a.AccountID
+	if accID == "" {
+		accID = "" // 单账号占位，与 06_/01_设计 一致 [Ref: D9-5]
 	}
 	_, err := p.db.ExecContext(ctx,
-		`INSERT INTO cost_cloud_bill_aggregate (report_type, period_key, total_amount, product_breakdown, last_success_at, created_at, updated_at, account_id)
+		`INSERT INTO cost_cloud_bill_aggregate (report_type, period_key, account_id, total_amount, product_breakdown, last_success_at, created_at, updated_at)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		 ON CONFLICT (report_type, period_key) DO UPDATE SET total_amount = EXCLUDED.total_amount, product_breakdown = EXCLUDED.product_breakdown, last_success_at = EXCLUDED.last_success_at, updated_at = EXCLUDED.updated_at, account_id = EXCLUDED.account_id`,
-		a.ReportType, a.PeriodKey, a.TotalAmount, js, a.LastSuccessAt, now, now, accID)
+		 ON CONFLICT (report_type, period_key, account_id) DO UPDATE SET total_amount = EXCLUDED.total_amount, product_breakdown = EXCLUDED.product_breakdown, last_success_at = EXCLUDED.last_success_at, updated_at = EXCLUDED.updated_at`,
+		a.ReportType, a.PeriodKey, accID, a.TotalAmount, js, a.LastSuccessAt, now, now)
 	return err
 }
 
@@ -326,7 +326,7 @@ func (p *PGRepository) GetCloudBillAggregate(ctx context.Context, reportType, pe
 	return &list[0], nil
 }
 
-// ListCloudBillAggregateForReportPeriod 返回指定 report_type+period_key 下所有 account 的聚合行。[Ref: 01_设计 §后端数据聚合与存储方案]
+// ListCloudBillAggregateForReportPeriod 返回指定 report_type+period_key 下所有 account 的聚合行。[Ref: 01_设计 §后端数据聚合与存储方案、D9-5]
 func (p *PGRepository) ListCloudBillAggregateForReportPeriod(ctx context.Context, reportType, periodKey string) ([]CloudBillAggregate, error) {
 	rows, err := p.db.QueryContext(ctx,
 		`SELECT total_amount, product_breakdown, last_success_at, created_at, updated_at, COALESCE(account_id,'') FROM cost_cloud_bill_aggregate WHERE report_type = $1 AND period_key = $2`,

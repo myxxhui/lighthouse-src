@@ -60,8 +60,19 @@ func TestCostService_GetGlobalCost_CloudBill(t *testing.T) {
 	if resp.TotalCost != 125000 {
 		t.Errorf("TotalCost = %v, want 125000 (from cloud bill)", resp.TotalCost)
 	}
-	if len(resp.DomainBreakdown) != 3 {
-		t.Errorf("DomainBreakdown len = %d, want 3", len(resp.DomainBreakdown))
+	// [Ref: 01_设计 §成本分解] domain_breakdown 固定五类：计算资源、存储、网络、安全、其他
+	if len(resp.DomainBreakdown) != 5 {
+		t.Errorf("DomainBreakdown len = %d, want 5", len(resp.DomainBreakdown))
+	}
+	byDomain := make(map[string]float64)
+	for _, d := range resp.DomainBreakdown {
+		byDomain[d.Domain] = d.Cost
+	}
+	if byDomain["计算资源"] != 85000 || byDomain["存储"] != 25000 || byDomain["网络"] != 15000 {
+		t.Errorf("DomainBreakdown costs = %v", byDomain)
+	}
+	if byDomain["安全"] != 0 || byDomain["其他"] != 0 {
+		t.Errorf("DomainBreakdown 安全/其他 should be 0 when absent: %v", byDomain)
 	}
 }
 
@@ -89,8 +100,14 @@ func TestCostService_GetGlobalCost_CloudBillZero(t *testing.T) {
 	if resp.TotalCost != 0 {
 		t.Errorf("TotalCost = %v, want 0 (from cloud bill)", resp.TotalCost)
 	}
-	if len(resp.DomainBreakdown) != 0 {
-		t.Errorf("DomainBreakdown len = %d, want 0", len(resp.DomainBreakdown))
+	// [Ref: 01_设计 §成本分解] 无数据时仍返回五类（安全、其他为 0）
+	if len(resp.DomainBreakdown) != 5 {
+		t.Errorf("DomainBreakdown len = %d, want 5", len(resp.DomainBreakdown))
+	}
+	for _, d := range resp.DomainBreakdown {
+		if d.Cost != 0 {
+			t.Errorf("DomainBreakdown %s cost = %v, want 0", d.Domain, d.Cost)
+		}
 	}
 }
 
