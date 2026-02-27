@@ -775,57 +775,65 @@ const CostOverviewPage: React.FC = () => {
                   />
                 </div>
                 </Card>
-                {/* [Ref: 01_设计 D9-16] 趋势总图默认关闭且收起，由「展示趋势」开关控制 */}
-                {!useMockData && showTrendChart && (
+                {/* [Ref: 01_设计 D9-16] 成本趋势区块始终展示，避免「趋势没了」；默认关闭图表由「展示趋势」开关控制 */}
+                {!useMockData && (
                   <Card size="small" title="成本趋势" style={{ marginBottom: 16 }}>
-                    {errorCostTrend && (
-                      <Alert message={errorCostTrend} type="warning" showIcon style={{ marginBottom: 8 }} />
-                    )}
-                    {loadingCostTrend ? (
-                      <div style={{ height: 220, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <LoadingOutlined spin /> 加载趋势中...
-                      </div>
-                    ) : (costTrendData?.length ?? 0) > 0 ? (
-                      <div>
-                        {drilldownCompare && (!costTrendDataPrev || costTrendDataPrev.length === 0) && (
-                          <div style={{ marginBottom: 8, fontSize: 12, color: '#faad14' }}>环比已开，暂无上期数据（展示「—」）</div>
-                        )}
-                      <div style={{ height: 220 }}>
-                        <ResponsiveContainer width="100%" height="100%">
-                          <LineChart
-                            data={(() => {
-                              const cur = costTrendData ?? [];
-                              const prev = costTrendDataPrev ?? [];
-                              const dateSet = new Set<string>([...cur.map(d => d.date), ...prev.map(d => d.date)]);
-                              const sorted = Array.from(dateSet).sort();
-                              return sorted.map(date => ({
-                                date,
-                                本期: cur.find(d => d.date === date)?.total_cost ?? null,
-                                上期: drilldownCompare && prev.length ? (prev.find(d => d.date === date)?.total_cost ?? null) : undefined,
-                              }));
-                            })()}
-                            margin={{ top: 5, right: 20, left: 0, bottom: 5 }}
-                          >
-                            <CartesianGrid strokeDasharray="3 3" />
-                            <XAxis dataKey="date" tick={{ fontSize: 11 }} tickFormatter={d => d.slice(5)} />
-                            <YAxis tick={{ fontSize: 11 }} tickFormatter={v => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(v))} />
-                            <RechartsTooltip
-                              formatter={(v: number) => (v != null ? `${CURRENCY_SYMBOL}${Number(v).toLocaleString()}` : '-')}
-                              labelFormatter={l => l}
-                            />
-                            <Line type="monotone" dataKey="本期" stroke="#1677ff" dot={false} name="本期" />
-                            {drilldownCompare && costTrendDataPrev?.length ? (
-                              <Line type="monotone" dataKey="上期" stroke="#52c41a" dot={false} name="上期" />
-                            ) : null}
-                            <Legend />
-                          </LineChart>
-                        </ResponsiveContainer>
-                      </div>
+                    {!showTrendChart ? (
+                      <div style={{ padding: '12px 0', color: 'var(--ant-color-text-secondary)', fontSize: 13 }}>
+                        请打开上方「展示趋势」开关查看按日成本趋势图。（默认关闭以保持页面简洁；开启后从 GET /api/v1/cost/trend 拉取数据）
                       </div>
                     ) : (
-                      <div style={{ height: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#999' }}>
-                        暂无趋势数据
-                      </div>
+                      <>
+                        {errorCostTrend && (
+                          <Alert message={errorCostTrend} type="warning" showIcon style={{ marginBottom: 8 }} />
+                        )}
+                        {loadingCostTrend ? (
+                          <div style={{ height: 220, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <LoadingOutlined spin /> 加载趋势中...
+                          </div>
+                        ) : (costTrendData?.length ?? 0) > 0 ? (
+                          <div>
+                            {drilldownCompare && (!costTrendDataPrev || costTrendDataPrev.length === 0) && (
+                              <div style={{ marginBottom: 8, fontSize: 12, color: '#faad14' }}>环比已开，暂无上期数据（展示「—」）</div>
+                            )}
+                            <div style={{ height: 220 }}>
+                              <ResponsiveContainer width="100%" height="100%">
+                                <LineChart
+                                  data={(() => {
+                                    const cur = costTrendData ?? [];
+                                    const prev = costTrendDataPrev ?? [];
+                                    const dateSet = new Set<string>([...cur.map(d => d.date), ...prev.map(d => d.date)]);
+                                    const sorted = Array.from(dateSet).sort();
+                                    return sorted.map(date => ({
+                                      date,
+                                      本期: cur.find(d => d.date === date)?.total_cost ?? null,
+                                      上期: drilldownCompare && prev.length ? (prev.find(d => d.date === date)?.total_cost ?? null) : undefined,
+                                    }));
+                                  })()}
+                                  margin={{ top: 5, right: 20, left: 0, bottom: 5 }}
+                                >
+                                  <CartesianGrid strokeDasharray="3 3" />
+                                  <XAxis dataKey="date" tick={{ fontSize: 11 }} tickFormatter={d => d.slice(5)} />
+                                  <YAxis tick={{ fontSize: 11 }} tickFormatter={v => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(v))} />
+                                  <RechartsTooltip
+                                    formatter={(v: number) => (v != null ? `${CURRENCY_SYMBOL}${Number(v).toLocaleString()}` : '-')}
+                                    labelFormatter={l => l}
+                                  />
+                                  <Line type="monotone" dataKey="本期" stroke="#1677ff" dot={false} name="本期" />
+                                  {drilldownCompare && costTrendDataPrev?.length ? (
+                                    <Line type="monotone" dataKey="上期" stroke="#52c41a" dot={false} name="上期" />
+                                  ) : null}
+                                  <Legend />
+                                </LineChart>
+                              </ResponsiveContainer>
+                            </div>
+                          </div>
+                        ) : (
+                          <div style={{ height: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#999' }}>
+                            暂无趋势数据（请确认后端 GET /api/v1/cost/trend 已启用且日原始表有数据）
+                          </div>
+                        )}
+                      </>
                     )}
                   </Card>
                 )}
