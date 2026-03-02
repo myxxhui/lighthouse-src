@@ -87,12 +87,23 @@ export function adaptGlobalCostToCostMetrics(res: GlobalCostApiResponse): CostMe
     previous_period_cost: e.previous_period_cost,
     change_pct: e.change_pct,
   }));
+  // [Ref: 用户需求 仅四大分类] 从 domain_breakdown 构建 billDetail（计算资源、存储、网络、安全）
+  const billDetail =
+    domainBreakdown.length > 0
+      ? {
+          compute: domainBreakdown.find((d) => d.domain === '计算资源')?.cost ?? 0,
+          storage: domainBreakdown.find((d) => d.domain === '存储')?.cost ?? 0,
+          network: domainBreakdown.find((d) => d.domain === '网络')?.cost ?? 0,
+          security: domainBreakdown.find((d) => d.domain === '安全')?.cost ?? 0,
+        }
+      : undefined;
   return {
     totalBillableCost: res.total_cost,
     totalOptimizableSpace: totalOptimizable,
     globalEfficiency,
     domainBreakdown,
     envBreakdown,
+    billDetail,
     lastUpdatedAt,
   };
 }

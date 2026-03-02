@@ -454,27 +454,19 @@ func (w *BillingWorker) RunPipeline(ctx context.Context) error {
 		_ = saveAggWithPrev("last_quarter", prevQuarterKey, totalPrevQ, byCatPrevQ, prevPrevQuarterKey, totalPrevPrevQ, byCatPrevPrevQ)
 	}
 
-	// this_year / last_year：从月原始表汇总 [Ref: 01_设计 D9-10、§后端数据聚合与存储方案]
+	// this_year / last_year：日原始表叠加（与 quarter 相同模式）[Ref: 01_设计 D9-10]
+	// 根因修正：原月原始表汇总不含当月在途数据（如 3 月仅有 1-2 日）导致 this_year < last_quarter。
+	// 正确做法：1 月 1 日至昨日按天叠加，确保 YTD 包含当月已落盘的每日数据。
 	thisYearKey := now.Format("2006")
-	var totalThisYear, totalLastYear float64
-	byCatThisYear := make(map[string]float64)
-	byCatLastYear := make(map[string]float64)
-	for m := 1; m <= 12; m++ {
-		cycle := fmt.Sprintf("%04d-%02d", now.Year(), m)
-		if mon, _ := w.pipelineRepo.GetCloudBillMonthlyRaw(ctx, cycle); mon != nil {
-			totalThisYear += mon.TotalAmount
-			for k, v := range mon.ProductBreakdown {
-				byCatThisYear[k] += v
-			}
-		}
-		cycleLast := fmt.Sprintf("%04d-%02d", now.Year()-1, m)
-		if mon, _ := w.pipelineRepo.GetCloudBillMonthlyRaw(ctx, cycleLast); mon != nil {
-			totalLastYear += mon.TotalAmount
-			for k, v := range mon.ProductBreakdown {
-				byCatLastYear[k] += v
-			}
-		}
-	}
+	firstOfYear := time.Date(now.Year(), 1, 1, 0, 0, 0, 0, time.UTC)
+	rowsThisYear, _ := w.pipelineRepo.ListCloudBillDailyRawFromTo(ctx, firstOfYear, yesterdayT)
+	totalThisYear, byCatThisYear := mergeDailyRows(rowsThisYear)
+
+	// last_year：去年全年（1 月 1 日至 12 月 31 日），日原始表叠加
+	firstOfLastYear := time.Date(now.Year()-1, 1, 1, 0, 0, 0, 0, time.UTC)
+	lastDayOfLastYear := time.Date(now.Year()-1, 12, 31, 0, 0, 0, 0, time.UTC)
+	rowsLastYear, _ := w.pipelineRepo.ListCloudBillDailyRawFromTo(ctx, firstOfLastYear, lastDayOfLastYear)
+	totalLastYear, byCatLastYear := mergeDailyRows(rowsLastYear)
 	if totalThisYear > 0 || len(byCatThisYear) > 0 {
 		lastYearKey := fmt.Sprintf("%d", now.Year()-1)
 		_ = saveAggWithPrev("this_year", thisYearKey, totalThisYear, byCatThisYear, lastYearKey, totalLastYear, byCatLastYear)

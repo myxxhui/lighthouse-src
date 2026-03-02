@@ -3,7 +3,6 @@ import {
   NamespaceCost,
   DrilldownItem,
   SLOStatus,
-  ROITrend,
   SLOScope,
   CostTimeRange,
   CostCompareMode,
@@ -57,7 +56,7 @@ const generateMockCostMetrics = (opts?: {
       compute: Math.round(85000 * m.cost),
       storage: Math.round(25000 * m.cost),
       network: Math.round(15000 * m.cost),
-      other: 0,
+      security: 0,
     },
     lastUpdatedAt: new Date().toISOString(),
     envBreakdown: [
@@ -461,26 +460,6 @@ const generateMockSLOStatusByScope = (scope?: SLOScope): SLOStatus[] => {
   return serviceRows;
 };
 
-const generateMockROITrends = (): ROITrend[] => {
-  const trends: ROITrend[] = [];
-  const today = new Date();
-
-  for (let i = 30; i >= 0; i--) {
-    const date = new Date(today);
-    date.setDate(date.getDate() - i);
-    const dateString = date.toISOString().split('T')[0];
-
-    trends.push({
-      date: dateString,
-      value: Math.random() * 100000 + 50000,
-      cost: Math.random() * 80000 + 20000,
-      efficiency: Math.floor(Math.random() * 30) + 70,
-    });
-  }
-
-  return trends;
-};
-
 export const mockApi = {
   getGlobalCostMetrics: (params?: {
     period?: CostTimeRange;
@@ -503,9 +482,5 @@ export const mockApi = {
 
   getSLOStatus: (scope?: SLOScope): Promise<SLOStatus[]> => {
     return Promise.resolve(generateMockSLOStatusByScope(scope));
-  },
-
-  getROITrends: (): Promise<ROITrend[]> => {
-    return Promise.resolve(generateMockROITrends());
   },
 };

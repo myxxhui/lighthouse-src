@@ -18,12 +18,12 @@ export type CostTimeRange =
 /** 成本对比模式 */
 export type CostCompareMode = 'none' | 'previous';
 
-/** 成本账单详情：按资源类型拆分的费用（与领域可对齐） */
+/** 成本账单详情：按四大类拆分的费用（与领域可对齐）；仅四大类，无其它。[Ref: 用户需求 仅四大分类] */
 export interface BillDetail {
   compute: number;
   storage: number;
   network: number;
-  other: number;
+  security: number;
 }
 
 /** 资源维度：算力 / 存储 / 网络，与 domain、billDetail 对齐 */
@@ -141,13 +141,6 @@ export interface SLOStatus {
   scopeId?: string;
   /** 当前层级展示名称 */
   scopeName?: string;
-}
-
-export interface ROITrend {
-  date: string;
-  value: number;
-  cost: number;
-  efficiency: number;
 }
 
 export interface ApiError {

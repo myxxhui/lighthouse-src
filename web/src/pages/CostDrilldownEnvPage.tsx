@@ -12,11 +12,10 @@ import type { CostTimeRange } from '@/types';
 
 const CATEGORY_OPTIONS = [
   { label: '全部', value: '' },
-  { label: '计算', value: 'compute' },
-  { label: '网络', value: 'network' },
+  { label: '计算资源', value: 'compute' },
   { label: '存储', value: 'storage' },
+  { label: '网络', value: 'network' },
   { label: '安全', value: 'security' },
-  { label: '其他', value: 'other' },
 ];
 
 /** 与后端 reportTypeAndPeriodKey 口径一致：7d/30d/90d 结束日为昨日 [Ref: 01_设计 D9-7] */

@@ -5,7 +5,6 @@ import {
   NamespaceCost,
   DrilldownItem,
   SLOStatus,
-  ROITrend,
   SLOScope,
   CostTimeRange,
   CostCompareMode,
@@ -44,11 +43,6 @@ interface AppState {
   loadingSLO: boolean;
   errorSLO: string | null;
 
-  // ROI趋势
-  roiTrends: ROITrend[] | null;
-  loadingROI: boolean;
-  errorROI: string | null;
-
   /** [Ref: 01_设计 D9-16] 成本结构趋势（云产品明细索引区趋势图） */
   costTrendData: Array<{ date: string; total_cost: number }> | null;
   costTrendDataPrev: Array<{ date: string; total_cost: number }> | null; // 环比：上一周期
@@ -86,7 +80,6 @@ interface AppState {
   ) => Promise<void>;
   setSelectedDimension: (dimension: ResourceDimension) => void;
   fetchSLOStatus: (scope?: SLOScope) => Promise<void>;
-  fetchROITrends: () => Promise<void>;
   fetchCostTrend: (params?: { period?: string; date_from?: string; date_to?: string }, withCompare?: boolean) => Promise<void>;
   setCostTimeRange: (range: CostTimeRange) => void;
   setCostCompareMode: (mode: CostCompareMode) => void;
@@ -125,10 +118,6 @@ export const useAppStore = create<AppState>()(
       sloStatus: null,
       loadingSLO: false,
       errorSLO: null,
-
-      roiTrends: null,
-      loadingROI: false,
-      errorROI: null,
 
       costTrendData: null,
       costTrendDataPrev: null,
@@ -172,20 +161,23 @@ export const useAppStore = create<AppState>()(
             data = await costService.getGlobalCostMetrics({ period: effectivePeriod, compareMode: costCompareMode });
           }
           set({ globalCostMetrics: data, loadingGlobalMetrics: false });
-          // #region agent log
-          const pocCost = data.envBreakdown?.find(e => e.environment === 'POC')?.total_cost;
-          fetch('http://localhost:7370/ingest/822a34d3-40fb-48c1-8a89-5d12dd62b79d', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c39b07' }, body: JSON.stringify({ sessionId: 'c39b07', hypothesisId: 'H2_H4', location: 'store:fetchGlobalCostMetrics', message: 'global cost received', data: { useMockData, hasLastUpdatedAt: !!data.lastUpdatedAt, envBreakdownLen: data.envBreakdown?.length ?? 0, pocTotalCost: pocCost ?? 0 }, timestamp: Date.now() }) }).catch(() => {});
-          // #endregion
         } catch (error) {
-          // D8-8：日期选择请求超时提示重试或缩小范围
+          const err = error as { message?: string; code?: string };
           const isTimeout =
-            (error as { code?: string })?.code === 'ECONNABORTED' ||
-            (error instanceof Error && error.message?.toLowerCase().includes('timeout'));
-          const errorMessage = isTimeout
-            ? '请求超时，请重试或缩小日期范围'
-            : error instanceof Error
-              ? error.message
-              : '获取全局成本指标失败';
+            err?.code === 'ECONNABORTED' ||
+            (typeof err?.message === 'string' && err.message.toLowerCase().includes('timeout'));
+          const is502 = err?.code === '502';
+          const is503 = err?.code === '503';
+          // 502/503/超时：视为「数据加载中/后端可能正忙」，用友好提示
+          const likelyBackendBusy = is502 || is503 || isTimeout;
+          let errorMessage: string;
+          if (likelyBackendBusy) {
+            errorMessage = '数据正在加载或聚合中，请稍候 1～3 分钟再试。';
+          } else {
+            // 其余视为后端真实错误，保留错误信息
+            const raw = err?.message || (error instanceof Error ? error.message : null) || '未知错误';
+            errorMessage = raw.includes('后端') ? raw : `后端错误：${raw}`;
+          }
           set({ errorGlobalMetrics: errorMessage, loadingGlobalMetrics: false });
         }
       },
@@ -234,6 +226,23 @@ export const useAppStore = create<AppState>()(
           const prevQ = q <= 1 ? 4 : q - 1;
           const prevY = q <= 1 ? now.getFullYear() - 1 : now.getFullYear();
           const prevQuarterKey = `${prevY}-Q${prevQ}`;
+          // [Ref: 01_设计 report_type 与 period_key] this_week 后端期望 period_key=YYYY-Www（ISO 周），last_week 为上周日日期
+          const getISOWeekKey = (d: Date) => {
+            const dt = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+            const dayNum = dt.getUTCDay() || 7;
+            dt.setUTCDate(dt.getUTCDate() + 4 - dayNum);
+            const year = dt.getUTCFullYear();
+            const start = new Date(Date.UTC(year, 0, 1));
+            const week = Math.ceil((((dt.getTime() - start.getTime()) / 86400000) + 1) / 7);
+            return `${year}-W${String(week).padStart(2, '0')}`;
+          };
+          const getLastWeekEndKey = (d: Date) => {
+            const wd = d.getDay();
+            const sunOffset = wd === 0 ? 7 : wd;
+            const lastSunday = new Date(d);
+            lastSunday.setDate(d.getDate() - sunOffset);
+            return lastSunday.toISOString().slice(0, 10);
+          };
           const reportTypeMap: Record<string, string> = {
             '1d': '1d', this_week: 'this_week', '7d_range': '7d', '7d': '7d', last_week: 'last_week',
             '30d': '30d', month: 'month', quarter: 'quarter', '90d': '90d',
@@ -241,7 +250,7 @@ export const useAppStore = create<AppState>()(
           };
           const periodKeyMap: Record<string, string> = {
             '1d': yesterdayStr, '7d': yesterdayStr, '7d_range': yesterdayStr, '30d': yesterdayStr, '90d': yesterdayStr,
-            this_week: yesterdayStr, last_week: yesterdayStr,
+            this_week: getISOWeekKey(now), last_week: getLastWeekEndKey(now),
             month: monthStr, last_month: prevMonthStr, quarter: quarterKey, last_quarter: prevQuarterKey,
             this_year: String(now.getFullYear()), last_year: String(now.getFullYear() - 1),
           };
@@ -273,14 +282,63 @@ export const useAppStore = create<AppState>()(
           const period_key = periodKeyMap[period] ?? yesterdayStr;
           const data = await costService.getDrilldownGlobal({ report_type, period_key, env: envFilter, category: category || undefined, sort: sortOrder });
           set({ drilldownGlobalProducts: data, loadingDrilldownGlobal: false });
+          // [Ref: 用户需求 各时间范围均有对应环比] 上期与本期同源（report_type+period_key），保证产品维度一致、环比可算
           if (withCompare) {
-            const periodLen = period === '7d' || period === '7d_range' ? 7 : period === '90d' ? 90 : 30;
-            const end = new Date(yesterdayStr);
-            const startPrev = new Date(end);
-            startPrev.setDate(startPrev.getDate() - periodLen * 2 + 1);
-            const prevFrom = startPrev.toISOString().slice(0, 10);
-            const prevTo = new Date(end.getTime() - periodLen * 86400000).toISOString().slice(0, 10);
-            const prevData = await costService.getDrilldownGlobal({ date_from: prevFrom, date_to: prevTo, env: envFilter, category: category || undefined, sort: sortOrder });
+            let prevReportType = report_type;
+            let prevPeriodKey: string;
+            if (period === 'this_week') {
+              const prevWeekKey = getISOWeekKey(new Date(now.getTime() - 7 * 86400000));
+              prevPeriodKey = prevWeekKey;
+            } else if (period === 'last_week') {
+              const prevLastWeekEnd = new Date(getLastWeekEndKey(now));
+              prevLastWeekEnd.setDate(prevLastWeekEnd.getDate() - 7);
+              prevPeriodKey = prevLastWeekEnd.toISOString().slice(0, 10);
+            } else if (period === '1d') {
+              const dayBefore = new Date(yesterdayStr);
+              dayBefore.setDate(dayBefore.getDate() - 1);
+              prevPeriodKey = dayBefore.toISOString().slice(0, 10);
+            } else if (period === '7d' || period === '7d_range') {
+              const end = new Date(yesterdayStr);
+              end.setDate(end.getDate() - 7);
+              prevPeriodKey = end.toISOString().slice(0, 10);
+            } else if (period === '30d') {
+              const end = new Date(yesterdayStr);
+              end.setDate(end.getDate() - 30);
+              prevPeriodKey = end.toISOString().slice(0, 10);
+            } else if (period === '90d') {
+              const end = new Date(yesterdayStr);
+              end.setDate(end.getDate() - 90);
+              prevPeriodKey = end.toISOString().slice(0, 10);
+            } else if (period === 'month') {
+              prevPeriodKey = prevMonthStr;
+            } else if (period === 'last_month') {
+              const prevPrevMonth = new Date(prevMonth.getFullYear(), prevMonth.getMonth() - 1, 1);
+              prevPeriodKey = `${prevPrevMonth.getFullYear()}-${String(prevPrevMonth.getMonth() + 1).padStart(2, '0')}`;
+            } else if (period === 'quarter') {
+              prevPeriodKey = prevQuarterKey;
+            } else if (period === 'last_quarter') {
+              const [pqY, pqN] = prevQuarterKey.split('-Q').map((s, i) => (i === 0 ? parseInt(s, 10) : parseInt(s, 10)));
+              const prevPrevQ = pqN <= 1 ? 4 : pqN - 1;
+              const prevPrevY = pqN <= 1 ? pqY - 1 : pqY;
+              prevPeriodKey = `${prevPrevY}-Q${prevPrevQ}`;
+            } else if (period === 'this_year') {
+              prevReportType = 'last_year';
+              prevPeriodKey = String(now.getFullYear() - 1);
+            } else if (period === 'last_year') {
+              prevPeriodKey = String(now.getFullYear() - 2);
+            } else {
+              const periodLen = period === '90d' ? 90 : 30;
+              const end = new Date(yesterdayStr);
+              end.setDate(end.getDate() - periodLen);
+              prevPeriodKey = end.toISOString().slice(0, 10);
+            }
+            const prevData = await costService.getDrilldownGlobal({
+              report_type: prevReportType,
+              period_key: prevPeriodKey,
+              env: envFilter,
+              category: category || undefined,
+              sort: sortOrder,
+            });
             set(state => ({ ...state, drilldownGlobalProductsPrev: prevData }));
           }
         } catch (error) {
@@ -343,21 +401,6 @@ export const useAppStore = create<AppState>()(
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : '获取SLO状态失败';
           set({ errorSLO: errorMessage, loadingSLO: false });
-        }
-      },
-
-      fetchROITrends: async () => {
-        const { useMockData } = get();
-        set({ loadingROI: true, errorROI: null });
-
-        try {
-          const data = useMockData
-            ? await mockApi.getROITrends()
-            : await costService.getROITrends();
-          set({ roiTrends: data, loadingROI: false });
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : '获取ROI趋势失败';
-          set({ errorROI: errorMessage, loadingROI: false });
         }
       },
 
@@ -450,7 +493,7 @@ export const useAppStore = create<AppState>()(
           errorDrilldownGlobal: null,
           errorDrilldown: null,
           errorSLO: null,
-          errorROI: null,
+          errorCostTrend: null,
         });
       },
     }),

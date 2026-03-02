@@ -13,7 +13,7 @@ const SCOPE_LABELS: Record<SLOScope, string> = {
 };
 
 const SLODashboard: React.FC = () => {
-  const { sloStatus, loadingSLO, errorSLO, fetchSLOStatus, useMockData } = useAppStore();
+  const { sloStatus, loadingSLO, errorSLO, fetchSLOStatus } = useAppStore();
   const [scope, setScope] = useState<SLOScope>('service');
 
   useEffect(() => {
@@ -145,7 +145,6 @@ const SLODashboard: React.FC = () => {
     <div>
       <h2>SLO健康监控</h2>
 
-      {useMockData && <Alert message="当前使用Mock数据" type="info" style={{ marginBottom: 16 }} />}
 
       {loadingSLO ? (
         <div style={{ textAlign: 'center', padding: '40px' }}>

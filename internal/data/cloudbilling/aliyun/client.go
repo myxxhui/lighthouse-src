@@ -12,8 +12,8 @@ import (
 
 	"github.com/alibabacloud-go/bssopenapi-20171214/v4/client"
 	openapi "github.com/alibabacloud-go/darabonba-openapi/v2/client"
-	"github.com/alibabacloud-go/tea/tea"
 	"github.com/alibabacloud-go/tea-utils/v2/service"
+	"github.com/alibabacloud-go/tea/tea"
 )
 
 const (
@@ -21,19 +21,35 @@ const (
 	envAccessKeySecret     = "ALIBABA_CLOUD_ACCESS_KEY_SECRET"
 	envBillingEndpoint     = "ALIBABA_CLOUD_BILLING_ENDPOINT" // 可选；国际站填 business.ap-southeast-1.aliyuncs.com
 	envBillingEndpointAlt  = "CLOUD_BILLING_ENDPOINT"         // 与设计/实践文档一致
-	defaultBillingEndpoint = "business.aliyuncs.com"         // 中国站
+	defaultBillingEndpoint = "business.aliyuncs.com"          // 中国站
 	maxRetries             = 3
 	baseBackoff            = time.Second
 	circuitFailThreshold   = 5
 	circuitOpenDuration    = 60 * time.Second
 )
 
-// productCodeToDomain 将阿里云产品码映射为领域名（15_ 规范：算力/存储/网络/其它）。未匹配的归为「其它」，保证领域汇总之和=总账。
+// productCodeToDomain 将阿里云产品码显式映射为四大类（计算资源/存储/网络/安全），无「其它」分类。
+// 所有已知产品码均在下表中归入四类之一；仅当账单项产品码为空（API 未返回或空串）时兜底归入计算资源。
+// 新上市产品码需补充进下表，保证全量产品均显式映射。[Ref: 用户需求 仅四大分类、所有产品映射到四类]
 var productCodeToDomain = map[string]string{
-	"ecs": "计算资源", "ack": "计算资源", "cs": "计算资源", "ecs_workflow": "计算资源",
-	"oss": "存储", "nas": "存储", "disk": "存储",
-	"cdn": "网络", "slb": "网络", "vpc": "网络", "eip": "网络",
-	"cdt": "其它", "sfm": "其它", // 未归入计算/存储/网络的产品统一归为其它，避免与总账不一致
+	// 计算资源：ECS、容器、函数、数据库、大数据、消息等
+	"ecs": "计算资源", "ack": "计算资源", "cs": "计算资源", "ecs_workflow": "计算资源", "sfm": "计算资源",
+	"fc": "计算资源", "sae": "计算资源", "batchcompute": "计算资源", "emr": "计算资源", "openanalytics": "计算资源",
+	"rds": "计算资源", "polardb": "计算资源", "cddc": "计算资源", "redis": "计算资源", "memcache": "计算资源",
+	"mongodb": "计算资源", "hbase": "计算资源", "lindorm": "计算资源", "drds": "计算资源", "adb": "计算资源",
+	"dts": "计算资源", "hbr": "计算资源", "oos": "计算资源", "cr": "计算资源", "acr": "计算资源",
+	"arms": "计算资源", "gts": "计算资源", "mq": "计算资源", "amqp": "计算资源", "kafka": "计算资源",
+	"rocketmq": "计算资源", "eventbridge": "计算资源", "fnf": "计算资源", "serverless": "计算资源",
+	"cassandra": "计算资源", "clickhouse": "计算资源", "elasticsearch": "计算资源", "graphcompute": "计算资源",
+	"hdr": "计算资源", "swas": "计算资源", "ens": "计算资源",
+	// 存储：对象存储、文件、块存储、表格存储等
+	"oss": "存储", "nas": "存储", "disk": "存储", "ots": "存储", "pds": "存储",
+	// 网络：CDN、负载均衡、VPC、EIP、流量包、直播点播流量等
+	"cdn": "网络", "dcdn": "网络", "slb": "网络", "vpc": "网络", "eip": "网络", "cdt": "网络",
+	"flowbag": "网络", "ossbag": "网络", "cdnflowbag": "网络", "live": "网络", "vod": "网络",
+	"privatelink": "网络", "expressconnect": "网络", "smartag": "网络", "cbn": "网络", "nat": "网络",
+	// 安全：WAF、安全防护、内容安全等
+	"waf": "安全", "sas": "安全", "yundun": "安全", "ddos": "安全", "cfw": "安全", "cdi": "安全",
 }
 
 // BillItemResult 单产品金额，用于产品级明细与 top-N 展示。
@@ -54,7 +70,7 @@ type BillOverviewResult struct {
 
 // Fetcher 阿里云 BssOpenApi 拉取，带退避重试与熔断。
 type Fetcher struct {
-	bssClient          *client.Client
+	bssClient           *client.Client
 	consecutiveFailures int
 	circuitOpenUntil    time.Time
 	mu                  sync.Mutex
@@ -220,13 +236,14 @@ func (f *Fetcher) queryBillOverview(ctx context.Context, billingCycle string) (*
 				amount = float64(*it.PretaxAmount)
 			}
 			total += amount
-			domain := "其它"
+			domain := "计算资源"
 			codeStr := "OTHER"
 			if it.ProductCode != nil && *it.ProductCode != "" {
 				codeStr = strings.ToUpper(strings.TrimSpace(*it.ProductCode))
 				if d, ok := productCodeToDomain[strings.ToLower(*it.ProductCode)]; ok {
 					domain = d
 				}
+				// 产品码非空但未在 productCodeToDomain 中时兜底为计算资源，建议将新产品码补充进映射表
 			}
 			byCategory[domain] += amount
 			items = append(items, BillItemResult{ProductCode: codeStr, Amount: amount, Domain: domain})
@@ -267,12 +284,12 @@ func (f *Fetcher) FetchBillOverviewByDay(ctx context.Context, billingDate string
 	var allItems []BillItemResult
 	for {
 		req := &client.QueryAccountBillRequest{
-			BillingCycle:      tea.String(billingCycle),
-			BillingDate:       tea.String(billingDate),
-			Granularity:       tea.String("DAILY"),
-			IsGroupByProduct:  tea.Bool(true),
-			PageNum:           tea.Int32(pageNum),
-			PageSize:          tea.Int32(pageSize),
+			BillingCycle:     tea.String(billingCycle),
+			BillingDate:      tea.String(billingDate),
+			Granularity:      tea.String("DAILY"),
+			IsGroupByProduct: tea.Bool(true),
+			PageNum:          tea.Int32(pageNum),
+			PageSize:         tea.Int32(pageSize),
 		}
 		resp, err := f.bssClient.QueryAccountBillWithOptions(req, &service.RuntimeOptions{})
 		if err != nil {
@@ -295,15 +312,17 @@ func (f *Fetcher) FetchBillOverviewByDay(ctx context.Context, billingDate string
 			codeStr := "OTHER"
 			if it.PipCode != nil && *it.PipCode != "" {
 				codeStr = strings.ToUpper(strings.TrimSpace(*it.PipCode))
-				domain := "其它"
+				domain := "计算资源"
 				if d, ok := productCodeToDomain[strings.ToLower(*it.PipCode)]; ok {
 					domain = d
 				}
+				// 产品码非空但未在 productCodeToDomain 中时兜底为计算资源，建议将新产品码补充进映射表
 				byCategory[domain] += amount
 				allItems = append(allItems, BillItemResult{ProductCode: codeStr, Amount: amount, Domain: domain})
 			} else {
-				byCategory["其它"] += amount
-				allItems = append(allItems, BillItemResult{ProductCode: codeStr, Amount: amount, Domain: "其它"})
+				// 仅当产品码为空时兜底为计算资源（无「其它」分类）
+				byCategory["计算资源"] += amount
+				allItems = append(allItems, BillItemResult{ProductCode: codeStr, Amount: amount, Domain: "计算资源"})
 			}
 		}
 		total := int32(0)

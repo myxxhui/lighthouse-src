@@ -20,7 +20,7 @@ DEPLOY_DIR := ../lighthouse-deploy
 DOCKER_PLATFORM ?= linux/amd64
 
 .PHONY: help build build-backend build-frontend build-all docker-backend docker-frontend \
-        docker-all build-images run-local run-docker push-images test lint clean clean-env security-scan \
+        docker-all build-images run-local run-docker push-images test lint clean clean-env clean-dangling-images security-scan \
         verify-build verify-phase1 verify-phase2 verify-phase3 generate-sbom sign-images
 
 # 默认目标：显示帮助
@@ -39,8 +39,9 @@ help:
 	@echo "  make push-images       推送镜像到远程仓库"
 	@echo "  make test              运行所有测试"
 	@echo "  make lint              代码检查"
-	@echo "  make clean             清理构建产物"
+	@echo "  make clean             清理构建产物（含 docker system prune）"
 	@echo "  make clean-env         一键清理运行容器、数据卷与前后端镜像（deploy 环境）"
+	@echo "  make clean-dangling-images  仅清理悬空/残缺镜像（<none>:<none>，构建失败残留）"
 	@echo "  make security-scan     安全扫描"
 	@echo "  make verify-build      验证构建结果"
 	@echo "  make verify-phase1     Phase1 一键验收（骨架+领域+配置）"
@@ -154,6 +155,12 @@ clean-env:
 	@docker rmi $(PROJECT_NAME)-backend:$(IMAGE_TAG) $(PROJECT_NAME)-frontend:$(IMAGE_TAG) 2>/dev/null || true
 	@docker image prune -f
 	@echo "✅ 清理完成（下次需 make docker-all 再部署）"
+
+# 仅清理悬空/残缺镜像（构建失败或名称不全的 <none>:<none>），不删容器与卷
+clean-dangling-images:
+	@echo "🧹 清理悬空/残缺镜像（构建失败或无名镜像）..."
+	@docker image prune -f
+	@echo "✅ 悬空镜像清理完成"
 
 # 推送镜像到远程仓库
 push-images: docker-all

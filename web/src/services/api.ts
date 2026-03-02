@@ -32,9 +32,10 @@ class ApiClient {
         return response;
       },
       error => {
+        const data = error.response?.data as { message?: string; error?: string; code?: string } | undefined;
         const apiError: ApiError = {
-          message: error.response?.data?.message || error.message || '未知错误',
-          code: error.response?.data?.code || 'UNKNOWN_ERROR',
+          message: data?.error || data?.message || error.message || '未知错误',
+          code: data?.code || (error.response ? String(error.response.status) : 'UNKNOWN_ERROR'),
           timestamp: new Date().toISOString(),
         };
         return Promise.reject(apiError);

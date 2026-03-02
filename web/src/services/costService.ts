@@ -4,7 +4,6 @@ import {
   NamespaceCost,
   DrilldownItem,
   SLOStatus,
-  ROITrend,
   SLOScope,
   CostTimeRange,
   CostCompareMode,
@@ -175,15 +174,4 @@ export const costService = {
     };
   },
 
-  // 获取ROI趋势数据 (GET /api/v1/roi/dashboard)
-  async getROITrends(): Promise<ROITrend[]> {
-    try {
-      const response = await apiClient.get<{ trends?: ROITrend[] } | ROITrend[]>('/v1/roi/dashboard');
-      const data = response.data;
-      return Array.isArray(data) ? data : (data?.trends ?? []);
-    } catch (error) {
-      console.error('Failed to fetch ROI trends:', error);
-      throw error;
-    }
-  },
 };
