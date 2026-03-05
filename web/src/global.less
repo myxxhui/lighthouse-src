@@ -120,9 +120,9 @@ body {
 }
 
 // [Ref: 01_实践] 自管侧栏：仅保留一个左侧功能展示栏（layouts/index 内 lighthouse-sider），无 ProLayout
+// 背景色由 layouts/index.tsx 的 isDark 内联 style 控制，避免 Ant Design 5 CSS-in-JS 不写入 CSS 自定义属性导致 fallback #fff 的问题
 #root .lighthouse-sider {
   overflow: hidden !important;
-  background: var(--ant-color-bg-container, #fff) !important;
 }
 #root .lighthouse-sider .lighthouse-sider-menu {
   flex: 1 !important;

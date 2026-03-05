@@ -150,16 +150,19 @@ export const costService = {
     }
   },
 
-  /** [Ref: 01_设计 D9-16] 成本结构趋势 GET /api/v1/cost/trend，用于云产品明细索引区趋势图 */
+  /** [Ref: 01_设计 D9-16] 成本结构趋势 GET /api/v1/cost/trend，支持 env 过滤 */
   async getCostTrend(params?: {
     period?: string;
     date_from?: string;
     date_to?: string;
+    /** 按环境过滤趋势数据，'all' 或空值表示全环境 */
+    env?: string;
   }): Promise<{ data: Array<{ date: string; total_cost: number; by_domain?: Record<string, number> }> }> {
     const query: Record<string, string> = {};
     if (params?.period) query.period = params.period;
     if (params?.date_from) query.date_from = params.date_from;
     if (params?.date_to) query.date_to = params.date_to;
+    if (params?.env && params.env !== 'all') query.env = params.env;
     const response = await apiClient.get<{ data: Array<{ date: string; total_cost?: number; by_domain?: Record<string, number> }> }>(
       `${COST_API_PREFIX}/trend`,
       { params: query, timeout: 15000 },

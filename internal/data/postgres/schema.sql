@@ -74,6 +74,51 @@ CREATE TABLE IF NOT EXISTS cost_daily_network (
     PRIMARY KEY (day, namespace, resource_id)
 );
 
+-- [Ref: 16_云账单动态对账与高可靠处理规范 §三] 行级流水明细表（幂等写入，含负数冲正条目）
+CREATE TABLE IF NOT EXISTS cost_cloud_bill_line_items (
+    record_id           VARCHAR(128) NOT NULL,
+    bill_date           DATE NOT NULL,
+    billing_cycle       VARCHAR(32) NOT NULL,
+    product_code        VARCHAR(64),
+    product_name        VARCHAR(128),
+    sub_order_id        VARCHAR(128),
+    instance_id         VARCHAR(128),
+    billing_item        VARCHAR(128),
+    subscription_type   VARCHAR(32),
+    cash_amount         NUMERIC(14, 6) NOT NULL,
+    pretax_amount       NUMERIC(14, 6),
+    pretax_gross_amount NUMERIC(14, 6),
+    currency            VARCHAR(8) DEFAULT 'CNY',
+    is_reversal         BOOLEAN NOT NULL DEFAULT FALSE,
+    account_id          VARCHAR(64) NOT NULL DEFAULT '',
+    region              VARCHAR(32),
+    raw_payload         JSONB,
+    synced_at           TIMESTAMP NOT NULL DEFAULT NOW(),
+    created_at          TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMP NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (record_id)
+);
+CREATE INDEX IF NOT EXISTS idx_line_items_bill_date     ON cost_cloud_bill_line_items(bill_date, account_id);
+CREATE INDEX IF NOT EXISTS idx_line_items_billing_cycle ON cost_cloud_bill_line_items(billing_cycle, account_id);
+CREATE INDEX IF NOT EXISTS idx_line_items_reversal      ON cost_cloud_bill_line_items(bill_date) WHERE is_reversal = TRUE;
+
+-- [Ref: 16_云账单动态对账与高可靠处理规范 §三] 月度对账状态追踪表
+CREATE TABLE IF NOT EXISTS cost_cloud_bill_month_status (
+    billing_cycle       VARCHAR(32) NOT NULL,
+    account_id          VARCHAR(64) NOT NULL DEFAULT '',
+    data_status         VARCHAR(32) NOT NULL DEFAULT 'PRELIMINARY',
+    line_items_sum      NUMERIC(14, 2),
+    monthly_api_total   NUMERIC(14, 2),
+    drift_amount        NUMERIC(14, 2),
+    last_reconciled_at  TIMESTAMP,
+    last_full_sync_at   TIMESTAMP,
+    finalized_at        TIMESTAMP,
+    notes               TEXT,
+    created_at          TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMP NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (billing_cycle, account_id)
+);
+
 -- [Ref: 06_ 成本云账单三表] 月原始表、日原始表、聚合表（D1-D9 最佳方案）
 CREATE TABLE IF NOT EXISTS cost_cloud_bill_monthly_raw (
     billing_cycle   VARCHAR(32) NOT NULL,
@@ -95,13 +140,14 @@ CREATE TABLE IF NOT EXISTS cost_cloud_bill_daily_raw (
     region          VARCHAR(32),
     PRIMARY KEY (bill_date)
 );
--- [Ref: 01_设计 D9-5] 聚合表主键 (report_type, period_key, account_id)；单账号 account_id 占位 ''
+-- [Ref: 01_设计 D9-5] 聚合表主键 (report_type, period_key, account_id)；含 data_status 供 API 透传
 CREATE TABLE IF NOT EXISTS cost_cloud_bill_aggregate (
     report_type     VARCHAR(16) NOT NULL,
     period_key      VARCHAR(32) NOT NULL,
     account_id      VARCHAR(64) NOT NULL DEFAULT '',
     total_amount    DECIMAL(12, 2) NOT NULL,
     product_breakdown JSONB,
+    data_status     VARCHAR(32) NOT NULL DEFAULT 'PRELIMINARY',
     last_success_at TIMESTAMP,
     created_at      TIMESTAMP DEFAULT NOW(),
     updated_at      TIMESTAMP DEFAULT NOW(),

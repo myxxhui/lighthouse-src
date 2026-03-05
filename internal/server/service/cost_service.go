@@ -39,6 +39,56 @@ func NewCostService(repo postgres.Repository) *CostService {
 	}
 }
 
+// CostDiagnostic 成本数据源诊断，供 GET /api/v1/cost/diagnostic 返回；用于排查「暂无数据」根因。[Ref: 01_实践 §2.4]
+type CostDiagnostic struct {
+	DailyRawCountLast30   int     `json:"daily_raw_count_last_30d"`   // 近 30 天日原始表行数
+	DailyRawCashSumLast30 float64 `json:"daily_raw_cash_sum_last_30d"` // 近 30 天日表 cash_total_amount 代数和
+	MonthlyRawCountRecent int     `json:"monthly_raw_count_recent_3"` // 上月/前两月/前三月月原始表存在数（0～3）
+	AggregateMonthRows    int     `json:"aggregate_month_rows"`       // 聚合表 report_type=month 当前月 period_key 行数
+	AggregateMonthTotal   float64 `json:"aggregate_month_total"`      // 上述行 total_amount 合计
+	Hint                  string `json:"hint"`                        // 简要排查建议
+}
+
+// GetCostDiagnostic 返回成本数据源健康情况，便于定位「无数据」是 ETL 未写、API 返回 0 还是读路径问题。
+func (s *CostService) GetCostDiagnostic(ctx context.Context) (*CostDiagnostic, error) {
+	now := time.Now().UTC()
+	from30 := now.AddDate(0, 0, -30).Truncate(24 * time.Hour)
+	out := &CostDiagnostic{}
+	rows, err := s.repo.ListCloudBillDailyRawFromTo(ctx, from30, now)
+	if err == nil {
+		out.DailyRawCountLast30 = len(rows)
+		for _, r := range rows {
+			out.DailyRawCashSumLast30 += r.CashTotalAmount
+		}
+	}
+	for i := 1; i <= 3; i++ {
+		cycle := now.AddDate(0, -i, 0).Format("2006-01")
+		m, _ := s.repo.GetCloudBillMonthlyRaw(ctx, cycle)
+		if m != nil {
+			out.MonthlyRawCountRecent++
+		}
+	}
+	month := now.Format("2006-01")
+	list, _ := s.repo.ListCloudBillAggregateForReportPeriod(ctx, "month", month, "payment")
+	out.AggregateMonthRows = len(list)
+	for _, a := range list {
+		out.AggregateMonthTotal += a.TotalAmount
+	}
+	// 简要提示
+	if out.DailyRawCountLast30 == 0 && out.MonthlyRawCountRecent == 0 {
+		out.Hint = "日/月原始表均无数据：请确认 1) CLOUD_BILLING_PROVIDER=aliyun 且已配置 AK/SK；2) 后端启动后 ETL 已执行（查看日志 billing ETL pipeline）；3) 已执行 migrate-02/migrate-03 等迁移"
+	} else if out.DailyRawCountLast30 > 0 && out.DailyRawCashSumLast30 == 0 {
+		out.Hint = "日表有行但 cash_total_amount 全为 0：可能为按日 API 未返回实付或 ETL 未写 Cash 字段；确认 FetchBillOverviewByDay 与 fallback 已写入 CashTotalAmount/CashProductBreakdown"
+	} else if out.AggregateMonthRows == 0 && (out.DailyRawCountLast30 > 0 || out.MonthlyRawCountRecent > 0) {
+		out.Hint = "日/月表有数据但聚合表无当月：RunPipeline 聚合步骤可能未执行或失败；查看日志 runAggregateStep"
+	} else if out.AggregateMonthTotal > 0 {
+		out.Hint = "数据源正常；若前端仍为 0 请检查 period 与 reportType/periodKey 映射及前端请求参数"
+	} else {
+		out.Hint = "聚合表有行但 total_amount=0；或仅历史月有数据、当月为 0（T+1 延迟或当月暂无消费）"
+	}
+	return out, nil
+}
+
 // toCostmodelDailyNamespaceCost converts postgres.DailyNamespaceCost to costmodel.DailyNamespaceCost.
 func toCostmodelDailyNamespaceCost(p postgres.DailyNamespaceCost) costmodel.DailyNamespaceCost {
 	return costmodel.DailyNamespaceCost{
@@ -53,31 +103,32 @@ func toCostmodelDailyNamespaceCost(p postgres.DailyNamespaceCost) costmodel.Dail
 	}
 }
 
-// domainOrderForBreakdown 成本分解仅四大类，固定顺序 [Ref: 01_设计 §成本结构、成本分解；用户需求 仅四大分类]
-var domainOrderForBreakdown = []string{"计算资源", "存储", "网络", "安全"}
+// domainOrderForBreakdown 成本分解五大类，固定顺序 [Ref: 01_设计 §成本结构、成本分解；service_test 期望五类含「其他」]
+var domainOrderForBreakdown = []string{"计算资源", "存储", "网络", "安全", "其他"}
 
-// buildDomainBreakdownNormalized 从 merged（领域/领域:产品码）构建 domain_breakdown：仅四大类；其它/其他合并入计算资源，按固定顺序返回。[Ref: 01_设计 §成本分解；用户需求 仅四大分类]
+// buildDomainBreakdownNormalized 从 merged（领域/领域:产品码）构建 domain_breakdown：五大类；「其它」归并入「其他」，按固定顺序返回。[Ref: 01_设计 §成本分解]
 func buildDomainBreakdownNormalized(merged map[string]float64) []dto.DomainBreakdownItem {
-	// 其它/其他 → 计算资源（仅保留四大类）
-	for _, oldKey := range []string{"其它", "其他"} {
-		if v, ok := merged[oldKey]; ok {
-			merged["计算资源"] += v
-			delete(merged, oldKey)
-		}
+	// 「其它」→「其他」（统一写法）
+	if v, ok := merged["其它"]; ok {
+		merged["其他"] += v
+		delete(merged, "其它")
 	}
-	var toCompute []string
+	var toOther []string
 	for k := range merged {
-		if strings.HasPrefix(k, "其它:") || strings.HasPrefix(k, "其他:") {
-			toCompute = append(toCompute, k)
+		if strings.HasPrefix(k, "其它:") {
+			toOther = append(toOther, k)
 		}
 	}
-	for _, k := range toCompute {
-		suffix := strings.TrimPrefix(strings.TrimPrefix(k, "其它:"), "其他:")
-		merged["计算资源:"+suffix] += merged[k]
+	for _, k := range toOther {
+		suffix := strings.TrimPrefix(k, "其它:")
+		merged["其他:"+suffix] += merged[k]
 		delete(merged, k)
 	}
 	if _, ok := merged["安全"]; !ok {
 		merged["安全"] = 0
+	}
+	if _, ok := merged["其他"]; !ok {
+		merged["其他"] = 0
 	}
 	out := make([]dto.DomainBreakdownItem, 0, len(domainOrderForBreakdown))
 	for _, domain := range domainOrderForBreakdown {
@@ -121,17 +172,37 @@ func topProductsForDomain(pb *map[string]float64, domain string, n int) []dto.Pr
 // aggregateCloudBillByPeriod 按时间范围聚合云账单：month/1d/7d/30d 用当月账期，quarter 用本季度三月汇总。
 // 返回 (有云账单, 总金额, 领域分项)；无数据时 (false, 0, nil)。
 func (s *CostService) aggregateCloudBillByPeriod(ctx context.Context, period string) (bool, float64, *map[string]float64) {
-	now := time.Now()
+	now := time.Now().UTC()
 	currentCycle := now.Format("2006-01")
 	switch period {
 	case "quarter":
-		cycles := []string{currentCycle, now.AddDate(0, -1, 0).Format("2006-01"), now.AddDate(0, -2, 0).Format("2006-01")}
+		// [Ref: 16_ §3.3] 优先从月原始表读本季度三月实付，再降级 cost_cloud_bill_summary
+		curQ := (int(now.Month())-1)/3 + 1
+		qStartMonth := (curQ-1)*3 + 1
+		cycles := []string{
+			fmt.Sprintf("%04d-%02d", now.Year(), qStartMonth),
+			fmt.Sprintf("%04d-%02d", now.Year(), qStartMonth+1),
+			fmt.Sprintf("%04d-%02d", now.Year(), qStartMonth+2),
+		}
+		var total float64
+		merged := make(map[string]float64)
+		for _, cycle := range cycles {
+			if mon, err := s.repo.GetCloudBillMonthlyRaw(ctx, cycle); err == nil && mon != nil {
+				total += mon.CashTotalAmount
+				for k, v := range mon.CashProductBreakdown {
+					merged[k] += v
+				}
+			}
+		}
+		if total != 0 || len(merged) > 0 {
+			return true, total, &merged
+		}
 		list, err := s.repo.GetCloudBillSummariesForBillingCycles(ctx, cycles)
 		if err != nil || len(list) == 0 {
 			return false, 0, nil
 		}
-		var total float64
-		merged := make(map[string]float64)
+		total = 0
+		merged = make(map[string]float64)
 		for _, c := range list {
 			total += c.TotalAmount
 			for k, v := range c.ProductBreakdown {
@@ -141,11 +212,15 @@ func (s *CostService) aggregateCloudBillByPeriod(ctx context.Context, period str
 		return true, total, &merged
 	case "last_month":
 		prevCycle := now.AddDate(0, -1, 0).Format("2006-01")
-		cloud, err := s.repo.GetLatestCloudBillSummaryForBillingCycle(ctx, prevCycle)
-		if err != nil || cloud == nil {
-			return false, 0, nil
+		mon, err := s.repo.GetCloudBillMonthlyRaw(ctx, prevCycle)
+		if err != nil || mon == nil {
+			cloud, _ := s.repo.GetLatestCloudBillSummaryForBillingCycle(ctx, prevCycle)
+			if cloud == nil {
+				return false, 0, nil
+			}
+			return true, cloud.TotalAmount, &cloud.ProductBreakdown
 		}
-		return true, cloud.TotalAmount, &cloud.ProductBreakdown
+		return true, mon.CashTotalAmount, &mon.CashProductBreakdown
 	case "last_week":
 		// 上周：从日原始表聚合上一周 7 天
 		weekday := int(now.Weekday())
@@ -158,23 +233,47 @@ func (s *CostService) aggregateCloudBillByPeriod(ctx context.Context, period str
 		if err != nil || len(rows) == 0 {
 			return false, 0, nil
 		}
-		var total float64
-		merged := make(map[string]float64)
-		for _, r := range rows {
-			total += r.TotalAmount
-			for k, v := range r.ProductBreakdown {
-				merged[k] += v
-			}
-		}
+		total, merged := mergeDailyRowsSafe(rows)
 		return true, total, &merged
 	case "last_quarter":
-		prevCycles := []string{now.AddDate(0, -1, 0).Format("2006-01"), now.AddDate(0, -2, 0).Format("2006-01"), now.AddDate(0, -3, 0).Format("2006-01")}
+		// [Ref: 16_ §3.3] 上季度优先从月原始表读实付（与 quarter 一致），再降级 cost_cloud_bill_summary，避免口径混用导致「数据不对」
+		curMonth := int(now.Month())
+		curYear := now.Year()
+		var prevQStartMonth, prevQYear int
+		switch {
+		case curMonth <= 3:
+			prevQStartMonth, prevQYear = 10, curYear-1
+		case curMonth <= 6:
+			prevQStartMonth, prevQYear = 1, curYear
+		case curMonth <= 9:
+			prevQStartMonth, prevQYear = 4, curYear
+		default:
+			prevQStartMonth, prevQYear = 7, curYear
+		}
+		prevCycles := []string{
+			fmt.Sprintf("%04d-%02d", prevQYear, prevQStartMonth),
+			fmt.Sprintf("%04d-%02d", prevQYear, prevQStartMonth+1),
+			fmt.Sprintf("%04d-%02d", prevQYear, prevQStartMonth+2),
+		}
+		var total float64
+		merged := make(map[string]float64)
+		for _, cycle := range prevCycles {
+			if mon, err := s.repo.GetCloudBillMonthlyRaw(ctx, cycle); err == nil && mon != nil {
+				total += mon.CashTotalAmount
+				for k, v := range mon.CashProductBreakdown {
+					merged[k] += v
+				}
+			}
+		}
+		if total != 0 || len(merged) > 0 {
+			return true, total, &merged
+		}
 		list, err := s.repo.GetCloudBillSummariesForBillingCycles(ctx, prevCycles)
 		if err != nil || len(list) == 0 {
 			return false, 0, nil
 		}
-		var total float64
-		merged := make(map[string]float64)
+		total = 0
+		merged = make(map[string]float64)
 		for _, c := range list {
 			total += c.TotalAmount
 			for k, v := range c.ProductBreakdown {
@@ -183,83 +282,104 @@ func (s *CostService) aggregateCloudBillByPeriod(ctx context.Context, period str
 		}
 		return true, total, &merged
 	case "this_year":
-		// [Ref: 01_实践 D9-10] 今年 YTD 降级路径：日原始表叠加 Jan 1 至昨日，与 ETL worker 逻辑一致。
-		// 根因：原月原始表汇总不含当月在途数据，导致 this_year < last_quarter（漏算当月已落盘天数）。
-		yesterday := now.AddDate(0, 0, -1).Truncate(24 * time.Hour)
-		firstOfYear := time.Date(now.Year(), 1, 1, 0, 0, 0, 0, time.UTC)
-		rows, err := s.repo.ListCloudBillDailyRawFromTo(ctx, firstOfYear, yesterday)
-		if err != nil || len(rows) == 0 {
-			// 日原始表无数据时回退：从 cost_cloud_bill_summary 取已完结月份（仅截至上月）
-			prevMonthCycles := make([]string, 0, int(now.Month())-1)
-			for m := 1; m < int(now.Month()); m++ {
-				prevMonthCycles = append(prevMonthCycles, fmt.Sprintf("%04d-%02d", now.Year(), m))
-			}
-			if len(prevMonthCycles) == 0 {
-				return false, 0, nil
-			}
-			list, lerr := s.repo.GetCloudBillSummariesForBillingCycles(ctx, prevMonthCycles)
-			if lerr != nil || len(list) == 0 {
-				return false, 0, nil
-			}
-			var total float64
-			merged := make(map[string]float64)
-			for _, c := range list {
-				total += c.TotalAmount
-				for k, v := range c.ProductBreakdown {
+		// [Ref: 01_实践 §this_year 算法] 历史完整月（月原始表）+ 当月日累加。
+		// 严禁纯日粒度年累加（延迟 + 调账双重误差）。
+		thisYear := now.Year()
+		currentMonth := int(now.Month())
+		var total float64
+		merged := make(map[string]float64)
+		for m := 1; m < currentMonth; m++ {
+			cycle := fmt.Sprintf("%04d-%02d", thisYear, m)
+			if mon, err := s.repo.GetCloudBillMonthlyRaw(ctx, cycle); err == nil && mon != nil {
+				total += mon.CashTotalAmount
+				for k, v := range mon.CashProductBreakdown {
 					merged[k] += v
 				}
 			}
-			return true, total, &merged
 		}
-		var total float64
-		merged := make(map[string]float64)
-		for _, r := range rows {
-			total += r.TotalAmount
-			for k, v := range r.ProductBreakdown {
+		yesterday := now.AddDate(0, 0, -1).Truncate(24 * time.Hour)
+		firstOfCurrentMonth := time.Date(thisYear, time.Month(currentMonth), 1, 0, 0, 0, 0, time.UTC)
+		rows, _ := s.repo.ListCloudBillDailyRawFromTo(ctx, firstOfCurrentMonth, yesterday)
+		if len(rows) > 0 {
+			curTotal, curMerged := mergeDailyRowsSafe(rows)
+			total += curTotal
+			for k, v := range curMerged {
 				merged[k] += v
 			}
+		}
+		if total == 0 && len(merged) == 0 {
+			return false, 0, nil
 		}
 		return true, total, &merged
 	case "last_year":
-		// [Ref: 01_实践 D9-10] 去年：日原始表叠加去年全年（1/1 ~ 12/31），与 ETL worker 逻辑一致
-		firstOfLastYear := time.Date(now.Year()-1, 1, 1, 0, 0, 0, 0, time.UTC)
-		lastDayOfLastYear := time.Date(now.Year()-1, 12, 31, 0, 0, 0, 0, time.UTC)
-		rows, err := s.repo.ListCloudBillDailyRawFromTo(ctx, firstOfLastYear, lastDayOfLastYear)
-		if err != nil || len(rows) == 0 {
-			// 日原始表无数据时回退：月汇总表
-			year := now.Year() - 1
-			cycles := make([]string, 0, 12)
-			for m := 1; m <= 12; m++ {
-				cycles = append(cycles, fmt.Sprintf("%04d-%02d", year, m))
-			}
-			list, lerr := s.repo.GetCloudBillSummariesForBillingCycles(ctx, cycles)
-			if lerr != nil || len(list) == 0 {
-				return false, 0, nil
-			}
-			var total float64
-			merged := make(map[string]float64)
-			for _, c := range list {
-				total += c.TotalAmount
-				for k, v := range c.ProductBreakdown {
+		// [Ref: 01_实践 D9-10] 去年全年12个月月账单汇总（月原始表，避免日数据缺漏与调账误差）
+		lastYear := now.Year() - 1
+		var total float64
+		merged := make(map[string]float64)
+		for m := 1; m <= 12; m++ {
+			cycle := fmt.Sprintf("%04d-%02d", lastYear, m)
+			if mon, err := s.repo.GetCloudBillMonthlyRaw(ctx, cycle); err == nil && mon != nil {
+				total += mon.CashTotalAmount
+				for k, v := range mon.CashProductBreakdown {
 					merged[k] += v
 				}
 			}
-			return true, total, &merged
 		}
-		var total float64
-		merged := make(map[string]float64)
-		for _, r := range rows {
-			total += r.TotalAmount
-			for k, v := range r.ProductBreakdown {
-				merged[k] += v
-			}
+		if total == 0 && len(merged) == 0 {
+			return false, 0, nil
 		}
 		return true, total, &merged
 	case "1d", "7d", "30d", "90d", "month", "":
-		// 云账单粒度为账期，1d/7d/30d/month 均用当月账期
+		// [Ref: 16_ §3.3] 优先从新流水线表（daily_raw/monthly_raw）读实付，无数据再降级 cost_cloud_bill_summary
+		yesterday := now.AddDate(0, 0, -1).Truncate(24 * time.Hour)
+		switch period {
+		case "month", "":
+			if mon, err := s.repo.GetCloudBillMonthlyRaw(ctx, currentCycle); err == nil && mon != nil && (mon.CashTotalAmount != 0 || len(mon.CashProductBreakdown) > 0) {
+				return true, mon.CashTotalAmount, &mon.CashProductBreakdown
+			}
+			// 当月可能尚未写入月表，用日表 1 号至昨日叠加
+			firstOfMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+			if rows, err := s.repo.ListCloudBillDailyRawFromTo(ctx, firstOfMonth, yesterday); err == nil && len(rows) > 0 {
+				total, merged := mergeDailyRowsSafe(rows)
+				if total != 0 || len(merged) > 0 {
+					return true, total, &merged
+				}
+			}
+		case "1d":
+			if rows, err := s.repo.ListCloudBillDailyRawFromTo(ctx, yesterday, yesterday); err == nil && len(rows) > 0 {
+				total, merged := mergeDailyRowsSafe(rows)
+				if total != 0 || len(merged) > 0 {
+					return true, total, &merged
+				}
+			}
+		case "7d":
+			from := yesterday.AddDate(0, 0, -6)
+			if rows, err := s.repo.ListCloudBillDailyRawFromTo(ctx, from, yesterday); err == nil && len(rows) > 0 {
+				total, merged := mergeDailyRowsSafe(rows)
+				if total != 0 || len(merged) > 0 {
+					return true, total, &merged
+				}
+			}
+		case "30d":
+			from := yesterday.AddDate(0, 0, -29)
+			if rows, err := s.repo.ListCloudBillDailyRawFromTo(ctx, from, yesterday); err == nil && len(rows) > 0 {
+				total, merged := mergeDailyRowsSafe(rows)
+				if total != 0 || len(merged) > 0 {
+					return true, total, &merged
+				}
+			}
+		case "90d":
+			from := yesterday.AddDate(0, 0, -89)
+			if rows, err := s.repo.ListCloudBillDailyRawFromTo(ctx, from, yesterday); err == nil && len(rows) > 0 {
+				total, merged := mergeDailyRowsSafe(rows)
+				if total != 0 || len(merged) > 0 {
+					return true, total, &merged
+				}
+			}
+		}
+		// 降级：旧表 cost_cloud_bill_summary（兼容未跑新 ETL 的环境）
 		cloud, err := s.repo.GetLatestCloudBillSummaryForBillingCycle(ctx, currentCycle)
 		if err != nil || cloud == nil {
-			// 无当月则用全局最新一条（兼容历史数据）
 			cloud, err = s.repo.GetLatestCloudBillSummary(ctx)
 			if err != nil || cloud == nil {
 				return false, 0, nil
@@ -299,17 +419,10 @@ func (s *CostService) GetGlobalCostByDateRange(ctx context.Context, from, to tim
 	if err != nil || len(rows) == 0 {
 		return nil, nil
 	}
-	var total float64
-	merged := make(map[string]float64)
-	for _, r := range rows {
-		total += r.TotalAmount
-		for k, v := range r.ProductBreakdown {
-			merged[k] += v
-		}
-	}
+	total, merged := mergeDailyRowsSafe(rows)
 	// D8-3 可选校验：与当月月表比对（若范围跨月则仅做参考）
-	if mon, _ := s.repo.GetCloudBillMonthlyRaw(ctx, from.Format("2006-01")); mon != nil && mon.TotalAmount > 0 {
-		diffPct := (total - mon.TotalAmount) / mon.TotalAmount
+	if mon, _ := s.repo.GetCloudBillMonthlyRaw(ctx, from.Format("2006-01")); mon != nil && mon.CashTotalAmount > 0 {
+		diffPct := (total - mon.CashTotalAmount) / mon.CashTotalAmount
 		if diffPct < 0 {
 			diffPct = -diffPct
 		}
@@ -333,6 +446,43 @@ func (s *CostService) GetGlobalCostByDateRange(ctx context.Context, from, to tim
 	s.dateRangeCache[key] = dateRangeCacheEntry{resp: resp, exp: now.Add(s.dateRangeCacheTTL)}
 	s.dateRangeCacheMu.Unlock()
 	return resp, nil
+}
+
+// resolveBillDataStatus 根据 period 类型和时间推断账单对账状态，用于前端三段式状态标识。
+// [Ref: 16_云账单动态对账与高可靠处理规范 §三段式聚合策略]
+//   - 历史月（periodKey 为上月或更早的 YYYY-MM）→ 从 month_status 表读真实状态
+//   - 当前月 / 1d / this_week → "PRELIMINARY"（动态同步中）
+func (s *CostService) resolveBillDataStatus(ctx context.Context, reportType, periodKey string, now time.Time) string {
+	currentMonth := now.Format("2006-01")
+	switch reportType {
+	case "month":
+		if periodKey == currentMonth {
+			return "PRELIMINARY"
+		}
+		// 历史月：查 month_status 表
+		if ms, err := s.repo.GetCloudBillMonthStatus(ctx, periodKey, ""); err == nil && ms != nil {
+			return ms.DataStatus
+		}
+		return "FINALIZED" // 无 month_status 记录时，历史月默认视为已结算
+	case "1d", "7d", "this_week":
+		return "PRELIMINARY"
+	default:
+		// quarter/this_year 等跨月周期：任一月仍为 PRELIMINARY 则整体 PRELIMINARY
+		return "PRELIMINARY"
+	}
+}
+
+// mergeDailyRowsSafe 聚合日原始行；以 CashAmount 为基准（实际付款），负值为实际现金退款，代数参与计算。[Ref: 16_ §三、01_实践 §信用调整处理]
+func mergeDailyRowsSafe(rows []postgres.CloudBillDailyRaw) (float64, map[string]float64) {
+	var total float64
+	merged := make(map[string]float64)
+	for _, r := range rows {
+		total += r.CashTotalAmount
+		for k, v := range r.CashProductBreakdown {
+			merged[k] += v
+		}
+	}
+	return total, merged
 }
 
 // ErrFallbackTimeout D1-4：降级从原始表聚合时查询超时，调用方应返回 503。
@@ -360,29 +510,17 @@ func reportTypeAndPeriodKey(period string, now time.Time) (reportType, periodKey
 	case "1d":
 		return "1d", yesterdayStr
 	case "this_week":
-		// 这周：ISO 周（周一为第一天），period_key=YYYY-Www [Ref: 01_设计 report_type 与 period_key；这周与近七天必须区分]
+		// 这周：ISO 周（周一为第一天），period_key=YYYY-Www [Ref: 01_设计 report_type 与 period_key]
 		year, week := now.ISOWeek()
 		return "this_week", fmt.Sprintf("%04d-W%02d", year, week)
-	case "7d", "7d_range":
-		// 近七天：结束日固定昨日（T+1）[Ref: 01_设计 D9-7、误区六]
-		return "7d", yesterdayStr
 	case "last_week":
-		// 上周结束日（昨日或上周日）
 		weekday := int(now.Weekday())
 		if weekday == 0 {
 			weekday = 7
 		}
 		lastWeekEnd := now.AddDate(0, 0, -weekday)
 		return "last_week", lastWeekEnd.Format("2006-01-02")
-	case "30d", "":
-		return "30d", yesterdayStr
-	case "90d":
-		return "90d", yesterdayStr
-	case "this_year":
-		return "this_year", now.Format("2006")
-	case "last_year":
-		return "last_year", now.AddDate(-1, 0, 0).Format("2006")
-	case "month":
+	case "month", "":
 		return "month", month
 	case "last_month":
 		return "last_month", prevMonth
@@ -390,6 +528,11 @@ func reportTypeAndPeriodKey(period string, now time.Time) (reportType, periodKey
 		return "quarter", quarter
 	case "last_quarter":
 		return "last_quarter", prevQuarter
+	case "this_year":
+		// 今年：当年1月1日至昨日（按日累加，T+1 精度）
+		return "this_year", now.Format("2006")
+	case "last_year":
+		return "last_year", now.AddDate(-1, 0, 0).Format("2006")
 	default:
 		return "", ""
 	}
@@ -409,19 +552,14 @@ func previousPeriodKey(reportType, periodKey string, now time.Time) string {
 		if w > 1 {
 			return fmt.Sprintf("%04d-W%02d", y, w-1)
 		}
-		return fmt.Sprintf("%04d-W52", y-1) // 上一周为去年最后一周
-	case "7d":
-		t, _ := time.Parse("2006-01-02", periodKey)
-		return t.AddDate(0, 0, -7).Format("2006-01-02")
-	case "30d":
-		t, _ := time.Parse("2006-01-02", periodKey)
-		return t.AddDate(0, 0, -30).Format("2006-01-02")
+		// 支持 ISO W53 长年：回推7天取真实 ISO 周号
+		refDate := time.Date(y, 1, 4, 0, 0, 0, 0, time.UTC) // ISO 定义 1月4日必属于 W01
+		refDate = refDate.AddDate(0, 0, -7)
+		prevY, prevW := refDate.ISOWeek()
+		return fmt.Sprintf("%04d-W%02d", prevY, prevW)
 	case "last_week":
 		t, _ := time.Parse("2006-01-02", periodKey)
 		return t.AddDate(0, 0, -7).Format("2006-01-02")
-	case "90d":
-		t, _ := time.Parse("2006-01-02", periodKey)
-		return t.AddDate(0, 0, -90).Format("2006-01-02")
 	case "month", "last_month":
 		t, _ := time.Parse("2006-01", periodKey)
 		return t.AddDate(0, -1, 0).Format("2006-01")
@@ -454,8 +592,8 @@ func (s *CostService) buildEnvBreakdown(ctx context.Context, reportType, periodK
 	for _, c := range configs {
 		envByAccount[c.Environment] = c
 	}
-	curList, _ := s.repo.ListCloudBillAggregateForReportPeriod(ctx, reportType, periodKey)
-	prevList, _ := s.repo.ListCloudBillAggregateForReportPeriod(ctx, reportType, prevPeriodKey)
+	curList, _ := s.repo.ListCloudBillAggregateForReportPeriod(ctx, reportType, periodKey, "payment")
+	prevList, _ := s.repo.ListCloudBillAggregateForReportPeriod(ctx, reportType, prevPeriodKey, "payment")
 	curByAccount := make(map[string]float64)
 	for _, a := range curList {
 		k := a.AccountID
@@ -507,14 +645,16 @@ func (s *CostService) buildEnvBreakdown(ctx context.Context, reportType, periodK
 	return out
 }
 
-// GetGlobalCost returns L0 cost. [Ref: 04_01_成本透视真实数据] 常规展示仅读聚合表；无聚合时降级 cost_cloud_bill_summary 或日原始表。
+// GetGlobalCost returns L0 cost. [Ref: 04_01_成本透视真实数据、16_ §三] 常规展示仅读聚合表（仅实际付款）；无聚合时降级 cost_cloud_bill_summary 或日原始表。
 // period: 1d|7d|30d|month|quarter 时优先读 cost_cloud_bill_aggregate；自定义日期由 GetGlobalCostByDateRange 从日原始表叠加。
 // [Ref: D1-4] 降级时仅从日原始表聚合最近 30 天并设 5s 超时，超时返回 ErrFallbackTimeout（HTTP 503）。
-func (s *CostService) GetGlobalCost(ctx context.Context, period string) (*dto.GlobalCostResponse, error) {
+// metricType 已废弃，固定使用 "payment"（实际付款金额）；统计口径已移除。
+func (s *CostService) GetGlobalCost(ctx context.Context, period string, metricType string) (*dto.GlobalCostResponse, error) {
+	metricType = "payment"
 	now := time.Now().UTC()
 	// [Ref: 01_实践 展示与延迟说明] 常规展示仅读聚合表；多账号时从 List 合并 total 与 product_breakdown（01_设计 §后端数据聚合与存储方案）
 	if reportType, periodKey := reportTypeAndPeriodKey(period, now); reportType != "" {
-		list, _ := s.repo.ListCloudBillAggregateForReportPeriod(ctx, reportType, periodKey)
+		list, _ := s.repo.ListCloudBillAggregateForReportPeriod(ctx, reportType, periodKey, metricType)
 		if len(list) > 0 {
 			var totalAmount float64
 			merged := make(map[string]float64)
@@ -528,91 +668,76 @@ func (s *CostService) GetGlobalCost(ctx context.Context, period string) (*dto.Gl
 					lastSuccessAt = a.LastSuccessAt
 				}
 			}
-			if totalAmount > 0 || len(merged) > 0 {
-				domainBreakdown := buildDomainBreakdownNormalized(merged)
-				prevKey := previousPeriodKey(reportType, periodKey, now)
-				envBreakdown := s.buildEnvBreakdown(ctx, reportType, periodKey, prevKey)
-				meta := &dto.GlobalCostMetadata{DataStatus: "aggregate", ReportType: reportType, PeriodKey: periodKey}
-				if lastSuccessAt != nil {
-					meta.LastUpdatedAt = lastSuccessAt
-				}
-				return &dto.GlobalCostResponse{
-					TotalCost:        totalAmount,
-					TotalOptimizable: 0,
-					GlobalEfficiency: 0,
-					DomainBreakdown:  domainBreakdown,
-					EnvBreakdown:     envBreakdown,
-					Namespaces:       nil,
-					Timestamp:        now,
-					Metadata:         meta,
-				}, nil
+		if totalAmount > 0 || len(merged) > 0 {
+			domainBreakdown := buildDomainBreakdownNormalized(merged)
+			prevKey := previousPeriodKey(reportType, periodKey, now)
+			envBreakdown := s.buildEnvBreakdown(ctx, reportType, periodKey, prevKey)
+			meta := &dto.GlobalCostMetadata{DataStatus: "aggregate", ReportType: reportType, PeriodKey: periodKey}
+			if lastSuccessAt != nil {
+				meta.LastUpdatedAt = lastSuccessAt
 			}
+			// [Ref: 16_云账单动态对账与高可靠处理规范 §三段式] 注入账单对账状态供前端区分"已财务核算"/"动态同步中"
+			meta.BillDataStatus = s.resolveBillDataStatus(ctx, reportType, periodKey, now)
+			return &dto.GlobalCostResponse{
+				TotalCost:        totalAmount,
+				TotalOptimizable: 0,
+				GlobalEfficiency: 0,
+				DomainBreakdown:  domainBreakdown,
+				EnvBreakdown:     envBreakdown,
+				Namespaces:       nil,
+				Timestamp:        now,
+				Metadata:         meta,
+			}, nil
 		}
-		// 聚合表无数据时从日原始表降级：1d/this_week/7d/7d_range/30d 按对应区间聚合 [Ref: 01_实践 展示与延迟说明]；7d/30d 结束日为昨日（D9-7）
-		if period == "1d" || period == "this_week" || period == "7d" || period == "7d_range" || period == "30d" || period == "" {
-			ctxFallback, cancel := context.WithTimeout(ctx, FallbackQueryTimeout)
-			yesterday := now.AddDate(0, 0, -1).Truncate(24 * time.Hour)
-			var from, to time.Time
-			switch period {
-			case "1d":
-				from, to = yesterday, yesterday
-			case "this_week":
-				// 这周：本周一 00:00 至昨日（ISO 周周一为第一天）
-				wd := now.Weekday()
-				if wd == 0 {
-					wd = 7
-				}
-				daysBack := int(wd - 1)
-				thisWeekMonday := now.AddDate(0, 0, -daysBack).Truncate(24 * time.Hour)
-				from, to = thisWeekMonday, yesterday
-			case "7d", "7d_range":
-				to = yesterday
-				from = to.AddDate(0, 0, -6)
-			default:
-				from = now.AddDate(0, 0, -30)
-				to = yesterday
-			}
-			rows, err := s.repo.ListCloudBillDailyRawFromTo(ctxFallback, from, to)
-			cancel()
-			if err != nil {
-				if errors.Is(err, context.DeadlineExceeded) {
-					return nil, ErrFallbackTimeout
-				}
-			} else if len(rows) > 0 {
-				var total float64
-				merged := make(map[string]float64)
-				for _, r := range rows {
-					total += r.TotalAmount
-					for k, v := range r.ProductBreakdown {
-						merged[k] += v
-					}
-				}
-				domainBreakdown := buildDomainBreakdownNormalized(merged)
-				rType, pKey := "30d", yesterday.Format("2006-01-02")
-				if period == "1d" {
-					rType, pKey = "1d", yesterday.Format("2006-01-02")
-				} else if period == "this_week" {
-					year, week := now.ISOWeek()
-					rType, pKey = "this_week", fmt.Sprintf("%04d-W%02d", year, week)
-				} else if period == "7d" || period == "7d_range" {
-					rType, pKey = "7d", yesterday.Format("2006-01-02")
-				}
-				prevKey := previousPeriodKey(rType, pKey, now)
-				envBreakdown := s.buildEnvBreakdown(ctx, rType, pKey, prevKey)
-				metaFallback := &dto.GlobalCostMetadata{DataStatus: "fallback", ReportType: rType, PeriodKey: pKey}
-				metaFallback.LastUpdatedAt = &now
-				return &dto.GlobalCostResponse{
-					TotalCost:        total,
-					TotalOptimizable: 0,
-					GlobalEfficiency: 0,
-					DomainBreakdown:  domainBreakdown,
-					EnvBreakdown:     envBreakdown,
-					Namespaces:       nil,
-					Timestamp:        now,
-					Metadata:         metaFallback,
-				}, nil
-			}
 		}
+	// 聚合表无数据时从日原始表降级：1d/this_week 按对应区间聚合
+	if period == "1d" || period == "this_week" {
+		ctxFallback, cancel := context.WithTimeout(ctx, FallbackQueryTimeout)
+		yesterday := now.AddDate(0, 0, -1).Truncate(24 * time.Hour)
+		var from, to time.Time
+		switch period {
+		case "1d":
+			from, to = yesterday, yesterday
+		default: // this_week
+			// 这周：本周一 00:00 至昨日（ISO 周周一为第一天）
+			wd := now.Weekday()
+			if wd == 0 {
+				wd = 7
+			}
+			daysBack := int(wd - 1)
+			thisWeekMonday := now.AddDate(0, 0, -daysBack).Truncate(24 * time.Hour)
+			from, to = thisWeekMonday, yesterday
+		}
+		rows, err := s.repo.ListCloudBillDailyRawFromTo(ctxFallback, from, to)
+		cancel()
+		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return nil, ErrFallbackTimeout
+			}
+		} else if len(rows) > 0 {
+			total, merged := mergeDailyRowsSafe(rows)
+			domainBreakdown := buildDomainBreakdownNormalized(merged)
+			rType, pKey := "1d", yesterday.Format("2006-01-02")
+			if period == "this_week" {
+				year, week := now.ISOWeek()
+				rType, pKey = "this_week", fmt.Sprintf("%04d-W%02d", year, week)
+			}
+			prevKey := previousPeriodKey(rType, pKey, now)
+			envBreakdown := s.buildEnvBreakdown(ctx, rType, pKey, prevKey)
+			metaFallback := &dto.GlobalCostMetadata{DataStatus: "fallback", BillDataStatus: "PRELIMINARY", ReportType: rType, PeriodKey: pKey}
+			metaFallback.LastUpdatedAt = &now
+			return &dto.GlobalCostResponse{
+				TotalCost:        total,
+				TotalOptimizable: 0,
+				GlobalEfficiency: 0,
+				DomainBreakdown:  domainBreakdown,
+				EnvBreakdown:     envBreakdown,
+				Namespaces:       nil,
+				Timestamp:        now,
+				Metadata:         metaFallback,
+			}, nil
+		}
+	}
 	}
 	// 聚合表无数据时降级：cost_cloud_bill_summary（账期汇总）
 	cloud, totalAmount, productBreakdown := s.aggregateCloudBillByPeriod(ctx, period)
@@ -639,8 +764,8 @@ func (s *CostService) GetGlobalCost(ctx context.Context, period string) (*dto.Gl
 					}
 				}
 			}
-			metaFallback := &dto.GlobalCostMetadata{DataStatus: "fallback", ReportType: reportType, PeriodKey: periodKey}
-			metaFallback.LastUpdatedAt = &now
+		metaFallback := &dto.GlobalCostMetadata{DataStatus: "fallback", BillDataStatus: "PRELIMINARY", ReportType: reportType, PeriodKey: periodKey}
+		metaFallback.LastUpdatedAt = &now
 			return &dto.GlobalCostResponse{
 				TotalCost:        totalAmount,
 				TotalOptimizable: 0,
@@ -652,13 +777,15 @@ func (s *CostService) GetGlobalCost(ctx context.Context, period string) (*dto.Gl
 				Metadata:         metaFallback,
 			}, nil
 		}
-		metaFallback2 := &dto.GlobalCostMetadata{DataStatus: "fallback"}
+	// period 为 7d/30d/90d 时无 reportType，仍返回总账与领域分解；env_breakdown 返回空数组保持结构一致
+		metaFallback2 := &dto.GlobalCostMetadata{DataStatus: "fallback", BillDataStatus: "PRELIMINARY"}
 		metaFallback2.LastUpdatedAt = &now
 		return &dto.GlobalCostResponse{
 			TotalCost:        totalAmount,
 			TotalOptimizable: 0,
 			GlobalEfficiency: 0,
 			DomainBreakdown:  domainBreakdown,
+			EnvBreakdown:     []dto.EnvBreakdownItem{},
 			Namespaces:       nil,
 			Timestamp:        now,
 			Metadata:         metaFallback2,
@@ -761,7 +888,7 @@ func (s *CostService) MixedQueryTimeSeries(ctx context.Context, start, end time.
 
 // ListNamespaces returns all namespaces with cost summary for the frontend cost table.
 func (s *CostService) ListNamespaces(ctx context.Context, period string) ([]dto.NamespaceCostSummary, error) {
-	resp, err := s.GetGlobalCost(ctx, period)
+	resp, err := s.GetGlobalCost(ctx, period, "payment")
 	if err != nil {
 		return nil, err
 	}
@@ -770,7 +897,7 @@ func (s *CostService) ListNamespaces(ctx context.Context, period string) ([]dto.
 
 // GetNamespaceCost returns L1 cost for a namespace.
 func (s *CostService) GetNamespaceCost(ctx context.Context, namespace string) (*dto.NamespaceCostResponse, error) {
-	now := time.Now()
+	now := time.Now().UTC()
 	start := now.AddDate(0, 0, -7)
 
 	costs, err := s.repo.AggregateDailyNamespaceCosts(ctx, start, now)
@@ -823,7 +950,7 @@ func (s *CostService) GetEnvDrilldown(ctx context.Context, envId, reportType, pe
 		// 未配置该环境，返回空
 		return []dto.EnvDrilldownItem{}, nil
 	}
-	list, err := s.repo.ListCloudBillAggregateForReportPeriod(ctx, reportType, periodKey)
+	list, err := s.repo.ListCloudBillAggregateForReportPeriod(ctx, reportType, periodKey, "payment")
 	if err != nil || len(list) == 0 {
 		return []dto.EnvDrilldownItem{}, nil
 	}
@@ -968,6 +1095,37 @@ func drilldownPeriodToDateRange(reportType, periodKey string, now time.Time) (fr
 		to = t.Truncate(24 * time.Hour)
 		from = to.AddDate(0, 0, -6)
 		return from, to, true
+	// [Ref: 04_01_成本透视真实数据] 季度与年度环比降级：聚合表无历史记录时从日原始表计算
+	case "quarter", "last_quarter":
+		var y, q int
+		if _, err := fmt.Sscanf(periodKey, "%d-Q%d", &y, &q); err != nil || q < 1 || q > 4 {
+			return from, to, false
+		}
+		from = time.Date(y, time.Month((q-1)*3+1), 1, 0, 0, 0, 0, time.UTC)
+		// 季度末：Q1=3月末, Q2=6月末, Q3=9月末, Q4=12月末
+		lastMonth := time.Month(q * 3)
+		to = time.Date(y, lastMonth+1, 0, 0, 0, 0, 0, time.UTC) // 下月第0天 = 本月最后一天
+		if to.After(yesterday) {
+			to = yesterday
+		}
+		if from.After(to) {
+			return from, to, false
+		}
+		return from, to, true
+	case "this_year", "last_year":
+		var y int
+		if _, err := fmt.Sscanf(periodKey, "%d", &y); err != nil {
+			return from, to, false
+		}
+		from = time.Date(y, 1, 1, 0, 0, 0, 0, time.UTC)
+		to = time.Date(y, 12, 31, 0, 0, 0, 0, time.UTC)
+		if to.After(yesterday) {
+			to = yesterday
+		}
+		if from.After(to) {
+			return from, to, false
+		}
+		return from, to, true
 	default:
 		return from, to, false
 	}
@@ -976,7 +1134,7 @@ func drilldownPeriodToDateRange(reportType, periodKey string, now time.Time) (fr
 // GetGlobalDrilldown 全环境云产品明细：合并所有 account 的 product_breakdown 按产品汇总并打 category；env 非 all 时仅汇总该环境对应 account_id。[Ref: 01_设计 D9-8、D6 云产品成本明细索引、12_API；方案 B 键前缀映射]
 // 聚合表无数据时对 1d/this_week/7d/7d_range/30d/90d/last_week 从日原始表降级聚合，与 GetGlobalCost 行为一致。
 func (s *CostService) GetGlobalDrilldown(ctx context.Context, reportType, periodKey, category, sortOrder, env string) ([]dto.EnvDrilldownItem, error) {
-	list, err := s.repo.ListCloudBillAggregateForReportPeriod(ctx, reportType, periodKey)
+	list, err := s.repo.ListCloudBillAggregateForReportPeriod(ctx, reportType, periodKey, "payment")
 	if err != nil {
 		return nil, err
 	}
@@ -1026,7 +1184,8 @@ func (s *CostService) GetGlobalDrilldown(ctx context.Context, reportType, period
 	}
 	var out []dto.EnvDrilldownItem
 	for code, cost := range productCosts {
-		if cost <= 0 {
+		// 严格过滤：仅展示真正有消费成本的产品（>0.005，低于此值的四舍五入为零）
+		if cost < 0.005 {
 			continue
 		}
 		cat := s.resolveDrilldownCategory(ctx, code, categoryFromPrefix[code])
@@ -1048,7 +1207,7 @@ func (s *CostService) GetGlobalDrilldown(ctx context.Context, reportType, period
 	return out, nil
 }
 
-// GetGlobalDrilldownByDateRange 全环境云产品明细（自定义日期）：从日原始表按 [from,to] 聚合并打 category；env 参数保留，方案 B 日表无 account_id 时忽略（仅返回全环境）。[Ref: 01_设计 GET /api/v1/cost/drilldown/global date_from/date_to；方案 B 键前缀映射]
+// GetGlobalDrilldownByDateRange 全环境云产品明细（自定义日期）：从日原始表按 [from,to] 聚合并打 category；env 过滤按 account_id。[Ref: 01_设计 GET /api/v1/cost/drilldown/global date_from/date_to；方案 B 键前缀映射]
 func (s *CostService) GetGlobalDrilldownByDateRange(ctx context.Context, from, to time.Time, category, sortOrder, env string) ([]dto.EnvDrilldownItem, error) {
 	const maxMonths = 6
 	if to.Before(from) {
@@ -1061,9 +1220,29 @@ func (s *CostService) GetGlobalDrilldownByDateRange(ctx context.Context, from, t
 	if err != nil || len(rows) == 0 {
 		return []dto.EnvDrilldownItem{}, nil
 	}
+
+	// 按环境过滤 account_id（与 GetGlobalDrilldown 逻辑一致）
+	var filterAccountID string
+	if env != "" && env != "all" {
+		if configs, cerr := s.repo.ListEnvAccountConfig(ctx); cerr == nil {
+			for _, c := range configs {
+				if strings.EqualFold(c.Environment, env) {
+					filterAccountID = c.AccountID
+					break
+				}
+			}
+		}
+		if filterAccountID == "" {
+			return []dto.EnvDrilldownItem{}, nil
+		}
+	}
+
 	productCosts := make(map[string]float64)
 	categoryFromPrefix := make(map[string]string)
 	for _, r := range rows {
+		if filterAccountID != "" && r.AccountID != filterAccountID {
+			continue
+		}
 		for k, cost := range r.ProductBreakdown {
 			if idx := strings.Index(k, ":"); idx >= 0 && idx < len(k)-1 {
 				code := k[idx+1:]
@@ -1077,7 +1256,7 @@ func (s *CostService) GetGlobalDrilldownByDateRange(ctx context.Context, from, t
 	}
 	var out []dto.EnvDrilldownItem
 	for code, cost := range productCosts {
-		if cost <= 0 {
+		if cost < 0.005 {
 			continue
 		}
 		cat := s.resolveDrilldownCategory(ctx, code, categoryFromPrefix[code])
@@ -1105,8 +1284,9 @@ const CostTrendMaxDays = 90
 // CostTrendTimeout 趋势查询超时 [Ref: 01_设计 §成本趋势 API]
 const CostTrendTimeout = 10 * time.Second
 
-// GetCostTrend 成本结构趋势：从日原始表按 [start,end] 聚合，返回按日序列；最大 90 天、超时 10s。[Ref: 01_设计 D9-9、12_API GET /api/v1/cost/trend]
-func (s *CostService) GetCostTrend(ctx context.Context, period string, dateFrom, dateTo *time.Time) (*dto.CostTrendResponse, error) {
+// GetCostTrend 成本结构趋势：从日原始表按 [start,end] 聚合，返回按日序列；最大 90 天、超时 10s。
+// envFilter 非空且非"all"时按环境 account_id 过滤。[Ref: 01_设计 D9-9、12_API GET /api/v1/cost/trend]
+func (s *CostService) GetCostTrend(ctx context.Context, period string, dateFrom, dateTo *time.Time, envFilter string) (*dto.CostTrendResponse, error) {
 	var from, to time.Time
 	if dateFrom != nil && dateTo != nil {
 		from = dateFrom.Truncate(24 * time.Hour)
@@ -1132,6 +1312,31 @@ func (s *CostService) GetCostTrend(ctx context.Context, period string, dateFrom,
 	if to.Sub(from) > CostTrendMaxDays*24*time.Hour {
 		from = to.AddDate(0, 0, -CostTrendMaxDays+1)
 	}
+
+	// [Ref: 01_设计 §环境与云账号配置] 按环境过滤：查找对应 account_id；未配置环境返回空趋势
+	var filterAccountID string
+	var envRequested bool
+	if envFilter != "" && envFilter != "all" {
+		envRequested = true
+		if configs, err := s.repo.ListEnvAccountConfig(ctx); err == nil {
+			for _, cfg := range configs {
+				if strings.EqualFold(cfg.Environment, envFilter) {
+					filterAccountID = cfg.AccountID
+					break
+				}
+			}
+		}
+		// 环境已请求但无对应账号配置 → 该环境无账单，返回空序列
+		if filterAccountID == "" {
+			var empty []dto.CostTrendDataPoint
+			for t := from; !t.After(to); t = t.AddDate(0, 0, 1) {
+				empty = append(empty, dto.CostTrendDataPoint{Date: t.Format("2006-01-02"), TotalCost: 0})
+			}
+			return &dto.CostTrendResponse{Data: empty}, nil
+		}
+	}
+	_ = envRequested
+
 	ctxTrend, cancel := context.WithTimeout(ctx, CostTrendTimeout)
 	defer cancel()
 	rows, err := s.repo.ListCloudBillDailyRawFromTo(ctxTrend, from, to)
@@ -1143,13 +1348,18 @@ func (s *CostService) GetCostTrend(ctx context.Context, period string, dateFrom,
 	}
 	byDate := make(map[string]*dto.CostTrendDataPoint)
 	for _, r := range rows {
+		// 按环境过滤：若指定了 filterAccountID，只聚合匹配的行
+		if filterAccountID != "" && r.AccountID != filterAccountID {
+			continue
+		}
+		// [Ref: 16_ §三] 趋势展示实际付款（CashAmount）；允许负值代数参与
 		d := r.BillDate.Format("2006-01-02")
 		if byDate[d] == nil {
 			byDate[d] = &dto.CostTrendDataPoint{Date: d, ByDomain: make(map[string]float64)}
 		}
-		byDate[d].TotalCost += r.TotalAmount
-		for domain, cost := range r.ProductBreakdown {
-			if strings.Contains(domain, ":") {
+		byDate[d].TotalCost += r.CashTotalAmount
+		for domain, cost := range r.CashProductBreakdown {
+			if strings.Contains(domain, ":") || cost == 0 {
 				continue
 			}
 			byDate[d].ByDomain[domain] += cost

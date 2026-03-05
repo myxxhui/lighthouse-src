@@ -14,13 +14,16 @@ type FetchAccountSummaryRequest struct {
 	CategoryFilter []string `json:"category_filter,omitempty"`
 }
 
-// FetchAccountSummaryResponse 账户总账单汇总响应。
-// ByCategory: compute/storage/network/other/unassigned 对应金额（元）
+// FetchAccountSummaryResponse 账户总账单汇总响应（dual-metric v3）。
+// TotalAmount / ByCategory     = PretaxAmount（消耗价值）
+// CashTotalAmount / CashByCategory = CashAmount（支付价值）
 type FetchAccountSummaryResponse struct {
-	BillingCycle string             `json:"billing_cycle"`
-	TotalAmount  float64            `json:"total_amount"`
-	Currency     string             `json:"currency"`
-	ByCategory   map[string]float64 `json:"by_category"`
+	BillingCycle    string             `json:"billing_cycle"`
+	TotalAmount     float64            `json:"total_amount"`      // 消耗价值（PretaxAmount）
+	CashTotalAmount float64            `json:"cash_total_amount"` // 支付价值（CashAmount）
+	Currency        string             `json:"currency"`
+	ByCategory      map[string]float64 `json:"by_category"`
+	CashByCategory  map[string]float64 `json:"cash_by_category,omitempty"`
 	Items        []BillItem         `json:"items,omitempty"` // 可选，产品/计费项明细
 }
 
@@ -32,8 +35,44 @@ type BillItem struct {
 	Category    string  `json:"category"`
 }
 
+// BillLineItem 行级流水条目，对应阿里云 QueryAccountBill 每一行原始记录。
+// [Ref: 16_云账单动态对账与高可靠处理规范 §三]
+// RecordID: 阿里云 RecordID；若 API 未返回则由业务键构造
+// CashAmount: 现金实付（含负数冲正，禁止过滤）；PretaxAmount: 折后应付（辅助）
+type BillLineItem struct {
+	RecordID          string  `json:"record_id"`
+	BillingDate       string  `json:"billing_date"`   // YYYY-MM-DD
+	BillingCycle      string  `json:"billing_cycle"`  // YYYY-MM
+	ProductCode       string  `json:"product_code"`
+	ProductName       string  `json:"product_name"`
+	SubOrderID        string  `json:"sub_order_id"`
+	InstanceID        string  `json:"instance_id"`
+	BillingItem       string  `json:"billing_item"`
+	SubscriptionType  string  `json:"subscription_type"`
+	CashAmount        float64 `json:"cash_amount"`           // 现金支付（含负数）
+	PretaxAmount      float64 `json:"pretax_amount"`         // 折后应付（辅助）
+	PretaxGrossAmount float64 `json:"pretax_gross_amount"`   // 官网原价（辅助）
+	Category          string  `json:"category"`              // compute/storage/network/security/other
+}
+
+// FetchLineItemsRequest 拉取行级流水的请求。
+// BillingDate: YYYY-MM-DD；BillingCycle 由 BillingDate 自动推导
+type FetchLineItemsRequest struct {
+	BillingDate string `json:"billing_date"` // YYYY-MM-DD
+}
+
+// FetchLineItemsResponse 行级流水响应。
+type FetchLineItemsResponse struct {
+	BillingDate string         `json:"billing_date"`
+	BillingCycle string        `json:"billing_cycle"`
+	Items        []BillLineItem `json:"items"`
+}
+
 // CloudBillingFetcher 云账单拉取接口。业务/ETL 仅依赖此接口与工厂获取实现。
 // Phase3 为占位；Phase4 接入真实云厂商（如 aliyun BSS/费用中心）。
 type CloudBillingFetcher interface {
 	FetchAccountSummary(ctx context.Context, req FetchAccountSummaryRequest) (*FetchAccountSummaryResponse, error)
+	// FetchLineItems 拉取指定日期的行级流水（IsGroupByProduct=false），含 RecordID 与 CashAmount。
+	// [Ref: 16_云账单动态对账与高可靠处理规范 §四] 用于幂等 Upsert 流水表与窗口回溯
+	FetchLineItems(ctx context.Context, req FetchLineItemsRequest) (*FetchLineItemsResponse, error)
 }

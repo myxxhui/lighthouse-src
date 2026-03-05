@@ -80,7 +80,7 @@ interface AppState {
   ) => Promise<void>;
   setSelectedDimension: (dimension: ResourceDimension) => void;
   fetchSLOStatus: (scope?: SLOScope) => Promise<void>;
-  fetchCostTrend: (params?: { period?: string; date_from?: string; date_to?: string }, withCompare?: boolean) => Promise<void>;
+  fetchCostTrend: (params?: { period?: string; date_from?: string; date_to?: string; env?: string }, withCompare?: boolean) => Promise<void>;
   setCostTimeRange: (range: CostTimeRange) => void;
   setCostCompareMode: (mode: CostCompareMode) => void;
   setCostCustomDateRange: (range: [string, string] | null) => void;
@@ -124,7 +124,7 @@ export const useAppStore = create<AppState>()(
       loadingCostTrend: false,
       errorCostTrend: null,
 
-      costTimeRange: '30d',
+      costTimeRange: 'month',
       costCompareMode: 'none',
       costCustomDateRange: null,
       useMockData: false,
@@ -134,7 +134,7 @@ export const useAppStore = create<AppState>()(
       selectedWorkload: null,
       selectedPod: null,
 
-      theme: 'light',
+      theme: 'dark',
 
       // Actions
       setTheme: (theme: 'light' | 'dark') => set({ theme }),
@@ -145,11 +145,8 @@ export const useAppStore = create<AppState>()(
 
         try {
           let data: CostMetrics;
-          const effectivePeriod = costTimeRange === 'custom'
-            ? '30d'
-            : costTimeRange === '7d_range'
-              ? '7d'
-              : costTimeRange;
+          const effectivePeriod = costTimeRange === 'custom' ? 'month' : costTimeRange;
+          // [Ref: 16_ §三] 统计口径已移除，后端固定返回实际付款（payment）
           if (useMockData) {
             data = await mockApi.getGlobalCostMetrics({ period: effectivePeriod, compareMode: costCompareMode });
           } else if (costTimeRange === 'custom' && costCustomDateRange != null && costCustomDateRange[0] && costCustomDateRange[1]) {
@@ -185,11 +182,7 @@ export const useAppStore = create<AppState>()(
       fetchNamespaceCosts: async () => {
         const { useMockData, costTimeRange } = get();
         set({ loadingNamespaceCosts: true, errorNamespaceCosts: null });
-        const effectivePeriod = costTimeRange === 'custom'
-            ? '30d'
-            : costTimeRange === '7d_range'
-              ? '7d'
-              : costTimeRange;
+        const effectivePeriod = costTimeRange === 'custom' ? 'month' : costTimeRange;
 
         try {
           const data = useMockData
@@ -214,17 +207,21 @@ export const useAppStore = create<AppState>()(
             set({ drilldownGlobalProducts: [], loadingDrilldownGlobal: false });
             return;
           }
-          const yesterday = new Date();
-          yesterday.setDate(yesterday.getDate() - 1);
+          // 与后端 ETL (time.Now().UTC()) 对齐，统一用 UTC 计算 period_key
+          const nowUTC = new Date();
+          const utcYear = nowUTC.getUTCFullYear();
+          const utcMonth = nowUTC.getUTCMonth(); // 0-based
+          const utcDate = nowUTC.getUTCDate();
+          const now = new Date(Date.UTC(utcYear, utcMonth, utcDate));
+          const yesterday = new Date(Date.UTC(utcYear, utcMonth, utcDate - 1));
           const yesterdayStr = yesterday.toISOString().slice(0, 10);
-          const now = new Date();
-          const monthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-          const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-          const prevMonthStr = `${prevMonth.getFullYear()}-${String(prevMonth.getMonth() + 1).padStart(2, '0')}`;
-          const q = Math.floor(now.getMonth() / 3) + 1;
-          const quarterKey = `${now.getFullYear()}-Q${q}`;
+          const monthStr = `${utcYear}-${String(utcMonth + 1).padStart(2, '0')}`;
+          const prevMonth = new Date(Date.UTC(utcYear, utcMonth - 1, 1));
+          const prevMonthStr = `${prevMonth.getUTCFullYear()}-${String(prevMonth.getUTCMonth() + 1).padStart(2, '0')}`;
+          const q = Math.floor(utcMonth / 3) + 1;
+          const quarterKey = `${utcYear}-Q${q}`;
           const prevQ = q <= 1 ? 4 : q - 1;
-          const prevY = q <= 1 ? now.getFullYear() - 1 : now.getFullYear();
+          const prevY = q <= 1 ? utcYear - 1 : utcYear;
           const prevQuarterKey = `${prevY}-Q${prevQ}`;
           // [Ref: 01_设计 report_type 与 period_key] this_week 后端期望 period_key=YYYY-Www（ISO 周），last_week 为上周日日期
           const getISOWeekKey = (d: Date) => {
@@ -237,21 +234,23 @@ export const useAppStore = create<AppState>()(
             return `${year}-W${String(week).padStart(2, '0')}`;
           };
           const getLastWeekEndKey = (d: Date) => {
-            const wd = d.getDay();
+            const wd = d.getUTCDay();
             const sunOffset = wd === 0 ? 7 : wd;
-            const lastSunday = new Date(d);
-            lastSunday.setDate(d.getDate() - sunOffset);
+            const lastSunday = new Date(d.getTime());
+            lastSunday.setUTCDate(d.getUTCDate() - sunOffset);
             return lastSunday.toISOString().slice(0, 10);
           };
           const reportTypeMap: Record<string, string> = {
-            '1d': '1d', this_week: 'this_week', '7d_range': '7d', '7d': '7d', last_week: 'last_week',
-            '30d': '30d', month: 'month', quarter: 'quarter', '90d': '90d',
-            last_month: 'last_month', last_quarter: 'last_quarter', this_year: 'this_year', last_year: 'last_year',
+            '1d': '1d', this_week: 'this_week', last_week: 'last_week',
+            month: 'month', last_month: 'last_month',
+            quarter: 'quarter', last_quarter: 'last_quarter',
+            this_year: 'this_year', last_year: 'last_year',
           };
           const periodKeyMap: Record<string, string> = {
-            '1d': yesterdayStr, '7d': yesterdayStr, '7d_range': yesterdayStr, '30d': yesterdayStr, '90d': yesterdayStr,
+            '1d': yesterdayStr,
             this_week: getISOWeekKey(now), last_week: getLastWeekEndKey(now),
-            month: monthStr, last_month: prevMonthStr, quarter: quarterKey, last_quarter: prevQuarterKey,
+            month: monthStr, last_month: prevMonthStr,
+            quarter: quarterKey, last_quarter: prevQuarterKey,
             this_year: String(now.getFullYear()), last_year: String(now.getFullYear() - 1),
           };
           if (period === 'custom' && dateRange?.[0] && dateRange?.[1]) {
@@ -278,8 +277,8 @@ export const useAppStore = create<AppState>()(
             }
             return;
           }
-          const report_type = reportTypeMap[period] ?? '30d';
-          const period_key = periodKeyMap[period] ?? yesterdayStr;
+          const report_type = reportTypeMap[period] ?? 'month';
+          const period_key = periodKeyMap[period] ?? monthStr;
           const data = await costService.getDrilldownGlobal({ report_type, period_key, env: envFilter, category: category || undefined, sort: sortOrder });
           set({ drilldownGlobalProducts: data, loadingDrilldownGlobal: false });
           // [Ref: 用户需求 各时间范围均有对应环比] 上期与本期同源（report_type+period_key），保证产品维度一致、环比可算
@@ -297,24 +296,14 @@ export const useAppStore = create<AppState>()(
               const dayBefore = new Date(yesterdayStr);
               dayBefore.setDate(dayBefore.getDate() - 1);
               prevPeriodKey = dayBefore.toISOString().slice(0, 10);
-            } else if (period === '7d' || period === '7d_range') {
-              const end = new Date(yesterdayStr);
-              end.setDate(end.getDate() - 7);
-              prevPeriodKey = end.toISOString().slice(0, 10);
-            } else if (period === '30d') {
-              const end = new Date(yesterdayStr);
-              end.setDate(end.getDate() - 30);
-              prevPeriodKey = end.toISOString().slice(0, 10);
-            } else if (period === '90d') {
-              const end = new Date(yesterdayStr);
-              end.setDate(end.getDate() - 90);
-              prevPeriodKey = end.toISOString().slice(0, 10);
             } else if (period === 'month') {
               prevPeriodKey = prevMonthStr;
             } else if (period === 'last_month') {
               const prevPrevMonth = new Date(prevMonth.getFullYear(), prevMonth.getMonth() - 1, 1);
               prevPeriodKey = `${prevPrevMonth.getFullYear()}-${String(prevPrevMonth.getMonth() + 1).padStart(2, '0')}`;
             } else if (period === 'quarter') {
+              // 上季度在 ETL 中以 report_type='last_quarter' 存储，不保留历史 'quarter' 记录
+              prevReportType = 'last_quarter';
               prevPeriodKey = prevQuarterKey;
             } else if (period === 'last_quarter') {
               const [pqY, pqN] = prevQuarterKey.split('-Q').map((s, i) => (i === 0 ? parseInt(s, 10) : parseInt(s, 10)));
@@ -327,10 +316,7 @@ export const useAppStore = create<AppState>()(
             } else if (period === 'last_year') {
               prevPeriodKey = String(now.getFullYear() - 2);
             } else {
-              const periodLen = period === '90d' ? 90 : 30;
-              const end = new Date(yesterdayStr);
-              end.setDate(end.getDate() - periodLen);
-              prevPeriodKey = end.toISOString().slice(0, 10);
+              prevPeriodKey = prevMonthStr;
             }
             const prevData = await costService.getDrilldownGlobal({
               report_type: prevReportType,
@@ -404,7 +390,7 @@ export const useAppStore = create<AppState>()(
         }
       },
 
-      fetchCostTrend: async (params?: { period?: string; date_from?: string; date_to?: string }, withCompare?: boolean) => {
+      fetchCostTrend: async (params?: { period?: string; date_from?: string; date_to?: string; env?: string }, withCompare?: boolean) => {
         set({ loadingCostTrend: true, errorCostTrend: null, costTrendDataPrev: null });
         try {
           const res = await costService.getCostTrend(params);
@@ -433,7 +419,7 @@ export const useAppStore = create<AppState>()(
               prevFrom = startPrev.toISOString().slice(0, 10);
               prevTo = new Date(end.getTime() - len * 86400000).toISOString().slice(0, 10);
             }
-            const resPrev = await costService.getCostTrend(prevFrom && prevTo ? { date_from: prevFrom, date_to: prevTo } : { period: params?.period });
+            const resPrev = await costService.getCostTrend(prevFrom && prevTo ? { date_from: prevFrom, date_to: prevTo, env: params?.env } : { period: params?.period, env: params?.env });
             const listPrev = (resPrev?.data ?? []).map(d => ({ date: d.date, total_cost: d.total_cost }));
             set(state => ({ ...state, costTrendDataPrev: listPrev }));
           }

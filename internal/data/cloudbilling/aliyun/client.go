@@ -4,6 +4,7 @@ package aliyun
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"strings"
@@ -60,12 +61,16 @@ type BillItemResult struct {
 }
 
 // BillOverviewResult 账期总账与按产品金额（供工厂转换为 FetchAccountSummaryResponse）。
+// TotalAmount     = PretaxAmount 代数和（资源消耗价值）
+// CashTotalAmount = CashAmount  代数和（资源支付价值）
 type BillOverviewResult struct {
-	BillingCycle string
-	TotalAmount  float64
-	ByCategory   map[string]float64
-	Items        []BillItemResult
-	Currency     string
+	BillingCycle   string
+	TotalAmount    float64            // 消耗价值（PretaxAmount）
+	CashTotalAmount float64           // 支付价值（CashAmount）
+	ByCategory     map[string]float64 // 按分类 PretaxAmount
+	CashByCategory map[string]float64 // 按分类 CashAmount
+	Items          []BillItemResult
+	Currency       string
 }
 
 // Fetcher 阿里云 BssOpenApi 拉取，带退避重试与熔断。
@@ -227,15 +232,15 @@ func (f *Fetcher) queryBillOverview(ctx context.Context, billingCycle string) (*
 	}
 	data := resp.Body.Data
 	total := 0.0
+	cashTotal := 0.0
 	byCategory := make(map[string]float64)
+	cashByCategory := make(map[string]float64)
 	var items []BillItemResult
 	if data.Items != nil && len(data.Items.Item) > 0 {
 		for _, it := range data.Items.Item {
-			amount := 0.0
-			if it.PretaxAmount != nil {
-				amount = float64(*it.PretaxAmount)
-			}
-			total += amount
+			// [Ref: 16_云账单动态对账与高可靠处理规范] 消耗统计口径：使用 PretaxAmount（税前应付金额）。
+			// PretaxAmount：真实资源消耗价值（代金券/积分/现金支付均有值）。
+			// CashAmount：实际现金支出（代金券账号为0，月度信用结算条目为大额负数），并列保存供支付视图使用。
 			domain := "计算资源"
 			codeStr := "OTHER"
 			if it.ProductCode != nil && *it.ProductCode != "" {
@@ -243,10 +248,35 @@ func (f *Fetcher) queryBillOverview(ctx context.Context, billingCycle string) (*
 				if d, ok := productCodeToDomain[strings.ToLower(*it.ProductCode)]; ok {
 					domain = d
 				}
-				// 产品码非空但未在 productCodeToDomain 中时兜底为计算资源，建议将新产品码补充进映射表
+			} else if it.PipCode != nil && *it.PipCode != "" {
+				codeStr = strings.ToUpper(strings.TrimSpace(*it.PipCode))
+				if d, ok := productCodeToDomain[strings.ToLower(*it.PipCode)]; ok {
+					domain = d
+				}
 			}
-			byCategory[domain] += amount
-			items = append(items, BillItemResult{ProductCode: codeStr, Amount: amount, Domain: domain})
+			// consumption: PretaxAmount（零值不参与汇总）
+			if it.PretaxAmount != nil {
+				amount := float64(*it.PretaxAmount)
+				if amount != 0 {
+					total += amount
+					byCategory[domain] += amount
+					items = append(items, BillItemResult{ProductCode: codeStr, Amount: amount, Domain: domain})
+					if amount < 0 {
+						itemType := ""
+						if it.Item != nil {
+							itemType = *it.Item
+						}
+						slog.Info("aliyun billing: negative PretaxAmount item (chargeback)",
+							"product_code", codeStr, "pretax_amount", amount, "item_type", itemType, "billing_cycle", billingCycle)
+					}
+				}
+			}
+			// payment: CashAmount（代数全量累加，含信用结算负值）
+			if it.CashAmount != nil {
+				cashAmt := float64(*it.CashAmount)
+				cashTotal += cashAmt
+				cashByCategory[domain] += cashAmt
+			}
 		}
 	}
 	cycle := billingCycle
@@ -254,11 +284,13 @@ func (f *Fetcher) queryBillOverview(ctx context.Context, billingCycle string) (*
 		cycle = *data.BillingCycle
 	}
 	return &BillOverviewResult{
-		BillingCycle: cycle,
-		TotalAmount:  total,
-		ByCategory:   byCategory,
-		Items:        items,
-		Currency:     "CNY",
+		BillingCycle:    cycle,
+		TotalAmount:     total,
+		CashTotalAmount: cashTotal,
+		ByCategory:      byCategory,
+		CashByCategory:  cashByCategory,
+		Items:           items,
+		Currency:        "CNY",
 	}, nil
 }
 
@@ -281,6 +313,8 @@ func (f *Fetcher) FetchBillOverviewByDay(ctx context.Context, billingDate string
 	pageNum := int32(1)
 	var totalAmount float64
 	byCategory := make(map[string]float64)
+	var cashTotalAmount float64
+	cashByCategory := make(map[string]float64)
 	var allItems []BillItemResult
 	for {
 		req := &client.QueryAccountBillRequest{
@@ -304,25 +338,49 @@ func (f *Fetcher) FetchBillOverviewByDay(ctx context.Context, billingDate string
 			break
 		}
 		for _, it := range data.Items.Item {
-			amount := 0.0
-			if it.PretaxAmount != nil {
-				amount = float64(*it.PretaxAmount)
+			// [Ref: 16_云账单动态对账与高可靠处理规范] 消耗统计口径：使用 PretaxAmount（税前应付金额 = 真实资源消耗价值）。
+			// 代金券账号 CashAmount=0（导致日粒度全部为零），月度信用结算条目 CashAmount 为大额负数。
+			// PretaxAmount 反映实际消耗，代金券支付时仍有值；零消耗条目自然排除。
+			// 冲正/退款条目 PretaxAmount 为负，代数参与汇总（净消耗语义正确）。
+			if it.PretaxAmount == nil {
+				continue
+			}
+			amount := float64(*it.PretaxAmount)
+			if amount == 0 {
+				continue // 零消耗（纯信用结算或免费额度）
+			}
+			if amount < 0 {
+				pipCode := ""
+				if it.PipCode != nil {
+					pipCode = *it.PipCode
+				}
+				bizType := ""
+				if it.BizType != nil {
+					bizType = *it.BizType
+				}
+				slog.Info("aliyun billing: negative PretaxAmount item included (chargeback/adjustment)",
+					"billing_date", billingDate,
+					"pip_code", pipCode,
+					"biz_type", bizType,
+					"pretax_amount", amount,
+				)
 			}
 			totalAmount += amount
 			codeStr := "OTHER"
+			domain := "计算资源"
 			if it.PipCode != nil && *it.PipCode != "" {
 				codeStr = strings.ToUpper(strings.TrimSpace(*it.PipCode))
-				domain := "计算资源"
 				if d, ok := productCodeToDomain[strings.ToLower(*it.PipCode)]; ok {
 					domain = d
 				}
-				// 产品码非空但未在 productCodeToDomain 中时兜底为计算资源，建议将新产品码补充进映射表
-				byCategory[domain] += amount
-				allItems = append(allItems, BillItemResult{ProductCode: codeStr, Amount: amount, Domain: domain})
-			} else {
-				// 仅当产品码为空时兜底为计算资源（无「其它」分类）
-				byCategory["计算资源"] += amount
-				allItems = append(allItems, BillItemResult{ProductCode: codeStr, Amount: amount, Domain: "计算资源"})
+			}
+			byCategory[domain] += amount
+			allItems = append(allItems, BillItemResult{ProductCode: codeStr, Amount: amount, Domain: domain})
+			// [Ref: 16_ §3.3] 日粒度也汇总实付：CashAmount 代数累加（含负数冲正），供 daily_raw/聚合实付展示
+			if it.CashAmount != nil {
+				cashAmt := float64(*it.CashAmount)
+				cashTotalAmount += cashAmt
+				cashByCategory[domain] += cashAmt
 			}
 		}
 		total := int32(0)
@@ -340,12 +398,174 @@ func (f *Fetcher) FetchBillOverviewByDay(ctx context.Context, billingDate string
 		}
 	}
 	return &BillOverviewResult{
-		BillingCycle: billingDate,
-		TotalAmount:  totalAmount,
-		ByCategory:   byCategory,
-		Items:        allItems,
-		Currency:     "CNY",
+		BillingCycle:    billingDate,
+		TotalAmount:    totalAmount,
+		CashTotalAmount: cashTotalAmount,
+		ByCategory:     byCategory,
+		CashByCategory: cashByCategory,
+		Items:          allItems,
+		Currency:       "CNY",
 	}, nil
+}
+
+// BillLineItemResult 行级流水条目（QueryAccountBill IsGroupByProduct=false）。
+// [Ref: 16_云账单动态对账与高可靠处理规范 §四]
+type BillLineItemResult struct {
+	RecordID          string  // 阿里云 RecordID（若 API 返回）；否则为业务构造键
+	BillingDate       string  // YYYY-MM-DD
+	BillingCycle      string  // YYYY-MM
+	ProductCode       string
+	ProductName       string
+	SubOrderID        string
+	InstanceID        string
+	BillingItem       string
+	SubscriptionType  string
+	CashAmount        float64 // 现金支付（含负数冲正）
+	PretaxAmount      float64
+	PretaxGrossAmount float64
+	Category          string  // 四大类映射后的分类
+}
+
+// FetchLineItemsByDay 拉取指定日期的行级流水明细（QueryAccountBill IsGroupByProduct=false）。
+// 含负数 CashAmount 冲正条目，调用方禁止过滤。
+// [Ref: 16_云账单动态对账与高可靠处理规范 §四]
+func (f *Fetcher) FetchLineItemsByDay(ctx context.Context, billingDate string) ([]BillLineItemResult, error) {
+	f.mu.Lock()
+	if time.Now().Before(f.circuitOpenUntil) {
+		f.mu.Unlock()
+		return nil, ErrCircuitOpen
+	}
+	f.mu.Unlock()
+
+	billingCycle := billingDate
+	if len(billingDate) >= 7 {
+		billingCycle = billingDate[:7]
+	}
+
+	pageSize := int32(300)
+	pageNum := int32(1)
+	var allItems []BillLineItemResult
+	seqMap := make(map[string]int) // 同键计数，用于合成唯一 RecordID
+
+	for {
+		req := &client.QueryAccountBillRequest{
+			BillingCycle:     tea.String(billingCycle),
+			BillingDate:      tea.String(billingDate),
+			Granularity:      tea.String("DAILY"),
+			IsGroupByProduct: tea.Bool(false), // 行级明细
+			PageNum:          tea.Int32(pageNum),
+			PageSize:         tea.Int32(pageSize),
+		}
+		resp, err := f.bssClient.QueryAccountBillWithOptions(req, &service.RuntimeOptions{})
+		if err != nil {
+			slog.Warn("aliyun billing: FetchLineItemsByDay failed", "billing_date", billingDate, "page", pageNum, "error", err)
+			f.mu.Lock()
+			f.consecutiveFailures++
+			if f.consecutiveFailures >= circuitFailThreshold {
+				f.circuitOpenUntil = time.Now().Add(circuitOpenDuration)
+				f.mu.Unlock()
+				return nil, err
+			}
+			f.mu.Unlock()
+			return nil, err
+		}
+		f.mu.Lock()
+		f.consecutiveFailures = 0
+		f.mu.Unlock()
+
+		if resp == nil || resp.Body == nil || resp.Body.Data == nil {
+			break
+		}
+		data := resp.Body.Data
+		if data.Items == nil || len(data.Items.Item) == 0 {
+			break
+		}
+		for _, it := range data.Items.Item {
+			cashAmount := 0.0
+			if it.CashAmount != nil {
+				cashAmount = float64(*it.CashAmount)
+			}
+			pretaxAmount := 0.0
+			if it.PretaxAmount != nil {
+				pretaxAmount = float64(*it.PretaxAmount)
+			}
+			pretaxGrossAmount := 0.0
+			if it.PretaxGrossAmount != nil {
+				pretaxGrossAmount = float64(*it.PretaxGrossAmount)
+			}
+			// PipCode 日粒度产品码（IsGroupByProduct=false 时有效）
+			productCode := ""
+			if it.PipCode != nil {
+				productCode = strings.ToLower(strings.TrimSpace(*it.PipCode))
+			}
+			// ProductName/SubscriptionType 仅在 IsGroupByProduct=true 时返回；false 时通常为空
+			productName := ""
+			if it.ProductName != nil {
+				productName = *it.ProductName
+			}
+			subscriptionType := ""
+			if it.SubscriptionType != nil {
+				subscriptionType = *it.SubscriptionType
+			}
+			bizType := ""
+			if it.BizType != nil {
+				bizType = *it.BizType
+			}
+			// QueryAccountBill API 不返回 RecordID/SubOrderId/InstanceID；构造业务唯一键
+			// 包含 billingDate + productCode + bizType + pageNum + 序号 确保唯一
+			base := billingDate + "|" + billingCycle + "|" + productCode + "|" + bizType + "|" + subscriptionType
+			seqMap[base]++
+			recordID := fmt.Sprintf("syn_%x_%d", simpleHash(base), seqMap[base])
+
+			category := "其他"
+			if d, ok := productCodeToDomain[productCode]; ok {
+				category = d
+			} else if productCode != "" {
+				category = "计算资源"
+			}
+
+			allItems = append(allItems, BillLineItemResult{
+				RecordID:          recordID,
+				BillingDate:       billingDate,
+				BillingCycle:      billingCycle,
+				ProductCode:       productCode,
+				ProductName:       productName,
+				BillingItem:       bizType,
+				SubscriptionType:  subscriptionType,
+				CashAmount:        cashAmount,
+				PretaxAmount:      pretaxAmount,
+				PretaxGrossAmount: pretaxGrossAmount,
+				Category:          category,
+			})
+		}
+
+		total := int32(0)
+		if data.TotalCount != nil {
+			total = *data.TotalCount
+		}
+		if int(pageNum)*int(pageSize) >= int(total) {
+			break
+		}
+		pageNum++
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+	}
+
+	slog.Info("aliyun billing: FetchLineItemsByDay done", "billing_date", billingDate, "total_items", len(allItems))
+	return allItems, nil
+}
+
+// simpleHash 用于合成 RecordID 的简单哈希（非安全，仅用于唯一性辅助）。
+func simpleHash(s string) uint32 {
+	h := uint32(2166136261)
+	for i := 0; i < len(s); i++ {
+		h ^= uint32(s[i])
+		h *= 16777619
+	}
+	return h
 }
 
 // ErrCircuitOpen 熔断打开时返回。

@@ -108,6 +108,8 @@ func (s *HTTPServer) registerCostRoutes(group *gin.RouterGroup) {
 	group.GET("/drilldown/:level/:identifier", s.drilldownCost)
 	// 成本结构趋势 [Ref: 01_设计 D9-9、12_API]
 	group.GET("/trend", s.costTrend)
+	// 成本数据源诊断（排查「暂无数据」根因）[Ref: 01_实践 §2.4]
+	group.GET("/diagnostic", s.costDiagnostic)
 }
 
 // registerSLORoutes registers SLO-related routes (temporary implementation).
@@ -127,6 +129,20 @@ func (s *HTTPServer) healthCheck(c *gin.Context) {
 		"timestamp": time.Now().UTC(),
 		"version":   "1.0.0",
 	})
+}
+
+// costDiagnostic 返回成本数据源诊断信息，便于排查「暂无数据」。[Ref: 01_实践 §2.4]
+func (s *HTTPServer) costDiagnostic(c *gin.Context) {
+	if s.costService == nil {
+		c.JSON(http.StatusOK, gin.H{"hint": "cost service not configured"})
+		return
+	}
+	diag, err := s.costService.GetCostDiagnostic(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, diag)
 }
 
 // globalCost handles GET /api/v1/cost/global?period=1d|7d|30d|month|quarter 或 date_from=YYYY-MM-DD&date_to=YYYY-MM-DD（D8-2 自定义日期，从日原始表叠加 [Ref: 04_01_成本透视真实数据]）
@@ -160,8 +176,11 @@ func (s *HTTPServer) globalCost(c *gin.Context) {
 		}
 	}
 	period := c.DefaultQuery("period", "month")
+	// 统计口径已移除，固定使用实际付款（payment）[Ref: 16_ §三]
+	_ = c.Query("metric_type") // 兼容旧前端，忽略
+	metricType := "payment"
 	if s.costService != nil {
-		resp, err := s.costService.GetGlobalCost(c.Request.Context(), period)
+		resp, err := s.costService.GetGlobalCost(c.Request.Context(), period, metricType)
 		if err != nil {
 			// D1-4：降级查询超时返回 503
 			if errors.Is(err, service.ErrFallbackTimeout) {
@@ -326,11 +345,12 @@ func (s *HTTPServer) drilldownGlobalCost(c *gin.Context) {
 	c.JSON(http.StatusOK, []dto.EnvDrilldownItem{})
 }
 
-// costTrend handles GET /api/v1/cost/trend?period=7d|30d|90d 或 date_from=YYYY-MM-DD&date_to=YYYY-MM-DD [Ref: 01_设计 D9-9、12_API]
+// costTrend handles GET /api/v1/cost/trend?period=7d|30d|90d&env=POC|FAT|UAT|PROD|all [Ref: 01_设计 D9-9、12_API]
 func (s *HTTPServer) costTrend(c *gin.Context) {
 	period := c.Query("period")
 	dateFromStr := c.Query("date_from")
 	dateToStr := c.Query("date_to")
+	envFilter := c.Query("env")
 	var dateFrom, dateTo *time.Time
 	if dateFromStr != "" && dateToStr != "" {
 		if from, err := time.Parse("2006-01-02", dateFromStr); err == nil {
@@ -341,7 +361,7 @@ func (s *HTTPServer) costTrend(c *gin.Context) {
 		}
 	}
 	if s.costService != nil {
-		resp, err := s.costService.GetCostTrend(c.Request.Context(), period, dateFrom, dateTo)
+		resp, err := s.costService.GetCostTrend(c.Request.Context(), period, dateFrom, dateTo, envFilter)
 		if err != nil {
 			if errors.Is(err, service.ErrFallbackTimeout) {
 				c.JSON(http.StatusServiceUnavailable, gin.H{"error": "cost trend query timeout"})

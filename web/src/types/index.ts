@@ -1,19 +1,15 @@
-/** 成本透视时间范围 [Ref: 01_实践 front_end_time_ranges]；'custom' 表示使用自定义日期范围（与 costCustomDateRange 二选一）；这周=this_week 与 近七天=7d 必须区分 */
+/** 成本透视时间范围 [Ref: 01_实践 front_end_time_ranges] */
 export type CostTimeRange =
-  | '1d'
-  | 'this_week'  // 这周：ISO 周周一至昨日
-  | '7d'
-  | '7d_range'   // 近七天，API 同 7d
-  | '30d'
-  | 'month'
-  | 'quarter'
-  | '90d'
-  | 'last_week'
-  | 'last_month'
-  | 'last_quarter'
+  | '1d'          // 昨天
+  | 'this_week'   // 这周：ISO 周周一至昨日
+  | 'last_week'   // 上周
+  | 'month'       // 这月
+  | 'last_month'  // 上月
+  | 'quarter'     // 这季度
+  | 'last_quarter'// 上季度
   | 'this_year'   // 今年：1月1日至昨日
   | 'last_year'   // 去年：上一自然年
-  | 'custom';
+  | 'custom';     // 自定义（最多6个月内）
 
 /** 成本对比模式 */
 export type CostCompareMode = 'none' | 'previous';
@@ -62,6 +58,15 @@ export interface CostMetrics {
   };
   /** D1-3：数据更新至，前端展示「数据更新至 YYYY-MM-DD HH:mm」 */
   lastUpdatedAt?: string;
+  /**
+   * 账单对账状态标识 [Ref: 16_云账单动态对账与高可靠处理规范 §三段式]
+   *   FINALIZED   → 已财务核算（历史月，权威）
+   *   PRELIMINARY → 动态同步中（当前月/近期数据）
+   *   RECONCILING → 对账中
+   *   DIRTY       → 数据偏差
+   *   undefined   → 未知/不适用
+   */
+  billDataStatus?: string;
 }
 
 /** 产品级成本（账单详情 top-N 与详情跳转） */

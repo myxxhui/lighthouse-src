@@ -27,11 +27,19 @@ type DomainBreakdownItem struct {
 }
 
 // GlobalCostMetadata D1-3：数据更新至、来源（聚合表/原始表降级）；含 report_type/period_key 便于校验时间范围对应关系。
+// [Ref: 16_云账单动态对账与高可靠处理规范 §三段式聚合] BillDataStatus 字段语义：
+//   - FINALIZED   : 已对账结算（历史月，权威级别）→ 前端展示「已财务核算」
+//   - PRELIMINARY : 当前月动态同步中（可信，未结算）→ 前端展示「动态同步中」
+//   - RECONCILING : 对账工作线运行中（修复中）→ 前端展示「对账中」
+//   - DIRTY       : 发现偏差，待修复              → 前端展示「数据偏差」
+//   - aggregate   : 来自聚合缓存（兼容旧语义）
+//   - fallback    : 来自原始表降级聚合
 type GlobalCostMetadata struct {
-	LastUpdatedAt *time.Time `json:"last_updated_at,omitempty"` // 聚合完成时间，前端展示「数据更新至」
-	DataStatus    string     `json:"data_status,omitempty"`     // "aggregate" | "fallback"
-	ReportType    string     `json:"report_type,omitempty"`     // 1d|7d|30d|month|quarter 等，对应聚合表 report_type
-	PeriodKey     string     `json:"period_key,omitempty"`      // 对应聚合表 period_key，用于校验当前时间范围
+	LastUpdatedAt  *time.Time `json:"last_updated_at,omitempty"`  // 聚合完成时间，前端展示「数据更新至」
+	DataStatus     string     `json:"data_status,omitempty"`      // "aggregate"|"fallback"|"FINALIZED"|"PRELIMINARY"|"RECONCILING"|"DIRTY"
+	BillDataStatus string     `json:"bill_data_status,omitempty"` // 账单对账状态（来自 month_status 表）
+	ReportType     string     `json:"report_type,omitempty"`      // 1d|7d|30d|month|quarter 等，对应聚合表 report_type
+	PeriodKey      string     `json:"period_key,omitempty"`       // 对应聚合表 period_key，用于校验当前时间范围
 }
 
 // EnvBreakdownItem 按环境（POC/FAT/UAT/PROD）的总账与对比。[Ref: 01_设计 §按环境展示、12_API GlobalCostResponse]

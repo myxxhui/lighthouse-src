@@ -1002,7 +1002,7 @@ func (m *MockRepository) ListEnvAccountConfig(ctx context.Context) ([]EnvAccount
 func (m *MockRepository) GetProductCategory(ctx context.Context, productCode string) (string, bool) {
 	return "", false
 }
-func (m *MockRepository) ListCloudBillAggregateForReportPeriod(ctx context.Context, reportType, periodKey string) ([]CloudBillAggregate, error) {
+func (m *MockRepository) ListCloudBillAggregateForReportPeriod(ctx context.Context, reportType, periodKey, metricType string) ([]CloudBillAggregate, error) {
 	return nil, nil
 }
 
@@ -1551,8 +1551,8 @@ func (tr *transactionRepository) ListEnvAccountConfig(ctx context.Context) ([]En
 func (tr *transactionRepository) GetProductCategory(ctx context.Context, productCode string) (string, bool) {
 	return tr.tx.repo.GetProductCategory(ctx, productCode)
 }
-func (tr *transactionRepository) ListCloudBillAggregateForReportPeriod(ctx context.Context, reportType, periodKey string) ([]CloudBillAggregate, error) {
-	return tr.tx.repo.ListCloudBillAggregateForReportPeriod(ctx, reportType, periodKey)
+func (tr *transactionRepository) ListCloudBillAggregateForReportPeriod(ctx context.Context, reportType, periodKey, metricType string) ([]CloudBillAggregate, error) {
+	return tr.tx.repo.ListCloudBillAggregateForReportPeriod(ctx, reportType, periodKey, metricType)
 }
 
 func (tr *transactionRepository) HealthCheck(ctx context.Context) error {
@@ -1561,6 +1561,52 @@ func (tr *transactionRepository) HealthCheck(ctx context.Context) error {
 
 func (tr *transactionRepository) BeginTx(ctx context.Context) (Transaction, error) {
 	return nil, errors.New("nested transactions not supported in mock")
+}
+
+// [Ref: 16_云账单动态对账与高可靠处理规范] Mock stubs for new methods
+func (tr *transactionRepository) UpsertCloudBillLineItem(ctx context.Context, item CloudBillLineItem) error {
+	return nil
+}
+func (tr *transactionRepository) ListCloudBillLineItemsByDate(ctx context.Context, billDate time.Time, accountID string) ([]CloudBillLineItem, error) {
+	return nil, nil
+}
+func (tr *transactionRepository) ListCloudBillLineItemsByBillingCycle(ctx context.Context, billingCycle, accountID string) ([]CloudBillLineItem, error) {
+	return nil, nil
+}
+func (tr *transactionRepository) SumLineItemsCashByBillingCycle(ctx context.Context, billingCycle, accountID string) (float64, error) {
+	return 0, nil
+}
+func (tr *transactionRepository) DeleteLineItemsOlderThan(ctx context.Context, before time.Time, accountID string) error {
+	return nil
+}
+func (tr *transactionRepository) UpsertCloudBillMonthStatus(ctx context.Context, s CloudBillMonthStatus) error {
+	return nil
+}
+func (tr *transactionRepository) GetCloudBillMonthStatus(ctx context.Context, billingCycle, accountID string) (*CloudBillMonthStatus, error) {
+	return nil, nil
+}
+
+// MockRepository stubs for new methods
+func (m *MockRepository) UpsertCloudBillLineItem(ctx context.Context, item CloudBillLineItem) error {
+	return nil
+}
+func (m *MockRepository) ListCloudBillLineItemsByDate(ctx context.Context, billDate time.Time, accountID string) ([]CloudBillLineItem, error) {
+	return nil, nil
+}
+func (m *MockRepository) ListCloudBillLineItemsByBillingCycle(ctx context.Context, billingCycle, accountID string) ([]CloudBillLineItem, error) {
+	return nil, nil
+}
+func (m *MockRepository) SumLineItemsCashByBillingCycle(ctx context.Context, billingCycle, accountID string) (float64, error) {
+	return 0, nil
+}
+func (m *MockRepository) DeleteLineItemsOlderThan(ctx context.Context, before time.Time, accountID string) error {
+	return nil
+}
+func (m *MockRepository) UpsertCloudBillMonthStatus(ctx context.Context, s CloudBillMonthStatus) error {
+	return nil
+}
+func (m *MockRepository) GetCloudBillMonthStatus(ctx context.Context, billingCycle, accountID string) (*CloudBillMonthStatus, error) {
+	return nil, nil
 }
 
 // Helper methods for MockRepository

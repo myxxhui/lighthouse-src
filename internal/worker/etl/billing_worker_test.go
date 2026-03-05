@@ -78,6 +78,32 @@ func (m *mockPipelineRepo) DeleteCloudBillAggregateExcept(ctx context.Context, r
 	return nil
 }
 
+// [Ref: 16_云账单动态对账与高可靠处理规范] Mock stubs for new interface methods
+func (m *mockPipelineRepo) UpsertCloudBillLineItem(ctx context.Context, item postgres.CloudBillLineItem) error {
+	return nil
+}
+func (m *mockPipelineRepo) ListCloudBillLineItemsByDate(ctx context.Context, billDate time.Time, accountID string) ([]postgres.CloudBillLineItem, error) {
+	return nil, nil
+}
+func (m *mockPipelineRepo) ListCloudBillLineItemsByBillingCycle(ctx context.Context, billingCycle, accountID string) ([]postgres.CloudBillLineItem, error) {
+	return nil, nil
+}
+func (m *mockPipelineRepo) SumLineItemsCashByBillingCycle(ctx context.Context, billingCycle, accountID string) (float64, error) {
+	return 0, nil
+}
+func (m *mockPipelineRepo) GetProductCategory(ctx context.Context, productCode string) (string, bool) {
+	return "other", true
+}
+func (m *mockPipelineRepo) DeleteLineItemsOlderThan(ctx context.Context, before time.Time, accountID string) error {
+	return nil
+}
+func (m *mockPipelineRepo) UpsertCloudBillMonthStatus(ctx context.Context, s postgres.CloudBillMonthStatus) error {
+	return nil
+}
+func (m *mockPipelineRepo) GetCloudBillMonthStatus(ctx context.Context, billingCycle, accountID string) (*postgres.CloudBillMonthStatus, error) {
+	return nil, nil
+}
+
 // mockBillingFetcher 返回固定数据的拉取器。
 type mockBillingFetcher struct {
 	resp *cloudbilling.FetchAccountSummaryResponse
@@ -88,7 +114,24 @@ func (m *mockBillingFetcher) FetchAccountSummary(ctx context.Context, req cloudb
 	if m.err != nil {
 		return nil, m.err
 	}
-	return m.resp, nil
+	// 月请求时返回请求的 BillingCycle，以便落库的 monthly_raw 主键与 runAggregateStep 查询一致
+	out := *m.resp
+	if req.PeriodType == "month" && req.BillingCycle != "" {
+		out.BillingCycle = req.BillingCycle
+	}
+	return &out, nil
+}
+
+// FetchLineItems 返回空列表（测试中不需要行级流水；真实 ETL 有降级处理）。
+func (m *mockBillingFetcher) FetchLineItems(ctx context.Context, req cloudbilling.FetchLineItemsRequest) (*cloudbilling.FetchLineItemsResponse, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return &cloudbilling.FetchLineItemsResponse{
+		BillingDate:  req.BillingDate,
+		BillingCycle: func() string { if len(req.BillingDate) >= 7 { return req.BillingDate[:7] }; return req.BillingDate }(),
+		Items:        nil,
+	}, nil
 }
 
 func TestBillingWorker_Run_NilFetcher(t *testing.T) {
@@ -183,10 +226,12 @@ func TestBillingWorker_RunPipeline_MultiPageDaily(t *testing.T) {
 	yesterday := time.Now().UTC().AddDate(0, 0, -1).Truncate(24 * time.Hour)
 	fetcher := &mockBillingFetcher{
 		resp: &cloudbilling.FetchAccountSummaryResponse{
-			BillingCycle: yesterday.Format("2006-01-02"),
-			TotalAmount:  150,
-			Currency:     "CNY",
-			ByCategory:   map[string]float64{"计算资源": 80, "存储": 50, "网络": 20},
+			BillingCycle:    yesterday.Format("2006-01-02"),
+			TotalAmount:     150,
+			CashTotalAmount: 150, // [Ref: 16_ §三] 聚合表仅 payment，mock 需提供 Cash 以便校验
+			Currency:        "CNY",
+			ByCategory:      map[string]float64{"计算资源": 80, "存储": 50, "网络": 20},
+			CashByCategory:  map[string]float64{"计算资源": 80, "存储": 50, "网络": 20},
 			Items: []cloudbilling.BillItem{
 				{ProductCode: "ECS", Amount: 50, Category: "计算资源"},
 				{ProductCode: "ACK", Amount: 30, Category: "计算资源"},

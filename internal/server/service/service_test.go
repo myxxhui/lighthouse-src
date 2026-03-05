@@ -20,7 +20,7 @@ func TestCostService_GetGlobalCost(t *testing.T) {
 	repo := postgres.NewMockRepository(postgres.DefaultMockConfig())
 	svc := NewCostService(repo)
 	ctx := context.Background()
-	resp, err := svc.GetGlobalCost(ctx, "month")
+	resp, err := svc.GetGlobalCost(ctx, "month", "consumption")
 	if err != nil {
 		t.Fatalf("GetGlobalCost: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestCostService_GetGlobalCost_CloudBill(t *testing.T) {
 		t.Fatalf("SaveCloudBillSummary: %v", err)
 	}
 	svc := NewCostService(repo)
-	resp, err := svc.GetGlobalCost(ctx, "month")
+	resp, err := svc.GetGlobalCost(ctx, "month", "consumption")
 	if err != nil {
 		t.Fatalf("GetGlobalCost: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestCostService_GetGlobalCost_CloudBillZero(t *testing.T) {
 		t.Fatalf("SaveCloudBillSummary: %v", err)
 	}
 	svc := NewCostService(repo)
-	resp, err := svc.GetGlobalCost(ctx, "month")
+	resp, err := svc.GetGlobalCost(ctx, "month", "consumption")
 	if err != nil {
 		t.Fatalf("GetGlobalCost: %v", err)
 	}

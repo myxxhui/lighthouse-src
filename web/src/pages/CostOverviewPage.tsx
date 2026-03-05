@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'umi';
 import {
-  Button, Statistic, Switch, Space, Alert, Tooltip,
+  Button, Statistic, Switch, Alert, Tooltip,
   Select, Segmented, Radio, Modal, Descriptions, Table, DatePicker, Tag,
 } from 'antd';
 import dayjs, { type Dayjs } from 'dayjs';
@@ -24,18 +24,15 @@ import { CURRENCY_SYMBOL } from '@/constants';
 /* ─── Static Config ──────────────────────────────────────────────────────── */
 // [Ref: 01_实践 §3.1 DNA front_end_time_ranges]
 const TIME_RANGE_OPTIONS: { label: string; value: CostTimeRange }[] = [
-  { label: '昨天', value: '1d' },
-  { label: '这周', value: 'this_week' },
-  { label: '近七天', value: '7d_range' },
-  { label: '上周', value: 'last_week' },
-  { label: '这月', value: 'month' },
-  { label: '近30天', value: '30d' },
-  { label: '上月', value: 'last_month' },
+  { label: '昨天',   value: '1d' },
+  { label: '这周',   value: 'this_week' },
+  { label: '上周',   value: 'last_week' },
+  { label: '这月',   value: 'month' },
+  { label: '上月',   value: 'last_month' },
   { label: '这季度', value: 'quarter' },
-  { label: '近90天', value: '90d' },
   { label: '上季度', value: 'last_quarter' },
-  { label: '今年', value: 'this_year' },
-  { label: '去年', value: 'last_year' },
+  { label: '今年',   value: 'this_year' },
+  { label: '去年',   value: 'last_year' },
   { label: '自定义', value: 'custom' },
 ];
 const TOP_TIME_RANGE_OPTIONS = TIME_RANGE_OPTIONS.filter(o => o.value !== 'custom');
@@ -58,6 +55,12 @@ const DOMAIN_META: Record<string, { icon: React.ReactNode; color: string; gradSt
   '安全':     { icon: <SafetyCertificateOutlined />, color: '#f59e0b', gradStart: 'rgba(245,158,11,0.18)',  gradEnd: 'rgba(245,158,11,0.04)'  },
 };
 const ENV_COLORS: Record<string, string> = { POC: '#3b82f6', FAT: '#10b981', UAT: '#f59e0b', PROD: '#ef4444' };
+const ENV_SELECTED_BG: Record<string, [string, string]> = {
+  POC:  ['rgba(59,130,246,0.15)',  'rgba(59,130,246,0.08)'],
+  FAT:  ['rgba(16,185,129,0.15)',  'rgba(16,185,129,0.08)'],
+  UAT:  ['rgba(245,158,11,0.15)', 'rgba(245,158,11,0.08)'],
+  PROD: ['rgba(239,68,68,0.15)',  'rgba(239,68,68,0.08)'],
+};
 
 type DetailModalType = 'bill' | 'efficiency' | null;
 
@@ -65,12 +68,21 @@ type DetailModalType = 'bill' | 'efficiency' | null;
 const CostOverviewPage: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+
+  // Umi 4 兼容：避免 setSearchParams 回调模式不触发重渲染，统一用直接赋值
+  const updateParams = (updater: (p: URLSearchParams) => void, opts?: { replace?: boolean }) => {
+    const next = new URLSearchParams(searchParams);
+    updater(next);
+    setSearchParams(next, opts);
+  };
+
   const [detailModal, setDetailModal] = useState<DetailModalType>(null);
   const [domainDetail, setDomainDetail] = useState<DomainBreakdown | null>(null);
   const [highlightCloudProduct, setHighlightCloudProduct] = useState(false);
   const [trendModalOpen, setTrendModalOpen] = useState(false);
-  // [Ref: 用户需求] 分页 state：用受控 pageSize 替代硬编码，确保 showSizeChanger 实际生效
+  // [Ref: 用户需求] 分页 state：受控 pageSize + currentPage，确保 showSizeChanger 选择后自动跳回第1页
   const [tablePageSize, setTablePageSize] = useState(20);
+  const [tablePage, setTablePage] = useState(1);
 
   const {
     globalCostMetrics, namespaceCosts,
@@ -122,12 +134,13 @@ const CostOverviewPage: React.FC = () => {
     const period = effectiveDrilldownPeriod === '7d_range' ? '7d' : effectiveDrilldownPeriod === 'custom' ? undefined : effectiveDrilldownPeriod;
     const dateFrom = effectiveDrilldownDateRange?.[0];
     const dateTo = effectiveDrilldownDateRange?.[1];
+    const envParam = drilldownEnv !== 'all' ? drilldownEnv : undefined;
     if (effectiveDrilldownPeriod === 'custom' && dateFrom && dateTo) {
-      fetchCostTrend({ date_from: dateFrom, date_to: dateTo }, drilldownCompare);
+      fetchCostTrend({ date_from: dateFrom, date_to: dateTo, env: envParam }, drilldownCompare);
     } else if (period) {
-      fetchCostTrend({ period }, drilldownCompare);
+      fetchCostTrend({ period, env: envParam }, drilldownCompare);
     }
-  }, [effectiveDrilldownPeriod, effectiveDrilldownDateRange, drilldownCompare, fetchCostTrend]);
+  }, [effectiveDrilldownPeriod, effectiveDrilldownDateRange, drilldownCompare, drilldownEnv, fetchCostTrend]);
 
   /* ─── Theme-aware Color Palette ─────────────────────────────────────────── */
   const isDark = theme === 'dark';
@@ -165,6 +178,35 @@ const CostOverviewPage: React.FC = () => {
           </div>
         ))}
       </div>
+    );
+  };
+
+  /* ─── Bill Data Status Badge ─────────────────────────────────────────────── */
+  // [Ref: 16_云账单动态对账与高可靠处理规范 §三段式] 展示账单对账状态
+  const BillDataStatusBadge = ({ status, isDark: dark }: { status: string; isDark: boolean }) => {
+    const cfg: Record<string, { label: string; color: string; bg: string; dot: string }> = {
+      FINALIZED:    { label: '已财务核算', color: '#10b981', bg: 'rgba(16,185,129,0.12)', dot: '#10b981' },
+      PRELIMINARY:  { label: '动态同步中', color: '#f59e0b', bg: 'rgba(245,158,11,0.12)',  dot: '#f59e0b' },
+      RECONCILING:  { label: '对账中',    color: '#3b82f6', bg: 'rgba(59,130,246,0.12)',  dot: '#3b82f6' },
+      DIRTY:        { label: '数据偏差',  color: '#ef4444', bg: 'rgba(239,68,68,0.12)',   dot: '#ef4444' },
+    };
+    const c = cfg[status] ?? { label: '动态同步中', color: '#f59e0b', bg: 'rgba(245,158,11,0.12)', dot: '#f59e0b' };
+    return (
+      <span style={{
+        display: 'inline-flex', alignItems: 'center', gap: 5,
+        fontSize: 10, fontWeight: 600, color: c.color,
+        background: dark ? c.bg.replace('0.12', '0.20') : c.bg,
+        borderRadius: 20, padding: '2px 8px',
+        border: `1px solid ${c.color}30`,
+      }}>
+        <span style={{
+          width: 5, height: 5, borderRadius: '50%', background: c.dot,
+          boxShadow: status === 'PRELIMINARY' || status === 'RECONCILING' ? `0 0 4px ${c.dot}` : 'none',
+          animation: status === 'PRELIMINARY' ? 'pulse 2s infinite' : 'none',
+          flexShrink: 0,
+        }} />
+        {c.label}
+      </span>
     );
   };
 
@@ -210,23 +252,14 @@ const CostOverviewPage: React.FC = () => {
           <div style={{ fontSize: 11, color: txt2, marginBottom: 6, letterSpacing: '0.04em', textTransform: 'uppercase', fontWeight: 500 }}>
             时间范围
           </div>
-          {costTimeRange === 'custom' ? (
-            <Space>
-              <span style={{ color: txt1, fontSize: 13 }}>自定义（下方索引区选择）</span>
-              <Button type="link" size="small" onClick={() => {
-                setCostTimeRange('30d');
-                setCostCustomDateRange(null);
-                setSearchParams((prev: URLSearchParams) => { const n = new URLSearchParams(prev); n.set('period', '30d'); n.delete('date_from'); n.delete('date_to'); return n; });
-              }}>改用固定</Button>
-            </Space>
-          ) : (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
             <Radio.Group
-              value={costTimeRange}
+              value={costTimeRange === 'custom' ? undefined : costTimeRange}
               onChange={e => {
                 const val = e.target.value as CostTimeRange;
                 setCostCustomDateRange(null);
                 setCostTimeRange(val);
-                setSearchParams((prev: URLSearchParams) => { const n = new URLSearchParams(prev); n.set('period', val); n.delete('date_from'); n.delete('date_to'); return n; });
+                updateParams(n => { n.set('period', val); n.delete('date_from'); n.delete('date_to'); });
               }}
               optionType="button"
               buttonStyle="solid"
@@ -234,7 +267,36 @@ const CostOverviewPage: React.FC = () => {
               options={TOP_TIME_RANGE_OPTIONS}
               style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}
             />
-          )}
+            {/* [Ref: 01_实践 §时间范围] 自定义日期入口：与预设按钮互斥，选预设则清空，填日期则取消预设高亮 */}
+            <DatePicker.RangePicker
+              size="small"
+              allowClear
+              placeholder={['自定义开始', '自定义结束']}
+              value={
+                costTimeRange === 'custom' && costCustomDateRange
+                  ? [dayjs(costCustomDateRange[0]), dayjs(costCustomDateRange[1])]
+                  : null
+              }
+              disabledDate={current =>
+                !current ||
+                current.isAfter(dayjs().startOf('day')) ||
+                current.isBefore(dayjs().subtract(6, 'month').startOf('day'))
+              }
+              onChange={(dates) => {
+                if (!dates || !dates[0] || !dates[1]) {
+                  setCostTimeRange('30d');
+                  setCostCustomDateRange(null);
+                  updateParams(n => { n.set('period', '30d'); n.delete('date_from'); n.delete('date_to'); });
+                  return;
+                }
+                const from = dates[0].format('YYYY-MM-DD');
+                const to   = dates[1].format('YYYY-MM-DD');
+                setCostCustomDateRange([from, to]);
+                setCostTimeRange('custom');
+                updateParams(n => { n.set('period', 'custom'); n.set('date_from', from); n.set('date_to', to); });
+              }}
+            />
+          </div>
         </div>
         {/* Compare */}
         <div>
@@ -245,14 +307,17 @@ const CostOverviewPage: React.FC = () => {
             value={costCompareMode}
             onChange={v => {
               setCostCompareMode(v as CostCompareMode);
-              setSearchParams((prev: URLSearchParams) => { const n = new URLSearchParams(prev); n.set('compare', v as string); return n; });
+              updateParams(n => { n.set('compare', v as string); });
             }}
             options={COMPARE_OPTIONS}
             size="small"
           />
         </div>
         {/* Data note */}
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'flex-end', paddingBottom: 2 }}>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'flex-end', paddingBottom: 2, gap: 8 }}>
+          {globalCostMetrics?.billDataStatus && (
+            <BillDataStatusBadge status={globalCostMetrics.billDataStatus} isDark={isDark} />
+          )}
           <div style={{ fontSize: 11, color: txt2, display: 'flex', alignItems: 'center', gap: 6 }}>
             <span className="live-dot" />
             {globalCostMetrics?.lastUpdatedAt
@@ -270,16 +335,14 @@ const CostOverviewPage: React.FC = () => {
   );
 
   /* ─── Render: Hero + Env Bento ───────────────────────────────────────────── */
-  const renderHeroBento = () => {
-    if (!globalCostMetrics && !loadingGlobalMetrics) return null;
-
-    return (
+  // [Ref: 01_实践] 总账单与环境卡片框架始终渲染；无数据/报错时展示占位（— 或 0.00），不因数据缺失隐藏框架
+  const renderHeroBento = () => (
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gridTemplateRows: 'auto auto', gap: 12, marginBottom: 14 }}>
         {/* Hero card */}
         <div
           className="bento-card bento-card-clickable bento-hero-glow"
           onClick={() => {
-            setSearchParams((prev: URLSearchParams) => { const n = new URLSearchParams(prev); n.set('env', 'all'); n.set('period', costTimeRange); if (costTimeRange === 'custom' && costCustomDateRange?.[0] && costCustomDateRange?.[1]) { n.set('date_from', costCustomDateRange[0]); n.set('date_to', costCustomDateRange[1]); } return n; });
+            updateParams(n => { n.set('env', 'all'); n.set('period', costTimeRange); if (costTimeRange === 'custom' && costCustomDateRange?.[0] && costCustomDateRange?.[1]) { n.set('date_from', costCustomDateRange[0]); n.set('date_to', costCustomDateRange[1]); } });
             setHighlightCloudProduct(true);
             setTimeout(() => setHighlightCloudProduct(false), 2500);
             setTimeout(() => document.getElementById('cloud-product-detail')?.scrollIntoView({ behavior: 'smooth' }), 0);
@@ -312,9 +375,13 @@ const CostOverviewPage: React.FC = () => {
                 </div>
               ) : (
                 <>
-                  <div className="kpi-value-appear" style={{ fontSize: 42, fontWeight: 800, letterSpacing: '-0.02em', color: isDark ? '#fff' : '#1e3a5f', lineHeight: 1.1 }}>
-                    <span style={{ fontSize: 22, fontWeight: 600, marginRight: 3, opacity: 0.7 }}>{CURRENCY_SYMBOL}</span>
-                    {totalCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  <div className="kpi-value-appear" style={{ fontSize: 42, fontWeight: 800, letterSpacing: '-0.02em', color: globalCostMetrics ? (isDark ? '#fff' : '#1e3a5f') : txt2, lineHeight: 1.1 }}>
+                    {globalCostMetrics ? (
+                      <><span style={{ fontSize: 22, fontWeight: 600, marginRight: 3, opacity: 0.7 }}>{CURRENCY_SYMBOL}</span>
+                      {totalCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</>
+                    ) : (
+                      <span style={{ fontSize: 24 }}>—</span>
+                    )}
                   </div>
                   {heroChangePct !== null && (
                     <div style={{ marginTop: 8 }}>
@@ -325,13 +392,19 @@ const CostOverviewPage: React.FC = () => {
                 </>
               )}
             </div>
-            <Tag style={{
-              background: isDark ? 'rgba(59,130,246,0.18)' : 'rgba(59,130,246,0.1)',
-              border: `1px solid ${isDark ? 'rgba(59,130,246,0.35)' : 'rgba(59,130,246,0.25)'}`,
-              color: '#3b82f6', borderRadius: 20, fontSize: 11, fontWeight: 600, padding: '2px 10px',
-            }}>
-              云账单
-            </Tag>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+              <Tag style={{
+                background: isDark ? 'rgba(59,130,246,0.18)' : 'rgba(59,130,246,0.1)',
+                border: `1px solid ${isDark ? 'rgba(59,130,246,0.35)' : 'rgba(59,130,246,0.25)'}`,
+                color: '#3b82f6', borderRadius: 20, fontSize: 11, fontWeight: 600, padding: '2px 10px',
+              }}>
+                云账单
+              </Tag>
+              {/* 数据状态标识 [Ref: 16_云账单动态对账与高可靠处理规范 §三段式] */}
+              {globalCostMetrics?.billDataStatus && (
+                <BillDataStatusBadge status={globalCostMetrics.billDataStatus} isDark={isDark} />
+              )}
+            </div>
           </div>
           {/* Mini sparkline */}
           {(costTrendData?.length ?? 0) > 1 && (
@@ -353,54 +426,108 @@ const CostOverviewPage: React.FC = () => {
           )}
         </div>
 
-        {/* 4 Env cards */}
+        {/* 4 Env cards - always clickable to filter drilldown by env */}
         {(['POC', 'FAT', 'UAT', 'PROD'] as const).map(env => {
           const item = globalCostMetrics?.envBreakdown?.find(e => e.environment === env);
           const isConfigured = item && (item.account_id || item.total_cost > 0 || item.account_display_name !== '未配置');
+          const isSelected = drilldownEnv === env;
           const totalCostEnv = item?.total_cost ?? 0;
           const changePct = item?.change_pct;
           const color = ENV_COLORS[env];
           return (
             <div
               key={env}
-              className={`bento-card${isConfigured ? ' bento-card-clickable' : ''}`}
-              onClick={isConfigured ? () => {
-                setSearchParams((prev: URLSearchParams) => { const n = new URLSearchParams(prev); n.set('env', env); n.set('period', costTimeRange); if (costTimeRange === 'custom' && costCustomDateRange?.[0] && costCustomDateRange?.[1]) { n.set('date_from', costCustomDateRange[0]); n.set('date_to', costCustomDateRange[1]); } return n; });
-                setTimeout(() => document.getElementById('cloud-product-detail')?.scrollIntoView({ behavior: 'smooth' }), 0);
-              } : undefined}
+              className="bento-card bento-card-clickable"
+              onClick={() => {
+                const nextEnv = isSelected ? 'all' : env;
+                updateParams(n => {
+                  n.set('env', nextEnv);
+                  n.set('period', costTimeRange);
+                  if (costTimeRange === 'custom' && costCustomDateRange?.[0] && costCustomDateRange?.[1]) {
+                    n.set('date_from', costCustomDateRange[0]);
+                    n.set('date_to', costCustomDateRange[1]);
+                  }
+                });
+                if (!isSelected) {
+                  setTimeout(() => document.getElementById('cloud-product-detail')?.scrollIntoView({ behavior: 'smooth' }), 100);
+                }
+              }}
               style={{
                 ...gc,
                 padding: '16px 18px',
                 borderLeft: `3px solid ${color}`,
-                background: isDark ? `rgba(255,255,255,0.04)` : `rgba(255,255,255,0.78)`,
-                cursor: isConfigured ? 'pointer' : 'default',
+                background: isSelected
+                  ? (ENV_SELECTED_BG[env]?.[isDark ? 0 : 1] ?? (isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)'))
+                  : (isDark ? `rgba(255,255,255,0.04)` : `rgba(255,255,255,0.78)`),
+                outline: isSelected ? `1.5px solid ${color}` : 'none',
+                cursor: 'pointer',
+                transition: 'background 0.2s, outline 0.2s',
               }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                 <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', color }}>
                   {env}
                 </span>
-                {loadingGlobalMetrics && <LoadingOutlined style={{ fontSize: 12, color: txt2 }} />}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  {isSelected && (
+                    <span style={{ fontSize: 9, fontWeight: 600, color, background: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.06)', padding: '1px 5px', borderRadius: 3, letterSpacing: '0.04em' }}>
+                      已筛选
+                    </span>
+                  )}
+                  {loadingGlobalMetrics && <LoadingOutlined style={{ fontSize: 12, color: txt2 }} />}
+                </div>
               </div>
-              <div style={{ fontSize: 11, color: txt2, marginBottom: 4, height: 16, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <div style={{ fontSize: 11, color: isConfigured ? txt2 : (isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.3)'), marginBottom: 4, height: 16, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {item?.account_display_name ?? '未配置'}
               </div>
-              <div style={{ fontSize: 20, fontWeight: 700, color: txt1 }}>
+              <div style={{ fontSize: 20, fontWeight: 700, color: isConfigured ? txt1 : (isDark ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.2)') }}>
                 {CURRENCY_SYMBOL}{totalCostEnv.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
-              {costCompareMode === 'previous' && changePct != null && !Number.isNaN(changePct) && (
-                <div style={{ marginTop: 4 }}>
+              {costCompareMode === 'previous' && changePct != null && !Number.isNaN(changePct) ? (
+                <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
                   <ChangeBadge pct={changePct} inverted />
+                  <span style={{ fontSize: 10, color: txt2 }}>较上期</span>
+                </div>
+              ) : (
+                <div style={{ marginTop: 4, height: 18 }}>
+                  {!isConfigured && (
+                    <span style={{ fontSize: 10, color: isDark ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.25)' }}>点击查看明细</span>
+                  )}
                 </div>
               )}
             </div>
           );
         })}
       </div>
+  );
+
+  /* ─── Render: KPI Cards (placeholder when no data) ─────────────────────────── */
+  const renderKpiCardsPlaceholder = () => {
+    const labels = [
+      { label: '总账单成本', tip: '计算、存储、网络、安全四类计费成本汇总。', accentColor: '#3b82f6' },
+      { label: '可优化空间', tip: '云账单模式下暂不计算优化空间。', accentColor: '#8b5cf6' },
+      { label: '全局效率分', tip: '云账单模式下暂不计算效率分。', accentColor: '#10b981' },
+    ];
+    return (
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr auto', gap: 12, marginBottom: 14, alignItems: 'start' }}>
+        {labels.map((k, i) => (
+          <div key={i} className="bento-card" style={{ ...gc, padding: '20px 22px', borderTop: `3px solid ${k.accentColor}` }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12, fontSize: 12, color: txt2, fontWeight: 500 }}>
+              {k.label}
+              <Tooltip title={k.tip}><QuestionCircleOutlined style={{ fontSize: 11, cursor: 'help' }} /></Tooltip>
+            </div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: txt2, letterSpacing: '-0.02em' }}>—</div>
+          </div>
+        ))}
+        <div className="bento-card" style={{ ...gc, padding: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <EfficiencyChart efficiency={0} size={88} />
+        </div>
+      </div>
     );
   };
 
   /* ─── Render: KPI Cards ──────────────────────────────────────────────────── */
+  // [Ref: 01_实践] 总账单成本/可优化空间/全局效率分框架始终渲染；无数据时展示占位（—），错误时先展示 Alert 再展示占位卡片
   const renderKpiCards = () => {
     if (loadingGlobalMetrics && !globalCostMetrics) {
       return (
@@ -410,15 +537,23 @@ const CostOverviewPage: React.FC = () => {
         </div>
       );
     }
-    if (errorGlobalMetrics && !globalCostMetrics) {
+    const showErrorBanner = errorGlobalMetrics && !globalCostMetrics;
+    if (showErrorBanner) {
       return (
-        <Alert message="加载全局指标失败" description={errorGlobalMetrics} type="error" showIcon
-          action={<Button size="small" onClick={() => { resetErrors(); fetchGlobalCostMetrics(); fetchNamespaceCosts(); }}>重试</Button>}
-          style={{ marginBottom: 14 }}
-        />
+        <>
+          <Alert
+            message="数据暂未就绪"
+            description={errorGlobalMetrics}
+            type="warning"
+            showIcon
+            action={<Button size="small" onClick={() => { resetErrors(); fetchGlobalCostMetrics(); fetchNamespaceCosts(); }}>重试</Button>}
+            style={{ marginBottom: 14 }}
+          />
+          {renderKpiCardsPlaceholder()}
+        </>
       );
     }
-    if (!globalCostMetrics) return null;
+    if (!globalCostMetrics) return renderKpiCardsPlaceholder();
 
     const prev = globalCostMetrics.previousPeriod;
     const isPlaceholder = globalCostMetrics.totalOptimizableSpace === 0 && globalCostMetrics.globalEfficiency === 0;
@@ -507,15 +642,17 @@ const CostOverviewPage: React.FC = () => {
   };
 
   /* ─── Render: Domain Breakdown ───────────────────────────────────────────── */
+  // [Ref: 01_实践] 成本分解四类框架始终渲染；无数据时展示 0 占位
   const renderDomainBreakdown = () => {
-    if (!globalCostMetrics?.domainBreakdown?.length) return null;
     const domainOrder = ['计算资源', '存储', '网络', '安全'];
-    const ordered = domainOrder.reduce<typeof globalCostMetrics.domainBreakdown>((acc, name) => {
-      const found = globalCostMetrics.domainBreakdown.find(d => d.domain === name);
-      if (found) acc.push({ ...found });
-      else acc.push({ domain: name, cost: 0, optimizableSpace: 0, efficiency: 0, topProducts: [] });
-      return acc;
-    }, []);
+    const ordered = (globalCostMetrics?.domainBreakdown?.length)
+      ? domainOrder.reduce<NonNullable<typeof globalCostMetrics.domainBreakdown>>((acc, name) => {
+          const found = globalCostMetrics!.domainBreakdown!.find(d => d.domain === name);
+          if (found) acc.push({ ...found });
+          else acc.push({ domain: name, cost: 0, optimizableSpace: 0, efficiency: 0, topProducts: [] });
+          return acc;
+        }, [])
+      : domainOrder.map(name => ({ domain: name, cost: 0, optimizableSpace: 0, efficiency: 0, topProducts: [] }));
     const totalDomainCost = ordered.reduce((s, d) => s + d.cost, 0);
 
     return (
@@ -533,7 +670,7 @@ const CostOverviewPage: React.FC = () => {
                 className="bento-card bento-card-clickable"
                 onClick={() => {
                   const category = DOMAIN_TO_CATEGORY[domain.domain] || 'compute';
-                  setSearchParams((prev: URLSearchParams) => { const n = new URLSearchParams(prev); n.set('env', 'all'); n.set('period', costTimeRange); if (costTimeRange === 'custom' && costCustomDateRange?.[0] && costCustomDateRange?.[1]) { n.set('date_from', costCustomDateRange[0]); n.set('date_to', costCustomDateRange[1]); } n.set('category', category); return n; });
+                  updateParams(n => { n.set('env', 'all'); n.set('period', costTimeRange); if (costTimeRange === 'custom' && costCustomDateRange?.[0] && costCustomDateRange?.[1]) { n.set('date_from', costCustomDateRange[0]); n.set('date_to', costCustomDateRange[1]); } n.set('category', category); });
                   setHighlightCloudProduct(true);
                   setTimeout(() => setHighlightCloudProduct(false), 2500);
                   setTimeout(() => document.getElementById('cloud-product-detail')?.scrollIntoView({ behavior: 'smooth' }), 0);
@@ -596,17 +733,41 @@ const CostOverviewPage: React.FC = () => {
 
   /* ─── Render: Index/Filter Section ──────────────────────────────────────── */
   const renderIndexFilter = () => (
-    <div className="bento-card" style={{ ...gc, padding: '14px 20px', marginBottom: 12 }}>
-      <div style={{ fontSize: 11, color: txt2, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 10 }}>
-        云产品成本明细 · 筛选（索引）
+    <div style={{
+      background: isDark ? 'rgba(255,255,255,0.07)' : 'rgba(245,248,255,0.95)',
+      border: `1px solid ${isDark ? 'rgba(255,255,255,0.12)' : 'rgba(59,130,246,0.15)'}`,
+      borderRadius: 12,
+      boxShadow: isDark ? '0 2px 16px rgba(0,0,0,0.3)' : '0 1px 10px rgba(59,130,246,0.08)',
+      padding: '18px 24px 16px',
+      marginBottom: 14,
+    }}>
+      <div style={{
+        fontSize: 14,
+        color: isDark ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.78)',
+        fontWeight: 700,
+        letterSpacing: '-0.01em',
+        marginBottom: 14,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+      }}>
+        云产品成本明细 · 筛选
+        <span style={{
+          fontSize: 10,
+          fontWeight: 500,
+          color: isDark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.35)',
+          background: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)',
+          padding: '2px 8px',
+          borderRadius: 4,
+          letterSpacing: '0.04em',
+          textTransform: 'uppercase',
+        }}>索引</span>
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center' }}>
         <span style={{ fontSize: 12, color: txt2, fontWeight: 500 }}>时间范围</span>
         <Select value={indexPeriod ?? costTimeRange} style={{ minWidth: 180 }} dropdownStyle={{ minWidth: 240 }} listHeight={400}
           options={TIME_RANGE_OPTIONS.map(o => ({ label: o.label, value: o.value }))}
-          onChange={v => {
-            setSearchParams((prev: URLSearchParams) => { const n = new URLSearchParams(prev); n.set('index_period', v); if (v !== 'custom') { n.delete('index_date_from'); n.delete('index_date_to'); } return n; });
-          }}
+          onChange={v => updateParams(n => { n.set('index_period', v); if (v !== 'custom') { n.delete('index_date_from'); n.delete('index_date_to'); } })}
         />
         {effectiveDrilldownPeriod === 'custom' && (
           <>
@@ -615,7 +776,7 @@ const CostOverviewPage: React.FC = () => {
               onChange={(dates: [Dayjs | null, Dayjs | null] | null) => {
                 if (dates?.[0] && dates?.[1] && dates[1].diff(dates[0], 'day') <= 180) {
                   const from = dates[0].format('YYYY-MM-DD'); const to = dates[1].format('YYYY-MM-DD');
-                  setSearchParams((prev: URLSearchParams) => { const n = new URLSearchParams(prev); n.set('index_period', 'custom'); n.set('index_date_from', from); n.set('index_date_to', to); n.set('period', 'custom'); n.set('date_from', from); n.set('date_to', to); return n; });
+                  updateParams(n => { n.set('index_period', 'custom'); n.set('index_date_from', from); n.set('index_date_to', to); n.set('period', 'custom'); n.set('date_from', from); n.set('date_to', to); });
                 }
               }}
             />
@@ -624,15 +785,15 @@ const CostOverviewPage: React.FC = () => {
         )}
         <span style={{ fontSize: 12, color: txt2, fontWeight: 500, marginLeft: 4 }}>环境</span>
         <Select value={drilldownEnv} style={{ width: 110 }} options={[{ label: '全环境', value: 'all' }, { label: 'POC', value: 'POC' }, { label: 'FAT', value: 'FAT' }, { label: 'UAT', value: 'UAT' }, { label: 'PROD', value: 'PROD' }]}
-          onChange={v => setSearchParams((prev: URLSearchParams) => { const n = new URLSearchParams(prev); n.set('env', v); return n; })}
+          onChange={v => updateParams(n => { n.set('env', v); })}
         />
         <span style={{ fontSize: 12, color: txt2, fontWeight: 500 }}>大类</span>
         <Select value={drilldownCategory || 'all'} style={{ width: 120 }} options={[{ label: '全部', value: 'all' }, { label: '计算资源', value: 'compute' }, { label: '存储', value: 'storage' }, { label: '网络', value: 'network' }, { label: '安全', value: 'security' }]}
-          onChange={v => setSearchParams((prev: URLSearchParams) => { const n = new URLSearchParams(prev); if (v === 'all') n.delete('category'); else n.set('category', v); return n; })}
+          onChange={v => updateParams(n => { if (v === 'all') n.delete('category'); else n.set('category', v); })}
         />
         <span style={{ fontSize: 12, color: txt2, fontWeight: 500 }}>排序</span>
         <Select value={searchParams.get('sort') || 'cost_desc'} style={{ width: 110 }} options={[{ label: '成本降序', value: 'cost_desc' }, { label: '成本升序', value: 'cost_asc' }]}
-          onChange={v => setSearchParams((prev: URLSearchParams) => { const n = new URLSearchParams(prev); n.set('sort', v); return n; })}
+          onChange={v => updateParams(n => { n.set('sort', v); })}
         />
         <span style={{ fontSize: 12, color: txt2, fontWeight: 500, marginLeft: 4 }}>环比</span>
         <Switch
@@ -665,12 +826,17 @@ const CostOverviewPage: React.FC = () => {
 
     return (
       <div className="bento-card" style={{ ...gc, padding: '18px 20px', marginBottom: 12 }}>
-        <div style={{ fontSize: 11, color: txt2, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 12 }}>
+        <div style={{ fontSize: 11, color: txt2, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
           成本趋势
+          {drilldownEnv && drilldownEnv !== 'all' && (
+            <span style={{ fontSize: 10, fontWeight: 600, color: ENV_COLORS[drilldownEnv as keyof typeof ENV_COLORS] ?? '#3b82f6', background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)', padding: '1px 7px', borderRadius: 4, letterSpacing: '0.04em', textTransform: 'none' }}>
+              {drilldownEnv} 环境
+            </span>
+          )}
         </div>
         {!showTrendChart ? (
           <div style={{ padding: '16px 0', color: txt2, fontSize: 12 }}>
-            请打开上方「趋势图」开关查看按日成本趋势。（默认关闭；开启后从 GET /api/v1/cost/trend 拉取数据）
+            趋势图已关闭 · 打开上方「趋势图」开关即可查看按日成本趋势
           </div>
         ) : loadingCostTrend ? (
           <div style={{ height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
@@ -724,12 +890,15 @@ const CostOverviewPage: React.FC = () => {
       id="cloud-product-detail"
       className="bento-card"
       style={{
-        ...gc,
-        padding: '18px 20px',
-        transition: 'box-shadow 0.3s',
+        background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(248,249,252,0.95)',
+        border: `1px solid ${isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.07)'}`,
+        borderRadius: 14,
         boxShadow: highlightCloudProduct
-          ? `0 0 0 2px #3b82f6, ${gc.boxShadow}`
-          : gc.boxShadow,
+          ? `0 0 0 2px #3b82f6, 0 4px 24px rgba(0,0,0,0.10)`
+          : isDark ? '0 4px 24px rgba(0,0,0,0.35)' : '0 4px 24px rgba(0,0,0,0.06)',
+        padding: '18px 20px 10px',
+        transition: 'box-shadow 0.3s',
+        overflow: 'hidden',
       }}
     >
       <div style={{ fontSize: 11, color: txt2, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 14 }}>
@@ -740,11 +909,12 @@ const CostOverviewPage: React.FC = () => {
           <LoadingOutlined spin style={{ marginRight: 8 }} /> 加载中…
         </div>
       ) : errorDrilldownGlobal ? (
-        <Alert message="加载云产品明细失败" description={errorDrilldownGlobal} type="error" showIcon />
+        <Alert message="云产品明细暂未就绪" description={errorDrilldownGlobal} type="warning" showIcon />
       ) : drilldownGlobalProducts?.length ? (
-        /* [Ref: 用户需求] 重构列布局：等宽字体右对齐成本、趋势垂直居中、分页受控修复 */
+        /* [Ref: 用户需求] 重构列布局：产品列固定宽度使数据列左移，成本字号放大，分页受控 */
         <Table<CloudProductDrilldownItem>
           size="small"
+          bordered
           rowKey={r => r.product_code + (r.category ?? '')}
           dataSource={drilldownGlobalProducts}
           columns={[
@@ -752,6 +922,7 @@ const CostOverviewPage: React.FC = () => {
               title: '产品',
               dataIndex: 'product_name',
               key: 'product',
+              width: 220,
               ellipsis: true,
               render: (_: unknown, r: CloudProductDrilldownItem) => (
                 <span style={{ fontWeight: 600, fontSize: 13 }}>{r.product_name || r.product_code}</span>
@@ -761,15 +932,16 @@ const CostOverviewPage: React.FC = () => {
               title: `成本 (${CURRENCY_SYMBOL})`,
               dataIndex: 'cost',
               key: 'cost',
-              width: 160,
+              width: 148,
               align: 'right' as const,
               render: (v: number) => (
-                /* 等宽字体右对齐，数字对齐更清晰 */
+                /* 等宽字体右对齐，字号放大至15px凸显核心数据 */
                 <span style={{
                   fontFamily: '"SF Mono", "Fira Code", "Consolas", monospace',
                   fontWeight: 700,
-                  fontSize: 13,
-                  letterSpacing: '-0.01em',
+                  fontSize: 15,
+                  color: isDark ? '#93c5fd' : '#1d4ed8',
+                  letterSpacing: '-0.02em',
                 }}>
                   {CURRENCY_SYMBOL}{(v ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
@@ -866,13 +1038,20 @@ const CostOverviewPage: React.FC = () => {
               },
             },
           ]}
-          // [Ref: 用户需求] 分页 Bug 修复：用受控 pageSize + onChange 同步，确保 showSizeChanger 选择生效
+          // [Ref: 用户需求] 分页 Bug 修复：current + pageSize 双受控，pageSize 变更时强制跳回第1页
           pagination={{
+            current: tablePage,
             pageSize: tablePageSize,
             pageSizeOptions: [10, 20, 50, 100],
             showSizeChanger: true,
             showTotal: t => `共 ${t} 条`,
-            onChange: (_page, size) => { if (size !== tablePageSize) setTablePageSize(size); },
+            onChange: (page, size) => {
+              setTablePage(page);
+              if (size !== tablePageSize) {
+                setTablePageSize(size);
+                setTablePage(1);
+              }
+            },
           }}
         />
       ) : (
@@ -906,7 +1085,7 @@ const CostOverviewPage: React.FC = () => {
           <span className="live-dot" />
           {globalCostMetrics?.lastUpdatedAt
             ? `数据更新至 ${new Date(globalCostMetrics.lastUpdatedAt).toLocaleString('zh-CN', { dateStyle: 'short', timeStyle: 'short' })}`
-            : errorGlobalMetrics ? '加载失败' : '—'}
+            : errorGlobalMetrics ? '暂未就绪' : '—'}
         </div>
       </div>
 
@@ -914,7 +1093,7 @@ const CostOverviewPage: React.FC = () => {
       {globalCostMetrics && globalCostMetrics.totalBillableCost === 0 && !errorGlobalMetrics && (
         <Alert
           message="暂无真实数据"
-          description="请完成：1) 配置阿里云 AK/SK 并执行 ETL，将云账单写入 cost_cloud_bill_summary；2) 接入 Prometheus/K8s 获取集群内计算成本。"
+          description="请完成：1) 配置阿里云 AK/SK 并执行 ETL，将云账单写入日/月原始表与聚合表（cost_cloud_bill_daily_raw、cost_cloud_bill_aggregate 等）；2) 接入 Prometheus/K8s 获取集群内计算成本。部署后首次可触发全量回填或等待定时 ETL。"
           type="warning" showIcon style={{ marginBottom: 14, borderRadius: 12 }}
         />
       )}
@@ -997,7 +1176,7 @@ const CostOverviewPage: React.FC = () => {
           domainDetail ? (
             <Button type="link" onClick={() => {
               const category = domainDetail ? DOMAIN_TO_CATEGORY[domainDetail.domain] || 'compute' : undefined;
-              setSearchParams((prev: URLSearchParams) => { const n = new URLSearchParams(prev); n.set('env', 'all'); n.set('period', costTimeRange); if (costTimeRange === 'custom' && costCustomDateRange?.[0] && costCustomDateRange?.[1]) { n.set('date_from', costCustomDateRange[0]); n.set('date_to', costCustomDateRange[1]); } if (category) n.set('category', category); return n; });
+              updateParams(n => { n.set('env', 'all'); n.set('period', costTimeRange); if (costTimeRange === 'custom' && costCustomDateRange?.[0] && costCustomDateRange?.[1]) { n.set('date_from', costCustomDateRange[0]); n.set('date_to', costCustomDateRange[1]); } if (category) n.set('category', category); });
               setDomainDetail(null);
               setTimeout(() => document.getElementById('cloud-product-detail')?.scrollIntoView({ behavior: 'smooth' }), 0);
             }}>查看更多 → 云产品成本明细</Button>
@@ -1046,7 +1225,7 @@ const CostOverviewPage: React.FC = () => {
             )}
             <Descriptions column={1} bordered size="small">
               {(globalCostMetrics.domainBreakdown ?? []).map((d, i) => {
-                const dimensionAnchor = (d.domain === '计算资源' && 'compute') || (d.domain === '存储' && 'storage') || (d.domain === '网络' && 'network') || null;
+                const categoryKey = DOMAIN_TO_CATEGORY[d.domain];
                 return (
                   <Descriptions.Item key={i} label={d.domain}>
                     <div>
@@ -1057,8 +1236,18 @@ const CostOverviewPage: React.FC = () => {
                           <ul style={{ margin: 0, paddingLeft: 18 }}>
                             {d.topProducts.map((p, j) => <li key={j}>{p.product}：{CURRENCY_SYMBOL}{p.cost.toLocaleString()}</li>)}
                           </ul>
-                          {dimensionAnchor && (
-                            <a onClick={e => { e.preventDefault(); navigate(`/DrilldownPage?dimension=${dimensionAnchor}`); setDetailModal(null); }} style={{ marginTop: 6, display: 'inline-block', cursor: 'pointer' }}>查看详情 →</a>
+                          {categoryKey && (
+                            <a
+                              onClick={e => {
+                                e.preventDefault();
+                                setDetailModal(null);
+                                updateParams(n => { n.set('category', categoryKey); });
+                                setTimeout(() => document.getElementById('cloud-product-detail')?.scrollIntoView({ behavior: 'smooth' }), 100);
+                              }}
+                              style={{ marginTop: 6, display: 'inline-block', cursor: 'pointer' }}
+                            >
+                              查看详情 →
+                            </a>
                           )}
                         </div>
                       )}

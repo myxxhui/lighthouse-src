@@ -20,6 +20,38 @@ type CloudBillingConfig struct {
 // aliCloudFetcher 适配 aliyun.Fetcher 为 CloudBillingFetcher（避免 aliyun 依赖 cloudbilling 造成循环引用）。
 type aliCloudFetcher struct{ inner *aliyun.Fetcher }
 
+// FetchLineItems 拉取行级流水（IsGroupByProduct=false），含 RecordID 与 CashAmount（含负数冲正）。
+// [Ref: 16_云账单动态对账与高可靠处理规范 §四]
+func (a *aliCloudFetcher) FetchLineItems(ctx context.Context, req FetchLineItemsRequest) (*FetchLineItemsResponse, error) {
+	items, err := a.inner.FetchLineItemsByDay(ctx, req.BillingDate)
+	if err != nil {
+		return nil, err
+	}
+	billingCycle := req.BillingDate
+	if len(req.BillingDate) >= 7 {
+		billingCycle = req.BillingDate[:7]
+	}
+	out := make([]BillLineItem, 0, len(items))
+	for _, it := range items {
+		out = append(out, BillLineItem{
+			RecordID:          it.RecordID,
+			BillingDate:       it.BillingDate,
+			BillingCycle:      it.BillingCycle,
+			ProductCode:       it.ProductCode,
+			ProductName:       it.ProductName,
+			SubOrderID:        it.SubOrderID,
+			InstanceID:        it.InstanceID,
+			BillingItem:       it.BillingItem,
+			SubscriptionType:  it.SubscriptionType,
+			CashAmount:        it.CashAmount,
+			PretaxAmount:      it.PretaxAmount,
+			PretaxGrossAmount: it.PretaxGrossAmount,
+			Category:          it.Category,
+		})
+	}
+	return &FetchLineItemsResponse{BillingDate: req.BillingDate, BillingCycle: billingCycle, Items: out}, nil
+}
+
 func (a *aliCloudFetcher) FetchAccountSummary(ctx context.Context, req FetchAccountSummaryRequest) (*FetchAccountSummaryResponse, error) {
 	// [Ref: 01_设计 §拉取粒度与落表] day → QueryAccountBill DAILY(BillingDate)；month → QueryBillOverview(BillingCycle)
 	var res *aliyun.BillOverviewResult
@@ -42,11 +74,13 @@ func (a *aliCloudFetcher) FetchAccountSummary(ctx context.Context, req FetchAcco
 		})
 	}
 	return &FetchAccountSummaryResponse{
-		BillingCycle: res.BillingCycle,
-		TotalAmount:  res.TotalAmount,
-		Currency:     res.Currency,
-		ByCategory:   res.ByCategory,
-		Items:        items,
+		BillingCycle:    res.BillingCycle,
+		TotalAmount:     res.TotalAmount,
+		CashTotalAmount: res.CashTotalAmount,
+		Currency:        res.Currency,
+		ByCategory:      res.ByCategory,
+		CashByCategory:  res.CashByCategory,
+		Items:           items,
 	}, nil
 }
 
