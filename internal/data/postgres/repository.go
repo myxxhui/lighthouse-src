@@ -49,18 +49,23 @@ type Repository interface {
 	// GetCloudBillSummariesForBillingCycles 返回多个账期各自最近一条汇总（用于本季度聚合）
 	GetCloudBillSummariesForBillingCycles(ctx context.Context, billingCycles []string) ([]*CloudBillSummary, error)
 
-	// [Ref: 06_ 成本云账单三表 D2] 日/月原始与聚合表（ETL 五步流水线）
+	// [Ref: 06_ 成本云账单三表 D2] 日/月原始与聚合表（ETL 五步流水线）；月/日表主键含 account_id，多环境各写一行 [Ref: 01_多环境 UAT]
 	SaveCloudBillDailyRaw(ctx context.Context, r CloudBillDailyRaw) error
-	GetCloudBillDailyRaw(ctx context.Context, billDate time.Time) (*CloudBillDailyRaw, error)
-	DeleteCloudBillDailyRawForDate(ctx context.Context, billDate time.Time) error
-	ListMissingCloudBillDailyDates(ctx context.Context, from, to time.Time) ([]time.Time, error)
+	GetCloudBillDailyRaw(ctx context.Context, billDate time.Time, accountID string) (*CloudBillDailyRaw, error)
+	DeleteCloudBillDailyRawForDate(ctx context.Context, billDate time.Time, accountID string) error
+	ListMissingCloudBillDailyDates(ctx context.Context, from, to time.Time, accountID string) ([]time.Time, error)
 	SaveCloudBillMonthlyRaw(ctx context.Context, r CloudBillMonthlyRaw) error
-	GetCloudBillMonthlyRaw(ctx context.Context, billingCycle string) (*CloudBillMonthlyRaw, error)
+	GetCloudBillMonthlyRaw(ctx context.Context, billingCycle, accountID string) (*CloudBillMonthlyRaw, error)
+	// ListCloudBillMonthlyRawByCycle 返回指定账期下所有 account 的月原始行，供 cost_service 多账户汇总 [Ref: 01_多环境 UAT]
+	ListCloudBillMonthlyRawByCycle(ctx context.Context, billingCycle string) ([]CloudBillMonthlyRaw, error)
+	// DeleteCloudBillMonthlyRawOlderThan 删除 billing_cycle < cutoff 的该 account 月原始数据。[Ref: 01_实践 月表保留由配置控制]
+	DeleteCloudBillMonthlyRawOlderThan(ctx context.Context, cutoffBillingCycle string, accountID string) error
 	SaveCloudBillAggregate(ctx context.Context, a CloudBillAggregate) error
 	GetCloudBillAggregate(ctx context.Context, reportType, periodKey string) (*CloudBillAggregate, error)
-	// DeleteCloudBillAggregateExcept 删除指定 report_type + metric_type 下 period_key 不在 keepPeriodKeys 中的行
-	DeleteCloudBillAggregateExcept(ctx context.Context, reportType string, keepPeriodKeys []string) error
-	ListCloudBillDailyRawFromTo(ctx context.Context, from, to time.Time) ([]CloudBillDailyRaw, error)
+	// DeleteCloudBillAggregateExcept 删除指定 report_type 下 period_key 不在 keepPeriodKeys 中的行；accountID 非空时仅删该账号，多环境互不覆盖 [Ref: 01_多环境 UAT]
+	DeleteCloudBillAggregateExcept(ctx context.Context, reportType string, keepPeriodKeys []string, accountID string) error
+	// ListCloudBillDailyRawFromTo accountID 为空时返回该日期范围内所有 account 的行；非空时仅该 account [Ref: 01_多环境 UAT]
+	ListCloudBillDailyRawFromTo(ctx context.Context, from, to time.Time, accountID string) ([]CloudBillDailyRaw, error)
 
 	// [Ref: 16_云账单动态对账与高可靠处理规范 §三] 行级流水 Upsert（ON CONFLICT record_id DO UPDATE）
 	UpsertCloudBillLineItem(ctx context.Context, item CloudBillLineItem) error
@@ -68,6 +73,8 @@ type Repository interface {
 	ListCloudBillLineItemsByDate(ctx context.Context, billDate time.Time, accountID string) ([]CloudBillLineItem, error)
 	// ListCloudBillLineItemsByBillingCycle 返回指定账期+账号的所有流水条目（用于按 billing_cycle 汇总月原始表，回退归属到被冲正账期）[Ref: 16_ §四、§七]
 	ListCloudBillLineItemsByBillingCycle(ctx context.Context, billingCycle, accountID string) ([]CloudBillLineItem, error)
+	// ListDistinctBillingCyclesInDateRange 返回日期范围内有流水的所有账期（用于步骤⑧按窗口重算月表，发现冲正即更新对应月）[Ref: 16_ §七 结合方案]
+	ListDistinctBillingCyclesInDateRange(ctx context.Context, from, to time.Time, accountID string) ([]string, error)
 	// SumLineItemsCashByBillingCycle 计算指定账期所有条目的 CashAmount 代数和（含负数）
 	SumLineItemsCashByBillingCycle(ctx context.Context, billingCycle, accountID string) (float64, error)
 	// DeleteLineItemsOlderThan 清理早于指定日期的流水条目（配合 daily_raw 10 个月滑动清理）
@@ -80,6 +87,7 @@ type Repository interface {
 	// [Ref: 01_设计 §环境与云账号配置 D9-3] 环境与产品配置
 	ListEnvAccountConfig(ctx context.Context) ([]EnvAccountConfig, error)
 	GetProductCategory(ctx context.Context, productCode string) (category string, ok bool)
+	UpsertProductCategory(ctx context.Context, productCode, category string) error
 	// ListCloudBillAggregateForReportPeriod 返回指定 report_type+period_key+metric_type 下所有 account 的聚合行（多账号时多行）
 	// metricType 为 "" 时默认 "payment"（仅保留实际付款聚合表）[Ref: 16_ §四]
 	ListCloudBillAggregateForReportPeriod(ctx context.Context, reportType, periodKey, metricType string) ([]CloudBillAggregate, error)

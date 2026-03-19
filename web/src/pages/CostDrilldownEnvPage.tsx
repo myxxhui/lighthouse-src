@@ -21,19 +21,12 @@ const CATEGORY_OPTIONS = [
 /** 与后端 reportTypeAndPeriodKey 口径一致：7d/30d/90d 结束日为昨日 [Ref: 01_设计 D9-7] */
 function periodToReportTypeAndKey(period: string | null): { reportType: string; periodKey: string } {
   const now = new Date();
-  const yesterday = new Date(now);
-  yesterday.setDate(yesterday.getDate() - 1);
   const yyyy = now.getFullYear();
   const mm = String(now.getMonth() + 1).padStart(2, '0');
-  const yesterdayStr = yesterday.toISOString().slice(0, 10);
   if (!period || period === 'custom') {
-    return { reportType: '30d', periodKey: yesterdayStr };
+    return { reportType: 'month', periodKey: `${yyyy}-${mm}` };
   }
   const p = period as CostTimeRange;
-  if (p === '1d') return { reportType: '1d', periodKey: yesterdayStr };
-  if (p === '7d' || p === '7d_range') return { reportType: '7d', periodKey: yesterdayStr };
-  if (p === '30d') return { reportType: '30d', periodKey: yesterdayStr };
-  if (p === '90d') return { reportType: '90d', periodKey: yesterdayStr };
   if (p === 'month') return { reportType: 'month', periodKey: `${yyyy}-${mm}` };
   if (p === 'last_month') {
     const prevMonth = now.getMonth() === 0 ? 12 : now.getMonth();
@@ -43,8 +36,7 @@ function periodToReportTypeAndKey(period: string | null): { reportType: string; 
   if (p === 'quarter' || p === 'last_quarter') return { reportType: p, periodKey: `${yyyy}-Q${Math.ceil((now.getMonth() + 1) / 3)}` };
   if (p === 'this_year') return { reportType: 'this_year', periodKey: String(yyyy) };
   if (p === 'last_year') return { reportType: 'last_year', periodKey: String(yyyy - 1) };
-  if (p === 'this_week' || p === 'last_week') return { reportType: p, periodKey: yesterdayStr };
-  return { reportType: '30d', periodKey: yesterdayStr };
+  return { reportType: 'month', periodKey: `${yyyy}-${mm}` };
 }
 
 const CostDrilldownEnvPage: React.FC = () => {

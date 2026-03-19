@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -145,13 +146,21 @@ func (s *HTTPServer) costDiagnostic(c *gin.Context) {
 	c.JSON(http.StatusOK, diag)
 }
 
-// globalCost handles GET /api/v1/cost/global?period=1d|7d|30d|month|quarter 或 date_from=YYYY-MM-DD&date_to=YYYY-MM-DD（D8-2 自定义日期，从日原始表叠加 [Ref: 04_01_成本透视真实数据]）
+// parseMonthOrDay 解析 YYYY-MM 或 YYYY-MM-DD 格式的日期字符串。
+func parseMonthOrDay(s string) (time.Time, error) {
+	if t, err := time.Parse("2006-01", s); err == nil {
+		return t, nil
+	}
+	return time.Parse("2006-01-02", s)
+}
+
+// globalCost handles GET /api/v1/cost/global?period=month|quarter|... 或 date_from=YYYY-MM&date_to=YYYY-MM（自定义月份范围，从月原始表叠加 [Ref: 04_01_成本透视真实数据]）
 func (s *HTTPServer) globalCost(c *gin.Context) {
 	dateFrom := c.Query("date_from")
 	dateTo := c.Query("date_to")
 	if dateFrom != "" && dateTo != "" && s.costService != nil {
-		from, err1 := time.Parse("2006-01-02", dateFrom)
-		to, err2 := time.Parse("2006-01-02", dateTo)
+		from, err1 := parseMonthOrDay(dateFrom)
+		to, err2 := parseMonthOrDay(dateTo)
 		if err1 == nil && err2 == nil {
 			resp, err := s.costService.GetGlobalCostByDateRange(c.Request.Context(), from, to)
 			if err != nil {
@@ -179,8 +188,16 @@ func (s *HTTPServer) globalCost(c *gin.Context) {
 	// 统计口径已移除，固定使用实际付款（payment）[Ref: 16_ §三]
 	_ = c.Query("metric_type") // 兼容旧前端，忽略
 	metricType := "payment"
+	var envs []string
+	if envsStr := c.Query("envs"); envsStr != "" {
+		for _, e := range strings.Split(envsStr, ",") {
+			if e = strings.TrimSpace(e); e != "" {
+				envs = append(envs, e)
+			}
+		}
+	}
 	if s.costService != nil {
-		resp, err := s.costService.GetGlobalCost(c.Request.Context(), period, metricType)
+		resp, err := s.costService.GetGlobalCost(c.Request.Context(), period, metricType, envs)
 		if err != nil {
 			// D1-4：降级查询超时返回 503
 			if errors.Is(err, service.ErrFallbackTimeout) {
@@ -265,9 +282,8 @@ func (s *HTTPServer) drilldownEnvCost(c *gin.Context) {
 	dateFromStr := c.Query("date_from")
 	dateToStr := c.Query("date_to")
 	if s.costService != nil && dateFromStr != "" && dateToStr != "" {
-		if from, err := time.Parse("2006-01-02", dateFromStr); err == nil {
-			if to, err := time.Parse("2006-01-02", dateToStr); err == nil {
-				// 自定义日期：方案 B 日表无 account_id 时返回全环境聚合；方案 A 时可按 env 过滤
+		if from, err := parseMonthOrDay(dateFromStr); err == nil {
+			if to, err := parseMonthOrDay(dateToStr); err == nil {
 				list, err := s.costService.GetGlobalDrilldownByDateRange(c.Request.Context(), from, to, category, sortOrder, envId)
 				if err != nil {
 					c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -310,8 +326,8 @@ func (s *HTTPServer) drilldownGlobalCost(c *gin.Context) {
 	dateFromStr := c.Query("date_from")
 	dateToStr := c.Query("date_to")
 	if s.costService != nil && dateFromStr != "" && dateToStr != "" {
-		if from, err := time.Parse("2006-01-02", dateFromStr); err == nil {
-			if to, err := time.Parse("2006-01-02", dateToStr); err == nil {
+		if from, err := parseMonthOrDay(dateFromStr); err == nil {
+			if to, err := parseMonthOrDay(dateToStr); err == nil {
 				list, err := s.costService.GetGlobalDrilldownByDateRange(c.Request.Context(), from, to, category, sortOrder, env)
 				if err != nil {
 					c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -353,10 +369,10 @@ func (s *HTTPServer) costTrend(c *gin.Context) {
 	envFilter := c.Query("env")
 	var dateFrom, dateTo *time.Time
 	if dateFromStr != "" && dateToStr != "" {
-		if from, err := time.Parse("2006-01-02", dateFromStr); err == nil {
+		if from, err := parseMonthOrDay(dateFromStr); err == nil {
 			dateFrom = &from
 		}
-		if to, err := time.Parse("2006-01-02", dateToStr); err == nil {
+		if to, err := parseMonthOrDay(dateToStr); err == nil {
 			dateTo = &to
 		}
 	}

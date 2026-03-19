@@ -136,16 +136,26 @@ type BusinessConfig struct {
 	} `mapstructure:"roi"`
 }
 
+// CloudBillingETLData 云账单 ETL 拉取与保留月数。[Ref: 01_实践 月源数据近5年；16_ §5.4]
+// 由配置文件或环境变量控制，避免硬编码。
+type CloudBillingETLData struct {
+	DailyPullMonths    int `mapstructure:"daily_pull_months" env:"BILLING_DAILY_PULL_MONTHS"`       // 日表拉取月数（全量回填时拉取最近 N 个月）
+	DailyRetentionMonths int `mapstructure:"daily_retention_months" env:"BILLING_DAILY_RETENTION_MONTHS"` // 日表保留月数，超期删除
+	MonthlyPullMonths  int `mapstructure:"monthly_pull_months" env:"BILLING_MONTHLY_PULL_MONTHS"`   // 月表拉取月数，每次更新全量对比拉取
+	MonthlyRetentionMonths int `mapstructure:"monthly_retention_months" env:"BILLING_MONTHLY_RETENTION_MONTHS"` // 月表保留月数，超期删除
+}
+
 // CloudBillingConfig 云账单配置（15_ 规范）。凭证仅由环境变量或 K8s Secret 注入，不落配置文件。
 // 环境变量：CLOUD_BILLING_PROVIDER、CLOUD_BILLING_ENDPOINT、CLOUD_BILLING_PERIOD、CLOUD_BILLING_CYCLE；
 // 阿里云 AK/SK：ALIBABA_CLOUD_ACCESS_KEY_ID、ALIBABA_CLOUD_ACCESS_KEY_SECRET（或 K8s Secret 注入）。
 // [Ref: 成本透视实践优化 D2-5] ETL/聚合执行时间可配置，非硬编码。
 type CloudBillingConfig struct {
-	Provider       string `mapstructure:"provider" env:"PROVIDER"`             // "aliyun" | "aws" | ""
-	Endpoint       string `mapstructure:"endpoint" env:"ENDPOINT"`             // 可选
-	PeriodType     string `mapstructure:"period_type" env:"PERIOD"`             // "day" | "month"
-	BillingCycle   string `mapstructure:"billing_cycle" env:"CYCLE"`           // 账期，如 2025-01
-	ETLScheduleCron string `mapstructure:"etl_schedule_cron" env:"ETL_SCHEDULE_CRON"` // ETL 执行时间：cron 表达式，默认 "0 1 * * *"（每日 01:00）
+	Provider        string               `mapstructure:"provider" env:"PROVIDER"`                   // "aliyun" | "aws" | ""
+	Endpoint        string               `mapstructure:"endpoint" env:"ENDPOINT"`                   // 可选
+	PeriodType      string               `mapstructure:"period_type" env:"PERIOD"`                   // "day" | "month"
+	BillingCycle    string               `mapstructure:"billing_cycle" env:"CYCLE"`                 // 账期，如 2025-01
+	ETLScheduleCron string               `mapstructure:"etl_schedule_cron" env:"ETL_SCHEDULE_CRON"` // ETL 执行时间：cron 表达式，默认 "0 1 * * *"（每日 01:00）
+	ETLData         CloudBillingETLData  `mapstructure:"etl_data"`                                 // 日/月拉取与保留月数
 }
 
 // EffectiveETLScheduleCron 返回 ETL 执行 cron；空时返回默认每日 01:00。供 CronJob 或调度器使用。

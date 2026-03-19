@@ -43,42 +43,15 @@ func main() {
 			repo = postgres.NewMockRepository(postgres.DefaultMockConfig())
 		} else {
 			repo = pgRepo
-			// 启动时执行一次云账单 ETL（PG + 云账单凭证已配置时）。[Ref: D2-5] 单账号用无后缀 AK/SK，多账号可用带环境后缀（POC/FAT/UAT/PROD）任一组。
+			// [Ref: 01_多环境 UAT] 启动时对每个有凭证的环境执行云账单 ETL；POC/UAT 等并列存储、聚合、前端展示。
 			if cfg.CloudBilling.Provider == "aliyun" {
-				var billingEnv string
-				fetcher := cloudbilling.NewFetcher(cloudbilling.CloudBillingConfig{
-					Provider:     cfg.CloudBilling.Provider,
-					Endpoint:     cfg.CloudBilling.Endpoint,
-					BillingCycle: cfg.CloudBilling.BillingCycle,
-					PeriodType:   cfg.CloudBilling.PeriodType,
-				})
-				if fetcher == nil {
-					// 无后缀时尝试任一带环境后缀的凭证（01_实践 §3.3(3a)）
-					for _, env := range []string{"POC", "FAT", "UAT", "PROD"} {
-						fetcher = cloudbilling.NewFetcherForEnv(env)
-						if fetcher != nil {
-							billingEnv = env
-							log.Printf("billing ETL: using credentials for environment %s (ALIBABA_CLOUD_ACCESS_KEY_ID_%s)", env, env)
-							break
-						}
-					}
-				}
-				if fetcher != nil {
+				workers := buildBillingWorkers(repo, cfg)
+				if len(workers) > 0 {
 					log.Printf("billing ETL schedule (config): %s", cfg.CloudBilling.EffectiveETLScheduleCron())
-					cycle := cfg.CloudBilling.BillingCycle
-					if cycle == "" {
-						cycle = time.Now().Format("2006-01")
+					for _, w := range workers {
+						runBillingETLCycle(context.Background(), w, 2*time.Hour)
 					}
-					worker := etl.NewBillingWorker(fetcher, repo, cycle)
-					worker.AccountID = billingEnv // account_id 取值为 POC、FAT、UAT、PROD 四者之一，与 cost_env_account_config.account_id 一致，供按环境总账展示 [Ref: 01_设计 §环境与云账号配置]
-					worker.OnPipelineFailAlert = func(step string, err error) {
-						log.Printf("WARN: billing ETL pipeline failed [%s]: %v", step, err)
-						// D1-1：与 04_ 监控告警集成时在此触发告警
-					}
-					// [Ref: 01_实践 部署与每日凌晨全量检查] 每次部署：检查全量数据是否按预期存在，否则自动全量拉取+聚合；符合则仅增量+按规则删除周期外数据
-					runBillingETLCycle(context.Background(), worker, 2*time.Hour)
-					// 每日凌晨 1 点后执行全量检查；不符合则全量更新，符合则仅增量更新并删除周期外数据
-					go runNightlyBillingETL(worker, &cfg.CloudBilling)
+					go runNightlyBillingETL(workers, &cfg.CloudBilling)
 				} else {
 					log.Printf("billing ETL skipped: CLOUD_BILLING_PROVIDER=aliyun but no AK/SK (set ALIBABA_CLOUD_ACCESS_KEY_ID/SECRET or ALIBABA_CLOUD_ACCESS_KEY_ID_POC/SECRET_POC etc.)")
 				}
@@ -164,6 +137,54 @@ func fillPostgresFromEnv(cfg *config.Config) {
 	}
 }
 
+// buildBillingWorkers 为每个有 AK/SK 的环境创建 BillingWorker（POC/FAT/UAT/PROD），供多环境并列 ETL。[Ref: 01_多环境 UAT]
+func buildBillingWorkers(repo postgres.Repository, cfg *config.Config) []*etl.BillingWorker {
+	cycle := cfg.CloudBilling.BillingCycle
+	if cycle == "" {
+		cycle = time.Now().Format("2006-01")
+	}
+	etlData := &etl.ETLDataConfig{
+		DailyPullMonths:        cfg.CloudBilling.ETLData.DailyPullMonths,
+		DailyRetentionMonths:   cfg.CloudBilling.ETLData.DailyRetentionMonths,
+		MonthlyPullMonths:      cfg.CloudBilling.ETLData.MonthlyPullMonths,
+		MonthlyRetentionMonths: cfg.CloudBilling.ETLData.MonthlyRetentionMonths,
+	}
+	onFail := func(step string, err error) {
+		log.Printf("WARN: billing ETL pipeline failed [%s]: %v", step, err)
+	}
+	var out []*etl.BillingWorker
+	// 先试单账号（无后缀）
+	fetcher := cloudbilling.NewFetcher(cloudbilling.CloudBillingConfig{
+		Provider:     cfg.CloudBilling.Provider,
+		Endpoint:     cfg.CloudBilling.Endpoint,
+		BillingCycle: cycle,
+		PeriodType:   cfg.CloudBilling.PeriodType,
+	})
+	if fetcher != nil {
+		w := etl.NewBillingWorker(fetcher, repo, cycle)
+		w.AccountID = "POC" // 单账号时沿用 POC 展示
+		w.ETLData = etlData
+		w.OnPipelineFailAlert = onFail
+		out = append(out, w)
+		log.Printf("billing ETL: using single-account credentials")
+		return out
+	}
+	// 多账号：按环境后缀收集所有有凭证的环境
+	for _, env := range []string{"POC", "FAT", "UAT", "PROD"} {
+		f := cloudbilling.NewFetcherForEnv(env)
+		if f == nil {
+			continue
+		}
+		w := etl.NewBillingWorker(f, repo, cycle)
+		w.AccountID = env
+		w.ETLData = etlData
+		w.OnPipelineFailAlert = onFail
+		out = append(out, w)
+		log.Printf("billing ETL: using credentials for environment %s (ALIBABA_CLOUD_ACCESS_KEY_ID_%s)", env, env)
+	}
+	return out
+}
+
 // runBillingETLCycle 执行一次账单 ETL 周期：全量检查 → 不满足则全量回填，满足则仅增量；再执行流水线（写昨日→校验→删周期外→写月→聚合）与对账。[Ref: 01_实践 部署与每日凌晨全量检查]
 func runBillingETLCycle(ctx context.Context, worker *etl.BillingWorker, maxDuration time.Duration) {
 	ctx, cancel := context.WithTimeout(ctx, maxDuration)
@@ -209,13 +230,15 @@ func nextDurationTo1AMUTC() time.Duration {
 	return next.Sub(now)
 }
 
-// runNightlyBillingETL 每日凌晨 1 点（UTC）后执行全量检查：不符合则全量更新，符合则仅增量更新并按规则删除周期外数据。
-func runNightlyBillingETL(worker *etl.BillingWorker, _ *config.CloudBillingConfig) {
+// runNightlyBillingETL 每日凌晨 1 点（UTC）后对每个环境执行全量检查：不符合则全量更新，符合则仅增量更新并按规则删除周期外数据。
+func runNightlyBillingETL(workers []*etl.BillingWorker, _ *config.CloudBillingConfig) {
 	for {
 		d := nextDurationTo1AMUTC()
 		log.Printf("billing ETL nightly: next run in %v (after 01:00 UTC)", d.Round(time.Second))
 		time.Sleep(d)
-		runBillingETLCycle(context.Background(), worker, 2*time.Hour)
+		for _, w := range workers {
+			runBillingETLCycle(context.Background(), w, 2*time.Hour)
+		}
 	}
 }
 
@@ -233,5 +256,26 @@ func fillCloudBillingFromEnv(cfg *config.Config) {
 	}
 	if v := os.Getenv("CLOUD_BILLING_PERIOD"); v != "" {
 		cfg.CloudBilling.PeriodType = v
+	}
+	// [Ref: 01_实践 配置控制拉取与保存长度] 日/月拉取与保留月数可由环境变量覆盖
+	if v := os.Getenv("BILLING_DAILY_PULL_MONTHS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.CloudBilling.ETLData.DailyPullMonths = n
+		}
+	}
+	if v := os.Getenv("BILLING_DAILY_RETENTION_MONTHS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.CloudBilling.ETLData.DailyRetentionMonths = n
+		}
+	}
+	if v := os.Getenv("BILLING_MONTHLY_PULL_MONTHS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.CloudBilling.ETLData.MonthlyPullMonths = n
+		}
+	}
+	if v := os.Getenv("BILLING_MONTHLY_RETENTION_MONTHS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.CloudBilling.ETLData.MonthlyRetentionMonths = n
+		}
 	}
 }

@@ -44,8 +44,8 @@ interface AppState {
   errorSLO: string | null;
 
   /** [Ref: 01_设计 D9-16] 成本结构趋势（云产品明细索引区趋势图） */
-  costTrendData: Array<{ date: string; total_cost: number }> | null;
-  costTrendDataPrev: Array<{ date: string; total_cost: number }> | null; // 环比：上一周期
+  costTrendData: Array<{ date: string; total_cost: number; by_product?: Record<string, number> }> | null;
+  costTrendDataPrev: Array<{ date: string; total_cost: number; by_product?: Record<string, number> }> | null;
   loadingCostTrend: boolean;
   errorCostTrend: string | null;
 
@@ -69,7 +69,8 @@ interface AppState {
 
   // Actions
   setTheme: (theme: 'light' | 'dark') => void;
-  fetchGlobalCostMetrics: () => Promise<void>;
+  /** envs 非空时仅请求所选环境的成本（与成本分解、云产品明细一致）[Ref: 用户需求 环境多选] */
+  fetchGlobalCostMetrics: (envs?: string[]) => Promise<void>;
   fetchNamespaceCosts: () => Promise<void>;
   /** [Ref: 01_设计 §云产品成本明细索引 索引区时间范围] override 为索引区独立时间范围；withCompare 为 true 时再拉上期明细填 drilldownGlobalProductsPrev */
   fetchDrilldownGlobal: (env?: string, category?: string, sort?: string, override?: { period: CostTimeRange; dateRange: [string, string] | null }, withCompare?: boolean) => Promise<void>;
@@ -139,10 +140,10 @@ export const useAppStore = create<AppState>()(
       // Actions
       setTheme: (theme: 'light' | 'dark') => set({ theme }),
 
-      fetchGlobalCostMetrics: async () => {
+      fetchGlobalCostMetrics: async (envs?: string[]) => {
         const { useMockData, costTimeRange, costCompareMode, costCustomDateRange } = get();
         set({ loadingGlobalMetrics: true, errorGlobalMetrics: null });
-
+        const envsParam = envs?.length ? envs.join(',') : undefined;
         try {
           let data: CostMetrics;
           const effectivePeriod = costTimeRange === 'custom' ? 'month' : costTimeRange;
@@ -153,9 +154,10 @@ export const useAppStore = create<AppState>()(
             data = await costService.getGlobalCostMetrics({
               date_from: costCustomDateRange[0],
               date_to: costCustomDateRange[1],
+              envs: envsParam,
             });
           } else {
-            data = await costService.getGlobalCostMetrics({ period: effectivePeriod, compareMode: costCompareMode });
+            data = await costService.getGlobalCostMetrics({ period: effectivePeriod, compareMode: costCompareMode, envs: envsParam });
           }
           set({ globalCostMetrics: data, loadingGlobalMetrics: false });
         } catch (error) {
@@ -223,32 +225,12 @@ export const useAppStore = create<AppState>()(
           const prevQ = q <= 1 ? 4 : q - 1;
           const prevY = q <= 1 ? utcYear - 1 : utcYear;
           const prevQuarterKey = `${prevY}-Q${prevQ}`;
-          // [Ref: 01_设计 report_type 与 period_key] this_week 后端期望 period_key=YYYY-Www（ISO 周），last_week 为上周日日期
-          const getISOWeekKey = (d: Date) => {
-            const dt = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
-            const dayNum = dt.getUTCDay() || 7;
-            dt.setUTCDate(dt.getUTCDate() + 4 - dayNum);
-            const year = dt.getUTCFullYear();
-            const start = new Date(Date.UTC(year, 0, 1));
-            const week = Math.ceil((((dt.getTime() - start.getTime()) / 86400000) + 1) / 7);
-            return `${year}-W${String(week).padStart(2, '0')}`;
-          };
-          const getLastWeekEndKey = (d: Date) => {
-            const wd = d.getUTCDay();
-            const sunOffset = wd === 0 ? 7 : wd;
-            const lastSunday = new Date(d.getTime());
-            lastSunday.setUTCDate(d.getUTCDate() - sunOffset);
-            return lastSunday.toISOString().slice(0, 10);
-          };
           const reportTypeMap: Record<string, string> = {
-            '1d': '1d', this_week: 'this_week', last_week: 'last_week',
             month: 'month', last_month: 'last_month',
             quarter: 'quarter', last_quarter: 'last_quarter',
             this_year: 'this_year', last_year: 'last_year',
           };
           const periodKeyMap: Record<string, string> = {
-            '1d': yesterdayStr,
-            this_week: getISOWeekKey(now), last_week: getLastWeekEndKey(now),
             month: monthStr, last_month: prevMonthStr,
             quarter: quarterKey, last_quarter: prevQuarterKey,
             this_year: String(now.getFullYear()), last_year: String(now.getFullYear() - 1),
@@ -285,18 +267,7 @@ export const useAppStore = create<AppState>()(
           if (withCompare) {
             let prevReportType = report_type;
             let prevPeriodKey: string;
-            if (period === 'this_week') {
-              const prevWeekKey = getISOWeekKey(new Date(now.getTime() - 7 * 86400000));
-              prevPeriodKey = prevWeekKey;
-            } else if (period === 'last_week') {
-              const prevLastWeekEnd = new Date(getLastWeekEndKey(now));
-              prevLastWeekEnd.setDate(prevLastWeekEnd.getDate() - 7);
-              prevPeriodKey = prevLastWeekEnd.toISOString().slice(0, 10);
-            } else if (period === '1d') {
-              const dayBefore = new Date(yesterdayStr);
-              dayBefore.setDate(dayBefore.getDate() - 1);
-              prevPeriodKey = dayBefore.toISOString().slice(0, 10);
-            } else if (period === 'month') {
+            if (period === 'month') {
               prevPeriodKey = prevMonthStr;
             } else if (period === 'last_month') {
               const prevPrevMonth = new Date(prevMonth.getFullYear(), prevMonth.getMonth() - 1, 1);
@@ -394,33 +365,60 @@ export const useAppStore = create<AppState>()(
         set({ loadingCostTrend: true, errorCostTrend: null, costTrendDataPrev: null });
         try {
           const res = await costService.getCostTrend(params);
-          const list = (res?.data ?? []).map(d => ({ date: d.date, total_cost: d.total_cost }));
+          const list = (res?.data ?? []).map(d => ({ date: d.date, total_cost: d.total_cost, by_product: d.by_product }));
           set(state => ({ ...state, costTrendData: list, loadingCostTrend: false }));
           if (withCompare && (params?.period || (params?.date_from && params?.date_to))) {
             let prevFrom: string | undefined;
             let prevTo: string | undefined;
             if (params?.date_from && params?.date_to) {
-              const from = new Date(params.date_from);
-              const to = new Date(params.date_to);
-              const days = Math.round((to.getTime() - from.getTime()) / 86400000) + 1;
-              const prevEnd = new Date(from);
-              prevEnd.setDate(prevEnd.getDate() - 1);
-              const prevStart = new Date(prevEnd);
-              prevStart.setDate(prevStart.getDate() - days + 1);
-              prevFrom = prevStart.toISOString().slice(0, 10);
-              prevTo = prevEnd.toISOString().slice(0, 10);
+              // 自定义月范围：前移相同月数作为对比期
+              const fromParts = params.date_from.split('-').map(Number);
+              const toParts = params.date_to.split('-').map(Number);
+              const fromD = new Date(fromParts[0], fromParts[1] - 1, 1);
+              const toD = new Date(toParts[0], toParts[1] - 1, 1);
+              const months = (toD.getFullYear() - fromD.getFullYear()) * 12 + (toD.getMonth() - fromD.getMonth()) + 1;
+              const prevEndD = new Date(fromD); prevEndD.setMonth(prevEndD.getMonth() - 1);
+              const prevStartD = new Date(prevEndD); prevStartD.setMonth(prevStartD.getMonth() - months + 1);
+              prevFrom = `${prevStartD.getFullYear()}-${String(prevStartD.getMonth()+1).padStart(2,'0')}`;
+              prevTo = `${prevEndD.getFullYear()}-${String(prevEndD.getMonth()+1).padStart(2,'0')}`;
             } else {
-              const period = params?.period ?? '30d';
-              const len = period === '7d' || period === '7d_range' ? 7 : period === '90d' ? 90 : 30;
-              const end = new Date();
-              end.setDate(end.getDate() - 1);
-              const startPrev = new Date(end);
-              startPrev.setDate(startPrev.getDate() - len * 2 + 1);
-              prevFrom = startPrev.toISOString().slice(0, 10);
-              prevTo = new Date(end.getTime() - len * 86400000).toISOString().slice(0, 10);
+              const period = params?.period ?? 'month';
+              if (period === 'last_month') {
+                const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 2);
+                prevFrom = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+                prevTo = prevFrom;
+              } else if (period === 'month' || period === '') {
+                const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1);
+                prevFrom = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+                prevTo = prevFrom;
+              } else if (period === 'last_quarter') {
+                const now2 = new Date();
+                const cm = now2.getMonth(); const cy = now2.getFullYear();
+                let sq: number, sy: number;
+                if (cm < 3) { sq = 7; sy = cy - 1; } else if (cm < 6) { sq = 10; sy = cy - 1; }
+                else if (cm < 9) { sq = 1; sy = cy; } else { sq = 4; sy = cy; }
+                prevFrom = `${sy}-${String(sq).padStart(2,'0')}`;
+                const em = sq + 2; const ey2 = em > 12 ? sy + 1 : sy; const em2 = em > 12 ? em - 12 : em;
+                prevTo = `${ey2}-${String(em2).padStart(2,'0')}`;
+              } else if (period === 'quarter') {
+                const now2 = new Date();
+                const cq = Math.floor(now2.getMonth() / 3);
+                let sq: number, sy: number;
+                if (cq === 0) { sq = 10; sy = now2.getFullYear() - 1; }
+                else { sq = (cq - 1) * 3 + 1; sy = now2.getFullYear(); }
+                prevFrom = `${sy}-${String(sq).padStart(2,'0')}`;
+                const em = sq + 2; const ey2 = em > 12 ? sy + 1 : sy; const em2 = em > 12 ? em - 12 : em;
+                prevTo = `${ey2}-${String(em2).padStart(2,'0')}`;
+              } else if (period === 'last_year') {
+                const y = new Date().getFullYear() - 2;
+                prevFrom = `${y}-01`; prevTo = `${y}-12`;
+              } else if (period === 'this_year') {
+                const y = new Date().getFullYear() - 1;
+                prevFrom = `${y}-01`; prevTo = `${y}-12`;
+              }
             }
             const resPrev = await costService.getCostTrend(prevFrom && prevTo ? { date_from: prevFrom, date_to: prevTo, env: params?.env } : { period: params?.period, env: params?.env });
-            const listPrev = (resPrev?.data ?? []).map(d => ({ date: d.date, total_cost: d.total_cost }));
+            const listPrev = (resPrev?.data ?? []).map(d => ({ date: d.date, total_cost: d.total_cost, by_product: d.by_product }));
             set(state => ({ ...state, costTrendDataPrev: listPrev }));
           }
         } catch (error) {

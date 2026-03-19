@@ -24,10 +24,7 @@ import { CURRENCY_SYMBOL } from '@/constants';
 /* ─── Static Config ──────────────────────────────────────────────────────── */
 // [Ref: 01_实践 §3.1 DNA front_end_time_ranges]
 const TIME_RANGE_OPTIONS: { label: string; value: CostTimeRange }[] = [
-  { label: '昨天',   value: '1d' },
-  { label: '这周',   value: 'this_week' },
-  { label: '上周',   value: 'last_week' },
-  { label: '这月',   value: 'month' },
+  { label: '本月',   value: 'month' },
   { label: '上月',   value: 'last_month' },
   { label: '这季度', value: 'quarter' },
   { label: '上季度', value: 'last_quarter' },
@@ -80,6 +77,8 @@ const CostOverviewPage: React.FC = () => {
   const [domainDetail, setDomainDetail] = useState<DomainBreakdown | null>(null);
   const [highlightCloudProduct, setHighlightCloudProduct] = useState(false);
   const [trendModalOpen, setTrendModalOpen] = useState(false);
+  /** 从云产品明细行点击趋势图打开大图时，展示该产品趋势；否则展示总成本趋势 [Ref: 单产品趋势大图] */
+  const [trendModalProductCode, setTrendModalProductCode] = useState<string | null>(null);
   // [Ref: 用户需求] 分页 state：受控 pageSize + currentPage，确保 showSizeChanger 选择后自动跳回第1页
   const [tablePageSize, setTablePageSize] = useState(20);
   const [tablePage, setTablePage] = useState(1);
@@ -111,12 +110,18 @@ const CostOverviewPage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const drilldownEnv = searchParams.get('env') || 'all';
+  // 环境多选：URL envs=POC,FAT 或兼容单选 env=POC [Ref: 用户需求 环境多选]
+  const envsFromUrl = searchParams.get('envs') || searchParams.get('env') || '';
+  const selectedEnvs: string[] = envsFromUrl && envsFromUrl !== 'all'
+    ? envsFromUrl.split(',').map(s => s.trim()).filter(Boolean)
+    : [];
+  const drilldownEnv = selectedEnvs.length ? selectedEnvs.join(',') : 'all';
   const drilldownCategory = searchParams.get('category') || undefined;
   const drilldownSort = searchParams.get('sort') || 'cost_desc';
   // [Ref: 用户需求] 默认开启环比与趋势图；通过 ?compare_trend=0 / ?show_trend=0 可显式关闭
   const drilldownCompare = searchParams.get('compare_trend') !== '0';
   const showTrendChart = searchParams.get('show_trend') !== '0';
+  const [trendMode, setTrendMode] = React.useState<'total' | 'product'>('total');
   const indexPeriod = searchParams.get('index_period') as CostTimeRange | null;
   const indexDateFrom = searchParams.get('index_date_from') ?? null;
   const indexDateTo = searchParams.get('index_date_to') ?? null;
@@ -125,7 +130,7 @@ const CostOverviewPage: React.FC = () => {
     (indexPeriod === 'custom' && indexDateFrom && indexDateTo ? [indexDateFrom, indexDateTo] : null) ?? costCustomDateRange;
 
   useEffect(() => {
-    fetchGlobalCostMetrics();
+    fetchGlobalCostMetrics(selectedEnvs.length ? selectedEnvs : undefined);
     fetchNamespaceCosts();
     fetchDrilldownGlobal(drilldownEnv, drilldownCategory, drilldownSort, { period: effectiveDrilldownPeriod, dateRange: effectiveDrilldownDateRange }, drilldownCompare);
   }, [fetchGlobalCostMetrics, fetchNamespaceCosts, fetchDrilldownGlobal, costTimeRange, costCompareMode, costCustomDateRange, drilldownEnv, drilldownCategory, drilldownSort, effectiveDrilldownPeriod, effectiveDrilldownDateRange, drilldownCompare]);
@@ -229,14 +234,9 @@ const CostOverviewPage: React.FC = () => {
     );
   };
 
-  /* ─── Hero Total Cost ────────────────────────────────────────────────────── */
-  const totalCost = globalCostMetrics?.envBreakdown?.length
-    ? (globalCostMetrics.envBreakdown as { total_cost?: number }[]).reduce((s, e) => s + (e.total_cost ?? 0), 0)
-    : Number(globalCostMetrics?.totalBillableCost ?? 0);
-
-  const prevTotalCost = globalCostMetrics?.envBreakdown?.length
-    ? (globalCostMetrics.envBreakdown as { previous_period_cost?: number }[]).reduce((s, e) => s + (e.previous_period_cost ?? 0), 0)
-    : null;
+  /* ─── Hero 全环境总成本：以 API total_cost 为唯一来源，与后端聚合一致 [Ref: 去掉总账单功能，与全环境总成本统一] ────────────────────────────────────────────────────── */
+  const totalCost = Number(globalCostMetrics?.totalBillableCost ?? 0);
+  const prevTotalCost = globalCostMetrics?.previousPeriod?.totalBillableCost ?? null;
 
   const heroChangePct =
     costCompareMode === 'previous' && prevTotalCost && prevTotalCost > 0
@@ -267,11 +267,12 @@ const CostOverviewPage: React.FC = () => {
               options={TOP_TIME_RANGE_OPTIONS}
               style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}
             />
-            {/* [Ref: 01_实践 §时间范围] 自定义日期入口：与预设按钮互斥，选预设则清空，填日期则取消预设高亮 */}
+            {/* [Ref: 01_实践 §时间范围] 自定义月份范围入口：与预设按钮互斥，最多 3 年 */}
             <DatePicker.RangePicker
+              picker="month"
               size="small"
               allowClear
-              placeholder={['自定义开始', '自定义结束']}
+              placeholder={['开始月份', '结束月份']}
               value={
                 costTimeRange === 'custom' && costCustomDateRange
                   ? [dayjs(costCustomDateRange[0]), dayjs(costCustomDateRange[1])]
@@ -279,18 +280,18 @@ const CostOverviewPage: React.FC = () => {
               }
               disabledDate={current =>
                 !current ||
-                current.isAfter(dayjs().startOf('day')) ||
-                current.isBefore(dayjs().subtract(6, 'month').startOf('day'))
+                current.isAfter(dayjs().startOf('month')) ||
+                current.isBefore(dayjs().subtract(3, 'year').startOf('month'))
               }
               onChange={(dates) => {
                 if (!dates || !dates[0] || !dates[1]) {
-                  setCostTimeRange('30d');
+                  setCostTimeRange('month');
                   setCostCustomDateRange(null);
-                  updateParams(n => { n.set('period', '30d'); n.delete('date_from'); n.delete('date_to'); });
+                  updateParams(n => { n.set('period', 'month'); n.delete('date_from'); n.delete('date_to'); });
                   return;
                 }
-                const from = dates[0].format('YYYY-MM-DD');
-                const to   = dates[1].format('YYYY-MM-DD');
+                const from = dates[0].format('YYYY-MM');
+                const to   = dates[1].format('YYYY-MM');
                 setCostCustomDateRange([from, to]);
                 setCostTimeRange('custom');
                 updateParams(n => { n.set('period', 'custom'); n.set('date_from', from); n.set('date_to', to); });
@@ -335,7 +336,7 @@ const CostOverviewPage: React.FC = () => {
   );
 
   /* ─── Render: Hero + Env Bento ───────────────────────────────────────────── */
-  // [Ref: 01_实践] 总账单与环境卡片框架始终渲染；无数据/报错时展示占位（— 或 0.00），不因数据缺失隐藏框架
+  // [Ref: 01_实践] 全环境总成本与环境卡片框架始终渲染；无数据/报错时展示占位（— 或 0.00），不因数据缺失隐藏框架
   const renderHeroBento = () => (
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gridTemplateRows: 'auto auto', gap: 12, marginBottom: 14 }}>
         {/* Hero card */}
@@ -389,6 +390,11 @@ const CostOverviewPage: React.FC = () => {
                       <span style={{ fontSize: 11, color: txt2, marginLeft: 4 }}>较上期</span>
                     </div>
                   )}
+                  {globalCostMetrics?.displayNote && (
+                    <div style={{ marginTop: 6, fontSize: 12, color: isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.55)' }}>
+                      {globalCostMetrics.displayNote}
+                    </div>
+                  )}
                 </>
               )}
             </div>
@@ -426,11 +432,11 @@ const CostOverviewPage: React.FC = () => {
           )}
         </div>
 
-        {/* 4 Env cards - always clickable to filter drilldown by env */}
+        {/* 4 Env cards - click to toggle single/multi env filter; 成本分解与云产品明细随选择展示 [Ref: 用户需求 环境多选] */}
         {(['POC', 'FAT', 'UAT', 'PROD'] as const).map(env => {
           const item = globalCostMetrics?.envBreakdown?.find(e => e.environment === env);
           const isConfigured = item && (item.account_id || item.total_cost > 0 || item.account_display_name !== '未配置');
-          const isSelected = drilldownEnv === env;
+          const isSelected = selectedEnvs.includes(env);
           const totalCostEnv = item?.total_cost ?? 0;
           const changePct = item?.change_pct;
           const color = ENV_COLORS[env];
@@ -439,9 +445,15 @@ const CostOverviewPage: React.FC = () => {
               key={env}
               className="bento-card bento-card-clickable"
               onClick={() => {
-                const nextEnv = isSelected ? 'all' : env;
+                const next = isSelected ? selectedEnvs.filter(e => e !== env) : [...selectedEnvs, env];
                 updateParams(n => {
-                  n.set('env', nextEnv);
+                  if (next.length === 0) {
+                    n.delete('envs');
+                    n.set('env', 'all');
+                  } else {
+                    n.set('envs', next.join(','));
+                    n.delete('env');
+                  }
                   n.set('period', costTimeRange);
                   if (costTimeRange === 'custom' && costCustomDateRange?.[0] && costCustomDateRange?.[1]) {
                     n.set('date_from', costCustomDateRange[0]);
@@ -471,7 +483,7 @@ const CostOverviewPage: React.FC = () => {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                   {isSelected && (
                     <span style={{ fontSize: 9, fontWeight: 600, color, background: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.06)', padding: '1px 5px', borderRadius: 3, letterSpacing: '0.04em' }}>
-                      已筛选
+                      {selectedEnvs.length > 1 ? '已选' : '已筛选'}
                     </span>
                   )}
                   {loadingGlobalMetrics && <LoadingOutlined style={{ fontSize: 12, color: txt2 }} />}
@@ -504,12 +516,11 @@ const CostOverviewPage: React.FC = () => {
   /* ─── Render: KPI Cards (placeholder when no data) ─────────────────────────── */
   const renderKpiCardsPlaceholder = () => {
     const labels = [
-      { label: '总账单成本', tip: '计算、存储、网络、安全四类计费成本汇总。', accentColor: '#3b82f6' },
       { label: '可优化空间', tip: '云账单模式下暂不计算优化空间。', accentColor: '#8b5cf6' },
       { label: '全局效率分', tip: '云账单模式下暂不计算效率分。', accentColor: '#10b981' },
     ];
     return (
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr auto', gap: 12, marginBottom: 14, alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 12, marginBottom: 14, alignItems: 'start' }}>
         {labels.map((k, i) => (
           <div key={i} className="bento-card" style={{ ...gc, padding: '20px 22px', borderTop: `3px solid ${k.accentColor}` }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12, fontSize: 12, color: txt2, fontWeight: 500 }}>
@@ -527,7 +538,7 @@ const CostOverviewPage: React.FC = () => {
   };
 
   /* ─── Render: KPI Cards ──────────────────────────────────────────────────── */
-  // [Ref: 01_实践] 总账单成本/可优化空间/全局效率分框架始终渲染；无数据时展示占位（—），错误时先展示 Alert 再展示占位卡片
+  // [Ref: 01_实践] 可优化空间/全局效率分框架始终渲染；无数据时展示占位（—），错误时先展示 Alert 再展示占位卡片
   const renderKpiCards = () => {
     if (loadingGlobalMetrics && !globalCostMetrics) {
       return (
@@ -557,21 +568,10 @@ const CostOverviewPage: React.FC = () => {
 
     const prev = globalCostMetrics.previousPeriod;
     const isPlaceholder = globalCostMetrics.totalOptimizableSpace === 0 && globalCostMetrics.globalEfficiency === 0;
-    const costChange = prev && prev.totalBillableCost > 0 ? ((globalCostMetrics.totalBillableCost - prev.totalBillableCost) / prev.totalBillableCost) * 100 : null;
     const optimChange = prev && prev.totalOptimizableSpace > 0 ? ((globalCostMetrics.totalOptimizableSpace - prev.totalOptimizableSpace) / prev.totalOptimizableSpace) * 100 : null;
     const effChange = prev ? globalCostMetrics.globalEfficiency - prev.globalEfficiency : null;
 
     const kpiData = [
-      {
-        label: '总账单成本',
-        tip: '计算、存储、网络、安全四类计费成本汇总。',
-        value: globalCostMetrics.totalBillableCost,
-        prefix: CURRENCY_SYMBOL,
-        change: costCompareMode === 'previous' ? costChange : null,
-        inverted: true,
-        onClick: () => setDetailModal('bill'),
-        accentColor: '#3b82f6',
-      },
       {
         label: '可优化空间',
         tip: isPlaceholder ? '云账单模式下暂不计算优化空间。' : '账单成本减使用成本，点击下钻查看明细。',
@@ -595,7 +595,7 @@ const CostOverviewPage: React.FC = () => {
     ];
 
     return (
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr auto', gap: 12, marginBottom: 14, alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 12, marginBottom: 14, alignItems: 'start' }}>
         {kpiData.map((k, i) => (
           <div
             key={i}
@@ -657,7 +657,13 @@ const CostOverviewPage: React.FC = () => {
 
     return (
       <div style={{ marginBottom: 14 }}>
-        <div style={{ fontSize: 11, color: txt2, fontWeight: 500, letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 10 }}>
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() => setDetailModal('bill')}
+          onKeyDown={e => e.key === 'Enter' && setDetailModal('bill')}
+          style={{ fontSize: 11, color: txt2, fontWeight: 500, letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 10, cursor: 'pointer' }}
+        >
           成本分解
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
@@ -812,10 +818,13 @@ const CostOverviewPage: React.FC = () => {
   );
 
   /* ─── Render: Trend Chart ────────────────────────────────────────────────── */
+  const PRODUCT_COLORS = ['#3b82f6', '#ef4444', '#f59e0b', '#10b981', '#8b5cf6', '#ec4899', '#06b6d4', '#f97316', '#6366f1', '#14b8a6'];
+
   const renderTrendChart = () => {
+    const cur = costTrendData ?? [];
+    const prev = costTrendDataPrev ?? [];
+
     const trendChartData = (() => {
-      const cur = costTrendData ?? [];
-      const prev = costTrendDataPrev ?? [];
       const dateSet = new Set<string>([...cur.map(d => d.date), ...prev.map(d => d.date)]);
       return Array.from(dateSet).sort().map(date => ({
         date,
@@ -823,6 +832,26 @@ const CostOverviewPage: React.FC = () => {
         上期: drilldownCompare && prev.length ? (prev.find(d => d.date === date)?.total_cost ?? null) : undefined,
       }));
     })();
+
+    const topProducts = React.useMemo(() => {
+      const sums: Record<string, number> = {};
+      for (const pt of cur) {
+        for (const [code, cost] of Object.entries(pt.by_product ?? {})) {
+          sums[code] = (sums[code] ?? 0) + Math.abs(cost);
+        }
+      }
+      return Object.entries(sums).sort((a, b) => b[1] - a[1]).slice(0, 8).map(e => e[0]);
+    }, [cur]);
+
+    const productChartData = React.useMemo(() => {
+      return cur.map(pt => {
+        const row: Record<string, number | string | null> = { date: pt.date };
+        for (const code of topProducts) {
+          row[code] = pt.by_product?.[code] ?? 0;
+        }
+        return row;
+      });
+    }, [cur, topProducts]);
 
     return (
       <div className="bento-card" style={{ ...gc, padding: '18px 20px', marginBottom: 12 }}>
@@ -833,6 +862,24 @@ const CostOverviewPage: React.FC = () => {
               {drilldownEnv} 环境
             </span>
           )}
+          <span style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
+            {(['total', 'product'] as const).map(mode => (
+              <span
+                key={mode}
+                role="button"
+                tabIndex={0}
+                onClick={() => setTrendMode(mode)}
+                onKeyDown={e => e.key === 'Enter' && setTrendMode(mode)}
+                style={{
+                  fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 4, cursor: 'pointer',
+                  background: trendMode === mode ? (isDark ? 'rgba(59,130,246,0.25)' : 'rgba(59,130,246,0.12)') : 'transparent',
+                  color: trendMode === mode ? '#3b82f6' : txt2,
+                }}
+              >
+                {mode === 'total' ? '总成本' : '按产品'}
+              </span>
+            ))}
+          </span>
         </div>
         {!showTrendChart ? (
           <div style={{ padding: '16px 0', color: txt2, fontSize: 12 }}>
@@ -846,32 +893,45 @@ const CostOverviewPage: React.FC = () => {
           <Alert message={errorCostTrend} type="warning" showIcon style={{ marginBottom: 0 }} />
         ) : trendChartData.length > 0 ? (
           <>
-            {drilldownCompare && (!costTrendDataPrev || costTrendDataPrev.length === 0) && (
+            {drilldownCompare && trendMode === 'total' && (!costTrendDataPrev || costTrendDataPrev.length === 0) && (
               <div style={{ marginBottom: 8, fontSize: 11, color: '#f59e0b' }}>环比已开，暂无上期数据</div>
             )}
             <div style={{ height: 220 }}>
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={trendChartData} margin={{ top: 5, right: 16, left: 0, bottom: 5 }}>
-                  <defs>
-                    <linearGradient id="trendGradCur" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor={isDark ? '#60a5fa' : '#3b82f6'} stopOpacity={0.25} />
-                      <stop offset="100%" stopColor={isDark ? '#60a5fa' : '#3b82f6'} stopOpacity={0} />
-                    </linearGradient>
-                    <linearGradient id="trendGradPrev" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor={isDark ? '#34d399' : '#10b981'} stopOpacity={0.2} />
-                      <stop offset="100%" stopColor={isDark ? '#34d399' : '#10b981'} stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke={divider} />
-                  <XAxis dataKey="date" tick={{ fontSize: 11, fill: txt2 }} tickLine={false} axisLine={{ stroke: divider }} tickFormatter={d => d.slice(5)} />
-                  <YAxis tick={{ fontSize: 11, fill: txt2 }} tickLine={false} axisLine={false} tickFormatter={v => v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(v)} />
-                  <RTooltip content={<ChartTooltip />} />
-                  <Area type="monotone" dataKey="本期" stroke={isDark ? '#60a5fa' : '#3b82f6'} strokeWidth={2} fill="url(#trendGradCur)" dot={false} name="本期" />
-                  {drilldownCompare && costTrendDataPrev?.length ? (
-                    <Area type="monotone" dataKey="上期" stroke={isDark ? '#34d399' : '#10b981'} strokeWidth={2} strokeDasharray="5 3" fill="url(#trendGradPrev)" dot={false} name="上期" />
-                  ) : null}
-                  <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} />
-                </AreaChart>
+                {trendMode === 'product' && topProducts.length > 0 ? (
+                  <LineChart data={productChartData} margin={{ top: 5, right: 16, left: 0, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={divider} />
+                    <XAxis dataKey="date" tick={{ fontSize: 11, fill: txt2 }} tickLine={false} axisLine={{ stroke: divider }} tickFormatter={d => d.slice(5)} />
+                    <YAxis tick={{ fontSize: 11, fill: txt2 }} tickLine={false} axisLine={false} tickFormatter={v => v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(Math.round(v))} />
+                    <RTooltip content={<ChartTooltip />} />
+                    {topProducts.map((code, i) => (
+                      <Line key={code} type="monotone" dataKey={code} stroke={PRODUCT_COLORS[i % PRODUCT_COLORS.length]} strokeWidth={1.5} dot={false} name={code} />
+                    ))}
+                    <Legend wrapperStyle={{ fontSize: 10, paddingTop: 8 }} />
+                  </LineChart>
+                ) : (
+                  <AreaChart data={trendChartData} margin={{ top: 5, right: 16, left: 0, bottom: 5 }}>
+                    <defs>
+                      <linearGradient id="trendGradCur" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={isDark ? '#60a5fa' : '#3b82f6'} stopOpacity={0.25} />
+                        <stop offset="100%" stopColor={isDark ? '#60a5fa' : '#3b82f6'} stopOpacity={0} />
+                      </linearGradient>
+                      <linearGradient id="trendGradPrev" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={isDark ? '#34d399' : '#10b981'} stopOpacity={0.2} />
+                        <stop offset="100%" stopColor={isDark ? '#34d399' : '#10b981'} stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke={divider} />
+                    <XAxis dataKey="date" tick={{ fontSize: 11, fill: txt2 }} tickLine={false} axisLine={{ stroke: divider }} tickFormatter={d => d.slice(5)} />
+                    <YAxis tick={{ fontSize: 11, fill: txt2 }} tickLine={false} axisLine={false} tickFormatter={v => v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(v)} />
+                    <RTooltip content={<ChartTooltip />} />
+                    <Area type="monotone" dataKey="本期" stroke={isDark ? '#60a5fa' : '#3b82f6'} strokeWidth={2} fill="url(#trendGradCur)" dot={false} name="本期" />
+                    {drilldownCompare && costTrendDataPrev?.length ? (
+                      <Area type="monotone" dataKey="上期" stroke={isDark ? '#34d399' : '#10b981'} strokeWidth={2} strokeDasharray="5 3" fill="url(#trendGradPrev)" dot={false} name="上期" />
+                    ) : null}
+                    <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} />
+                  </AreaChart>
+                )}
               </ResponsiveContainer>
             </div>
           </>
@@ -976,13 +1036,13 @@ const CostOverviewPage: React.FC = () => {
                 if (!drilldownCompare) return <span style={{ color: txt2, fontSize: 12 }}>—</span>;
                 const prev = drilldownGlobalProductsPrev?.find(p => p.product_code === r.product_code);
                 const prevCost = prev?.cost ?? 0;
-                if (prevCost <= 0) return (
+                if (Math.abs(prevCost) < 0.01) return (
                   <span style={{ fontSize: 11, color: '#f59e0b', fontWeight: 600,
                     background: 'rgba(245,158,11,0.1)', borderRadius: 20, padding: '2px 7px' }}>
                     新增
                   </span>
                 );
-                const pct = ((r.cost - prevCost) / prevCost) * 100;
+                const pct = ((r.cost - prevCost) / Math.abs(prevCost)) * 100;
                 return <ChangeBadge pct={pct} inverted />;
               },
             },
@@ -991,28 +1051,33 @@ const CostOverviewPage: React.FC = () => {
               key: 'trend',
               width: 110,
               align: 'center' as const,
-              render: () => {
-                const hasTrend = showTrendChart && (costTrendData?.length ?? 0) > 0;
+              render: (_: unknown, r: CloudProductDrilldownItem) => {
+                const code = r.product_code;
+                const productSeries = (costTrendData ?? []).map(pt => ({
+                  date: pt.date,
+                  cost: pt.by_product?.[code] ?? 0,
+                }));
+                const hasData = productSeries.some(p => p.cost !== 0);
                 return (
                   <div
                     role="button"
                     tabIndex={0}
-                    onClick={() => setTrendModalOpen(true)}
-                    onKeyDown={e => e.key === 'Enter' && setTrendModalOpen(true)}
+                    onClick={() => { setTrendModalProductCode(code); setTrendModalOpen(true); }}
+                    onKeyDown={e => { if (e.key === 'Enter') { setTrendModalProductCode(code); setTrendModalOpen(true); } }}
                     style={{
-                      cursor: hasTrend ? 'pointer' : 'default',
+                      cursor: hasData ? 'pointer' : 'default',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
                       height: 32,
                     }}
-                    title={hasTrend ? '点击查看大图' : undefined}
+                    title={hasData ? `${code} 趋势 · 点击查看大图` : undefined}
                   >
-                    {hasTrend ? (
+                    {hasData ? (
                       <ResponsiveContainer width={96} height={28}>
-                        <AreaChart data={costTrendData ?? []} margin={{ top: 2, right: 2, left: 0, bottom: 2 }}>
+                        <AreaChart data={productSeries} margin={{ top: 2, right: 2, left: 0, bottom: 2 }}>
                           <defs>
-                            <linearGradient id="miniAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                            <linearGradient id={`miniGrad_${code}`} x1="0" y1="0" x2="0" y2="1">
                               <stop offset="0%" stopColor="#3b82f6" stopOpacity={0.35} />
                               <stop offset="100%" stopColor="#3b82f6" stopOpacity={0} />
                             </linearGradient>
@@ -1021,10 +1086,10 @@ const CostOverviewPage: React.FC = () => {
                           <YAxis hide domain={['auto', 'auto']} />
                           <Area
                             type="monotone"
-                            dataKey="total_cost"
+                            dataKey="cost"
                             stroke="#3b82f6"
                             strokeWidth={1.5}
-                            fill="url(#miniAreaGrad)"
+                            fill={`url(#miniGrad_${code})`}
                             dot={false}
                             isAnimationActive={false}
                           />
@@ -1078,7 +1143,7 @@ const CostOverviewPage: React.FC = () => {
             全域成本透视
           </h2>
           <span style={{ fontSize: 12, color: txt2 }}>
-            {globalCostMetrics && globalCostMetrics.totalBillableCost > 0 ? '数据来源：云账单' : '数据来源：—'}
+            {globalCostMetrics && (globalCostMetrics.totalBillableCost ?? 0) > 0 ? '数据来源：云账单' : '数据来源：—'}
           </span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: txt2 }}>
@@ -1090,7 +1155,7 @@ const CostOverviewPage: React.FC = () => {
       </div>
 
       {/* ── Alert: no data ── */}
-      {globalCostMetrics && globalCostMetrics.totalBillableCost === 0 && !errorGlobalMetrics && (
+      {globalCostMetrics && (globalCostMetrics.totalBillableCost ?? 0) === 0 && !errorGlobalMetrics && (
         <Alert
           message="暂无真实数据"
           description="请完成：1) 配置阿里云 AK/SK 并执行 ETL，将云账单写入日/月原始表与聚合表（cost_cloud_bill_daily_raw、cost_cloud_bill_aggregate 等）；2) 接入 Prometheus/K8s 获取集群内计算成本。部署后首次可触发全量回填或等待定时 ETL。"
@@ -1127,19 +1192,35 @@ const CostOverviewPage: React.FC = () => {
         {renderCloudProductTable()}
       </div>
 
-      {/* ── Trend Modal ── */}
-      <Modal title="成本趋势大图" open={trendModalOpen} onCancel={() => setTrendModalOpen(false)} footer={null} width={680} destroyOnClose>
+      {/* ── Trend Modal ── [Ref: 单产品趋势大图：从明细行打开时展示该产品趋势] */}
+      <Modal
+        title={trendModalProductCode ? `${trendModalProductCode} 成本趋势` : '成本趋势大图'}
+        open={trendModalOpen}
+        onCancel={() => { setTrendModalOpen(false); setTrendModalProductCode(null); }}
+        footer={null}
+        width={680}
+        destroyOnClose
+      >
         {showTrendChart && (costTrendData?.length ?? 0) > 0 ? (
           <div style={{ height: 360 }}>
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart
                 data={(() => {
                   const cur = costTrendData ?? []; const prev = costTrendDataPrev ?? [];
+                  const code = trendModalProductCode;
                   const dateSet = new Set<string>([...cur.map(d => d.date), ...prev.map(d => d.date)]);
-                  return Array.from(dateSet).sort().map(date => ({
-                    date, 本期: cur.find(d => d.date === date)?.total_cost ?? null,
-                    上期: drilldownCompare && prev.length ? (prev.find(d => d.date === date)?.total_cost ?? null) : undefined,
-                  }));
+                  return Array.from(dateSet).sort().map(date => {
+                    if (code) {
+                      const curVal = cur.find(d => d.date === date)?.by_product?.[code] ?? null;
+                      const prevVal = drilldownCompare && prev.length ? (prev.find(d => d.date === date)?.by_product?.[code] ?? null) : undefined;
+                      return { date, 本期: curVal, 上期: prevVal };
+                    }
+                    return {
+                      date,
+                      本期: cur.find(d => d.date === date)?.total_cost ?? null,
+                      上期: drilldownCompare && prev.length ? (prev.find(d => d.date === date)?.total_cost ?? null) : undefined,
+                    };
+                  });
                 })()}
                 margin={{ top: 10, right: 24, left: 0, bottom: 10 }}
               >
@@ -1204,7 +1285,7 @@ const CostOverviewPage: React.FC = () => {
 
       {/* ── Bill/Efficiency Detail Modal ── */}
       <Modal
-        title={detailModal === 'bill' ? '成本账单详情' : '效率构成'}
+        title={detailModal === 'bill' ? '成本分解（按领域）' : '效率构成'}
         open={detailModal !== null}
         onCancel={() => setDetailModal(null)}
         footer={null}
@@ -1213,7 +1294,7 @@ const CostOverviewPage: React.FC = () => {
         {detailModal === 'bill' && globalCostMetrics && (
           <div>
             <p style={{ color: '#666', marginBottom: 16 }}>
-              总账单由计算资源、存储、网络、安全四类领域汇总，分项之和=总账单。
+              全环境总成本由计算资源、存储、网络、安全四类领域汇总，分项之和=全环境总成本。
             </p>
             {globalCostMetrics.billDetail && (
               <Descriptions column={1} bordered size="small" style={{ marginBottom: 16 }}>
@@ -1260,7 +1341,7 @@ const CostOverviewPage: React.FC = () => {
         )}
         {detailModal === 'efficiency' && globalCostMetrics && (
           <div>
-            <p style={{ color: '#666', marginBottom: 16 }}>全局效率 = 汇总使用成本/汇总账单成本×100%。</p>
+            <p style={{ color: '#666', marginBottom: 16 }}>全局效率 = 汇总使用成本/全环境总成本×100%。</p>
             <Table size="small"
               dataSource={[
                 ...(globalCostMetrics.domainBreakdown ?? []).map(d => ({ key: `domain-${d.domain}`, name: d.domain, efficiency: d.efficiency, type: '领域' })),

@@ -9,7 +9,7 @@ test('should display cost overview page', async ({ page }) => {
   await expect(page).toHaveURL(/\/(CostOverviewPage)?(\?|$)/);
 
   await expect(page.getByRole('heading', { name: '全域成本透视' })).toBeVisible({ timeout: 15000 });
-  await expect(page.getByText('总账单成本')).toBeVisible();
+  await expect(page.getByText('全环境总成本')).toBeVisible();
   await expect(page.getByText('可优化空间').first()).toBeVisible();
   await expect(page.getByText('全局效率分')).toBeVisible();
   await expect(page.getByRole('table')).toBeVisible();

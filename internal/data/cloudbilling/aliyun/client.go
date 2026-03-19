@@ -271,9 +271,15 @@ func (f *Fetcher) queryBillOverview(ctx context.Context, billingCycle string) (*
 					}
 				}
 			}
-			// payment: CashAmount（代数全量累加，含信用结算负值）
-			if it.CashAmount != nil {
-				cashAmt := float64(*it.CashAmount)
+			// 现金支付：优先 PaymentAmount（控制台「现金支付」列），无则用 CashAmount，确保月/日源数据落库 [Ref: 16_ §3.3]
+			cashAmt := 0.0
+			if it.PaymentAmount != nil {
+				cashAmt = float64(*it.PaymentAmount)
+			}
+			if cashAmt == 0 && it.CashAmount != nil {
+				cashAmt = float64(*it.CashAmount)
+			}
+			if cashAmt != 0 {
 				cashTotal += cashAmt
 				cashByCategory[domain] += cashAmt
 			}
@@ -376,9 +382,15 @@ func (f *Fetcher) FetchBillOverviewByDay(ctx context.Context, billingDate string
 			}
 			byCategory[domain] += amount
 			allItems = append(allItems, BillItemResult{ProductCode: codeStr, Amount: amount, Domain: domain})
-			// [Ref: 16_ §3.3] 日粒度也汇总实付：CashAmount 代数累加（含负数冲正），供 daily_raw/聚合实付展示
-			if it.CashAmount != nil {
-				cashAmt := float64(*it.CashAmount)
+			// [Ref: 16_ §3.3] 日粒度现金支付：优先 PaymentAmount（控制台「现金支付」列），无则用 CashAmount，确保日表落库
+			cashAmt := 0.0
+			if it.PaymentAmount != nil {
+				cashAmt = float64(*it.PaymentAmount)
+			}
+			if cashAmt == 0 && it.CashAmount != nil {
+				cashAmt = float64(*it.CashAmount)
+			}
+			if cashAmt != 0 {
 				cashTotalAmount += cashAmt
 				cashByCategory[domain] += cashAmt
 			}
@@ -481,8 +493,12 @@ func (f *Fetcher) FetchLineItemsByDay(ctx context.Context, billingDate string) (
 			break
 		}
 		for _, it := range data.Items.Item {
+			// 现金支付：优先 PaymentAmount（控制台「现金支付」），无则用 CashAmount，与按日/月汇总一致
 			cashAmount := 0.0
-			if it.CashAmount != nil {
+			if it.PaymentAmount != nil {
+				cashAmount = float64(*it.PaymentAmount)
+			}
+			if cashAmount == 0 && it.CashAmount != nil {
 				cashAmount = float64(*it.CashAmount)
 			}
 			pretaxAmount := 0.0

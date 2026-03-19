@@ -119,16 +119,16 @@ CREATE TABLE IF NOT EXISTS cost_cloud_bill_month_status (
     PRIMARY KEY (billing_cycle, account_id)
 );
 
--- [Ref: 06_ 成本云账单三表] 月原始表、日原始表、聚合表（D1-D9 最佳方案）
+-- [Ref: 06_ 成本云账单三表] 月/日原始表主键含 account_id，多环境各写一行 [Ref: 01_多环境 UAT]
 CREATE TABLE IF NOT EXISTS cost_cloud_bill_monthly_raw (
     billing_cycle   VARCHAR(32) NOT NULL,
     total_amount    DECIMAL(12, 2) NOT NULL,
     product_breakdown JSONB NOT NULL,
     snapshot_at     TIMESTAMP DEFAULT NOW(),
     created_at      TIMESTAMP DEFAULT NOW(),
-    account_id      VARCHAR(64),
+    account_id      VARCHAR(64) NOT NULL DEFAULT '',
     region          VARCHAR(32),
-    PRIMARY KEY (billing_cycle)
+    PRIMARY KEY (billing_cycle, account_id)
 );
 CREATE TABLE IF NOT EXISTS cost_cloud_bill_daily_raw (
     bill_date       DATE NOT NULL,
@@ -136,9 +136,9 @@ CREATE TABLE IF NOT EXISTS cost_cloud_bill_daily_raw (
     product_breakdown JSONB NOT NULL,
     snapshot_at     TIMESTAMP DEFAULT NOW(),
     created_at      TIMESTAMP DEFAULT NOW(),
-    account_id      VARCHAR(64),
+    account_id      VARCHAR(64) NOT NULL DEFAULT '',
     region          VARCHAR(32),
-    PRIMARY KEY (bill_date)
+    PRIMARY KEY (bill_date, account_id)
 );
 -- [Ref: 01_设计 D9-5] 聚合表主键 (report_type, period_key, account_id)；含 data_status 供 API 透传
 CREATE TABLE IF NOT EXISTS cost_cloud_bill_aggregate (

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"math/rand"
 	"sort"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/myxxhui/lighthouse-src/pkg/costmodel"
@@ -67,6 +69,7 @@ func DefaultMockConfig() MockConfig {
 type MockRepository struct {
 	config              MockConfig
 	rand                *rand.Rand
+	mu                  sync.RWMutex
 	costSnapshots       map[string]CostSnapshot
 	roiBaselines        map[string]ROIBaseline
 	dailyNamespaceCosts map[string]DailyNamespaceCost // key: namespace-date
@@ -78,6 +81,7 @@ type MockRepository struct {
 	dailyNetworkCosts     map[string]DailyNetworkCost   // key: day-namespace-resource_id
 	// Phase4 01_：cost_cloud_bill_summary
 	cloudBillSummaries map[string]CloudBillSummary // key: day-billing_cycle
+	monthlyRaw         map[string]*CloudBillMonthlyRaw // key: billing_cycle
 }
 
 // MockTransaction is a mock implementation of the Transaction interface.
@@ -969,20 +973,64 @@ func (m *MockRepository) GetCloudBillSummariesForBillingCycles(ctx context.Conte
 func (m *MockRepository) SaveCloudBillDailyRaw(ctx context.Context, r CloudBillDailyRaw) error {
 	return nil
 }
-func (m *MockRepository) GetCloudBillDailyRaw(ctx context.Context, billDate time.Time) (*CloudBillDailyRaw, error) {
+func (m *MockRepository) GetCloudBillDailyRaw(ctx context.Context, billDate time.Time, accountID string) (*CloudBillDailyRaw, error) {
 	return nil, nil
 }
-func (m *MockRepository) DeleteCloudBillDailyRawForDate(ctx context.Context, billDate time.Time) error {
+func (m *MockRepository) DeleteCloudBillDailyRawForDate(ctx context.Context, billDate time.Time, accountID string) error {
 	return nil
 }
-func (m *MockRepository) ListMissingCloudBillDailyDates(ctx context.Context, from, to time.Time) ([]time.Time, error) {
+func (m *MockRepository) ListMissingCloudBillDailyDates(ctx context.Context, from, to time.Time, accountID string) ([]time.Time, error) {
 	return nil, nil
 }
 func (m *MockRepository) SaveCloudBillMonthlyRaw(ctx context.Context, r CloudBillMonthlyRaw) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.monthlyRaw == nil {
+		m.monthlyRaw = make(map[string]*CloudBillMonthlyRaw)
+	}
+	c := r
+	key := r.BillingCycle + "|" + r.AccountID
+	m.monthlyRaw[key] = &c
 	return nil
 }
-func (m *MockRepository) GetCloudBillMonthlyRaw(ctx context.Context, billingCycle string) (*CloudBillMonthlyRaw, error) {
+func (m *MockRepository) GetCloudBillMonthlyRaw(ctx context.Context, billingCycle, accountID string) (*CloudBillMonthlyRaw, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.monthlyRaw != nil {
+		key := billingCycle + "|" + accountID
+		if v, ok := m.monthlyRaw[key]; ok {
+			return v, nil
+		}
+	}
 	return nil, nil
+}
+func (m *MockRepository) ListCloudBillMonthlyRawByCycle(ctx context.Context, billingCycle string) ([]CloudBillMonthlyRaw, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var out []CloudBillMonthlyRaw
+	if m.monthlyRaw != nil {
+		prefix := billingCycle + "|"
+		for k, v := range m.monthlyRaw {
+			if strings.HasPrefix(k, prefix) && v != nil {
+				out = append(out, *v)
+			}
+		}
+	}
+	return out, nil
+}
+func (m *MockRepository) DeleteCloudBillMonthlyRawOlderThan(ctx context.Context, cutoffBillingCycle string, accountID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.monthlyRaw == nil {
+		return nil
+	}
+	for k := range m.monthlyRaw {
+		parts := strings.SplitN(k, "|", 2)
+		if len(parts) >= 2 && parts[1] == accountID && parts[0] < cutoffBillingCycle {
+			delete(m.monthlyRaw, k)
+		}
+	}
+	return nil
 }
 func (m *MockRepository) SaveCloudBillAggregate(ctx context.Context, a CloudBillAggregate) error {
 	return nil
@@ -990,10 +1038,10 @@ func (m *MockRepository) SaveCloudBillAggregate(ctx context.Context, a CloudBill
 func (m *MockRepository) GetCloudBillAggregate(ctx context.Context, reportType, periodKey string) (*CloudBillAggregate, error) {
 	return nil, nil
 }
-func (m *MockRepository) DeleteCloudBillAggregateExcept(ctx context.Context, reportType string, keepPeriodKeys []string) error {
+func (m *MockRepository) DeleteCloudBillAggregateExcept(ctx context.Context, reportType string, keepPeriodKeys []string, accountID string) error {
 	return nil
 }
-func (m *MockRepository) ListCloudBillDailyRawFromTo(ctx context.Context, from, to time.Time) ([]CloudBillDailyRaw, error) {
+func (m *MockRepository) ListCloudBillDailyRawFromTo(ctx context.Context, from, to time.Time, accountID string) ([]CloudBillDailyRaw, error) {
 	return nil, nil
 }
 func (m *MockRepository) ListEnvAccountConfig(ctx context.Context) ([]EnvAccountConfig, error) {
@@ -1001,6 +1049,9 @@ func (m *MockRepository) ListEnvAccountConfig(ctx context.Context) ([]EnvAccount
 }
 func (m *MockRepository) GetProductCategory(ctx context.Context, productCode string) (string, bool) {
 	return "", false
+}
+func (m *MockRepository) UpsertProductCategory(ctx context.Context, productCode, category string) error {
+	return nil
 }
 func (m *MockRepository) ListCloudBillAggregateForReportPeriod(ctx context.Context, reportType, periodKey, metricType string) ([]CloudBillAggregate, error) {
 	return nil, nil
@@ -1518,20 +1569,26 @@ func (tr *transactionRepository) GetCloudBillSummariesForBillingCycles(ctx conte
 func (tr *transactionRepository) SaveCloudBillDailyRaw(ctx context.Context, r CloudBillDailyRaw) error {
 	return tr.tx.repo.SaveCloudBillDailyRaw(ctx, r)
 }
-func (tr *transactionRepository) GetCloudBillDailyRaw(ctx context.Context, billDate time.Time) (*CloudBillDailyRaw, error) {
-	return tr.tx.repo.GetCloudBillDailyRaw(ctx, billDate)
+func (tr *transactionRepository) GetCloudBillDailyRaw(ctx context.Context, billDate time.Time, accountID string) (*CloudBillDailyRaw, error) {
+	return tr.tx.repo.GetCloudBillDailyRaw(ctx, billDate, accountID)
 }
-func (tr *transactionRepository) DeleteCloudBillDailyRawForDate(ctx context.Context, billDate time.Time) error {
-	return tr.tx.repo.DeleteCloudBillDailyRawForDate(ctx, billDate)
+func (tr *transactionRepository) DeleteCloudBillDailyRawForDate(ctx context.Context, billDate time.Time, accountID string) error {
+	return tr.tx.repo.DeleteCloudBillDailyRawForDate(ctx, billDate, accountID)
 }
-func (tr *transactionRepository) ListMissingCloudBillDailyDates(ctx context.Context, from, to time.Time) ([]time.Time, error) {
-	return tr.tx.repo.ListMissingCloudBillDailyDates(ctx, from, to)
+func (tr *transactionRepository) ListMissingCloudBillDailyDates(ctx context.Context, from, to time.Time, accountID string) ([]time.Time, error) {
+	return tr.tx.repo.ListMissingCloudBillDailyDates(ctx, from, to, accountID)
 }
 func (tr *transactionRepository) SaveCloudBillMonthlyRaw(ctx context.Context, r CloudBillMonthlyRaw) error {
 	return tr.tx.repo.SaveCloudBillMonthlyRaw(ctx, r)
 }
-func (tr *transactionRepository) GetCloudBillMonthlyRaw(ctx context.Context, billingCycle string) (*CloudBillMonthlyRaw, error) {
-	return tr.tx.repo.GetCloudBillMonthlyRaw(ctx, billingCycle)
+func (tr *transactionRepository) GetCloudBillMonthlyRaw(ctx context.Context, billingCycle, accountID string) (*CloudBillMonthlyRaw, error) {
+	return tr.tx.repo.GetCloudBillMonthlyRaw(ctx, billingCycle, accountID)
+}
+func (tr *transactionRepository) ListCloudBillMonthlyRawByCycle(ctx context.Context, billingCycle string) ([]CloudBillMonthlyRaw, error) {
+	return tr.tx.repo.ListCloudBillMonthlyRawByCycle(ctx, billingCycle)
+}
+func (tr *transactionRepository) DeleteCloudBillMonthlyRawOlderThan(ctx context.Context, cutoffBillingCycle string, accountID string) error {
+	return tr.tx.repo.DeleteCloudBillMonthlyRawOlderThan(ctx, cutoffBillingCycle, accountID)
 }
 func (tr *transactionRepository) SaveCloudBillAggregate(ctx context.Context, a CloudBillAggregate) error {
 	return tr.tx.repo.SaveCloudBillAggregate(ctx, a)
@@ -1539,17 +1596,20 @@ func (tr *transactionRepository) SaveCloudBillAggregate(ctx context.Context, a C
 func (tr *transactionRepository) GetCloudBillAggregate(ctx context.Context, reportType, periodKey string) (*CloudBillAggregate, error) {
 	return tr.tx.repo.GetCloudBillAggregate(ctx, reportType, periodKey)
 }
-func (tr *transactionRepository) DeleteCloudBillAggregateExcept(ctx context.Context, reportType string, keepPeriodKeys []string) error {
-	return tr.tx.repo.DeleteCloudBillAggregateExcept(ctx, reportType, keepPeriodKeys)
+func (tr *transactionRepository) DeleteCloudBillAggregateExcept(ctx context.Context, reportType string, keepPeriodKeys []string, accountID string) error {
+	return tr.tx.repo.DeleteCloudBillAggregateExcept(ctx, reportType, keepPeriodKeys, accountID)
 }
-func (tr *transactionRepository) ListCloudBillDailyRawFromTo(ctx context.Context, from, to time.Time) ([]CloudBillDailyRaw, error) {
-	return tr.tx.repo.ListCloudBillDailyRawFromTo(ctx, from, to)
+func (tr *transactionRepository) ListCloudBillDailyRawFromTo(ctx context.Context, from, to time.Time, accountID string) ([]CloudBillDailyRaw, error) {
+	return tr.tx.repo.ListCloudBillDailyRawFromTo(ctx, from, to, accountID)
 }
 func (tr *transactionRepository) ListEnvAccountConfig(ctx context.Context) ([]EnvAccountConfig, error) {
 	return tr.tx.repo.ListEnvAccountConfig(ctx)
 }
 func (tr *transactionRepository) GetProductCategory(ctx context.Context, productCode string) (string, bool) {
 	return tr.tx.repo.GetProductCategory(ctx, productCode)
+}
+func (tr *transactionRepository) UpsertProductCategory(ctx context.Context, productCode, category string) error {
+	return tr.tx.repo.UpsertProductCategory(ctx, productCode, category)
 }
 func (tr *transactionRepository) ListCloudBillAggregateForReportPeriod(ctx context.Context, reportType, periodKey, metricType string) ([]CloudBillAggregate, error) {
 	return tr.tx.repo.ListCloudBillAggregateForReportPeriod(ctx, reportType, periodKey, metricType)
@@ -1573,6 +1633,9 @@ func (tr *transactionRepository) ListCloudBillLineItemsByDate(ctx context.Contex
 func (tr *transactionRepository) ListCloudBillLineItemsByBillingCycle(ctx context.Context, billingCycle, accountID string) ([]CloudBillLineItem, error) {
 	return nil, nil
 }
+func (tr *transactionRepository) ListDistinctBillingCyclesInDateRange(ctx context.Context, from, to time.Time, accountID string) ([]string, error) {
+	return nil, nil
+}
 func (tr *transactionRepository) SumLineItemsCashByBillingCycle(ctx context.Context, billingCycle, accountID string) (float64, error) {
 	return 0, nil
 }
@@ -1594,6 +1657,9 @@ func (m *MockRepository) ListCloudBillLineItemsByDate(ctx context.Context, billD
 	return nil, nil
 }
 func (m *MockRepository) ListCloudBillLineItemsByBillingCycle(ctx context.Context, billingCycle, accountID string) ([]CloudBillLineItem, error) {
+	return nil, nil
+}
+func (m *MockRepository) ListDistinctBillingCyclesInDateRange(ctx context.Context, from, to time.Time, accountID string) ([]string, error) {
 	return nil, nil
 }
 func (m *MockRepository) SumLineItemsCashByBillingCycle(ctx context.Context, billingCycle, accountID string) (float64, error) {

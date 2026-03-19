@@ -1,0 +1,32 @@
+# [Ref: 04_Phase4/01_成本透视真实数据] 后端镜像：构建上下文 lighthouse-src，多阶段 deps→builder→runtime，依赖层缓存避免每次 go mod download
+ARG GIT_COMMIT=
+ARG BUILD_TIME=
+ARG VERSION=0.1.0
+
+# 阶段 1：依赖层（仅 go.mod/go.sum 变更时重建）
+FROM docker.io/library/golang:1.24-alpine AS deps
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+
+# 阶段 2：构建
+FROM deps AS builder
+WORKDIR /app
+ARG GIT_COMMIT
+ARG BUILD_TIME
+ARG VERSION
+COPY . .
+RUN CGO_ENABLED=0 go build \
+  -ldflags="-X main.Version=${VERSION} -X main.GitCommit=${GIT_COMMIT} -X main.BuildTime=${BUILD_TIME}" \
+  -o /server ./cmd/server
+
+FROM docker.io/library/alpine:3.20
+RUN apk --no-cache add ca-certificates wget
+RUN adduser -D -u 65532 nonroot
+WORKDIR /app
+COPY --from=builder /server .
+USER nonroot:nonroot
+EXPOSE 8080
+ENTRYPOINT ["/app/server"]
+HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
+  CMD wget -q -O- http://127.0.0.1:8080/health || exit 1

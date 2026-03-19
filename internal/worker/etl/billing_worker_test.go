@@ -34,7 +34,7 @@ func (m *mockPipelineRepo) SaveCloudBillDailyRaw(ctx context.Context, r postgres
 	m.dailyRawCnt = len(r.ProductBreakdown)
 	return nil
 }
-func (m *mockPipelineRepo) GetCloudBillDailyRaw(ctx context.Context, billDate time.Time) (*postgres.CloudBillDailyRaw, error) {
+func (m *mockPipelineRepo) GetCloudBillDailyRaw(ctx context.Context, billDate time.Time, accountID string) (*postgres.CloudBillDailyRaw, error) {
 	if m.dailyRaw.BillDate.IsZero() {
 		return nil, nil
 	}
@@ -43,19 +43,24 @@ func (m *mockPipelineRepo) GetCloudBillDailyRaw(ctx context.Context, billDate ti
 	}
 	return nil, nil
 }
-func (m *mockPipelineRepo) DeleteCloudBillDailyRawForDate(ctx context.Context, billDate time.Time) error { return nil }
-func (m *mockPipelineRepo) ListMissingCloudBillDailyDates(ctx context.Context, from, to time.Time) ([]time.Time, error) {
+func (m *mockPipelineRepo) DeleteCloudBillDailyRawForDate(ctx context.Context, billDate time.Time, accountID string) error {
+	return nil
+}
+func (m *mockPipelineRepo) ListMissingCloudBillDailyDates(ctx context.Context, from, to time.Time, accountID string) ([]time.Time, error) {
 	return nil, nil
 }
 func (m *mockPipelineRepo) SaveCloudBillMonthlyRaw(ctx context.Context, r postgres.CloudBillMonthlyRaw) error {
 	m.monthlyRaw = &r
 	return nil
 }
-func (m *mockPipelineRepo) GetCloudBillMonthlyRaw(ctx context.Context, billingCycle string) (*postgres.CloudBillMonthlyRaw, error) {
+func (m *mockPipelineRepo) GetCloudBillMonthlyRaw(ctx context.Context, billingCycle, accountID string) (*postgres.CloudBillMonthlyRaw, error) {
 	if m.monthlyRaw != nil && m.monthlyRaw.BillingCycle == billingCycle {
 		return m.monthlyRaw, nil
 	}
 	return nil, nil
+}
+func (m *mockPipelineRepo) DeleteCloudBillMonthlyRawOlderThan(ctx context.Context, cutoffBillingCycle string, accountID string) error {
+	return nil
 }
 func (m *mockPipelineRepo) SaveCloudBillAggregate(ctx context.Context, a postgres.CloudBillAggregate) error {
 	m.aggregate = &a
@@ -68,13 +73,13 @@ func (m *mockPipelineRepo) GetCloudBillAggregate(ctx context.Context, reportType
 	}
 	return nil, nil
 }
-func (m *mockPipelineRepo) ListCloudBillDailyRawFromTo(ctx context.Context, from, to time.Time) ([]postgres.CloudBillDailyRaw, error) {
+func (m *mockPipelineRepo) ListCloudBillDailyRawFromTo(ctx context.Context, from, to time.Time, accountID string) ([]postgres.CloudBillDailyRaw, error) {
 	if !m.dailyRaw.BillDate.IsZero() && !m.dailyRaw.BillDate.Before(from) && !m.dailyRaw.BillDate.After(to) {
 		return []postgres.CloudBillDailyRaw{m.dailyRaw}, nil
 	}
 	return nil, nil
 }
-func (m *mockPipelineRepo) DeleteCloudBillAggregateExcept(ctx context.Context, reportType string, keepPeriodKeys []string) error {
+func (m *mockPipelineRepo) DeleteCloudBillAggregateExcept(ctx context.Context, reportType string, keepPeriodKeys []string, accountID string) error {
 	return nil
 }
 
@@ -88,11 +93,17 @@ func (m *mockPipelineRepo) ListCloudBillLineItemsByDate(ctx context.Context, bil
 func (m *mockPipelineRepo) ListCloudBillLineItemsByBillingCycle(ctx context.Context, billingCycle, accountID string) ([]postgres.CloudBillLineItem, error) {
 	return nil, nil
 }
+func (m *mockPipelineRepo) ListDistinctBillingCyclesInDateRange(ctx context.Context, from, to time.Time, accountID string) ([]string, error) {
+	return nil, nil
+}
 func (m *mockPipelineRepo) SumLineItemsCashByBillingCycle(ctx context.Context, billingCycle, accountID string) (float64, error) {
 	return 0, nil
 }
 func (m *mockPipelineRepo) GetProductCategory(ctx context.Context, productCode string) (string, bool) {
 	return "other", true
+}
+func (m *mockPipelineRepo) UpsertProductCategory(ctx context.Context, productCode, category string) error {
+	return nil
 }
 func (m *mockPipelineRepo) DeleteLineItemsOlderThan(ctx context.Context, before time.Time, accountID string) error {
 	return nil

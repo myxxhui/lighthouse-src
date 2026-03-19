@@ -18,7 +18,7 @@ export interface GlobalCostApiResponse {
   env_breakdown?: EnvBreakdownApiItem[];
   namespaces: NamespaceCostSummaryApiItem[];
   timestamp: string;
-  metadata?: { last_updated_at?: string; data_status?: string; bill_data_status?: string };
+  metadata?: { last_updated_at?: string; data_status?: string; bill_data_status?: string; display_note?: string };
 }
 
 export interface EnvBreakdownApiItem {
@@ -80,6 +80,7 @@ export function adaptGlobalCostToCostMetrics(res: GlobalCostApiResponse): CostMe
   const lastUpdatedAt =
     res.metadata?.last_updated_at != null ? res.metadata.last_updated_at : undefined;
   const billDataStatus = res.metadata?.bill_data_status ?? res.metadata?.data_status;
+  const displayNote = res.metadata?.display_note ?? undefined;
   const envBreakdown: EnvBreakdownItem[] | undefined = res.env_breakdown?.map((e) => ({
     environment: e.environment,
     account_id: e.account_id,
@@ -107,6 +108,7 @@ export function adaptGlobalCostToCostMetrics(res: GlobalCostApiResponse): CostMe
     billDetail,
     lastUpdatedAt,
     billDataStatus,
+    displayNote,
   };
 }
 

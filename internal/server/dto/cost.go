@@ -40,6 +40,8 @@ type GlobalCostMetadata struct {
 	BillDataStatus string     `json:"bill_data_status,omitempty"` // 账单对账状态（来自 month_status 表）
 	ReportType     string     `json:"report_type,omitempty"`      // 1d|7d|30d|month|quarter 等，对应聚合表 report_type
 	PeriodKey      string     `json:"period_key,omitempty"`       // 对应聚合表 period_key，用于校验当前时间范围
+	// DisplayNote 展示说明：月粒度周期内净退款导致现金合计为负时，后端将金额展示为 0 并设置本字段，前端可展示「该周期净退款已抵减」
+	DisplayNote string `json:"display_note,omitempty"`
 }
 
 // EnvBreakdownItem 按环境（POC/FAT/UAT/PROD）的总账与对比。[Ref: 01_设计 §按环境展示、12_API GlobalCostResponse]
@@ -72,11 +74,12 @@ type EnvDrilldownItem struct {
 	Category    string  `json:"category"` // compute|network|storage|security|other
 }
 
-// CostTrendDataPoint 成本趋势按日数据点。[Ref: 12_API GET /api/v1/cost/trend]
+// CostTrendDataPoint 成本趋势按日/按月数据点。[Ref: 12_API GET /api/v1/cost/trend]
 type CostTrendDataPoint struct {
-	Date       string             `json:"date"`        // YYYY-MM-DD
-	TotalCost  float64            `json:"total_cost,omitempty"`
-	ByDomain   map[string]float64 `json:"by_domain,omitempty"`
+	Date      string             `json:"date"`
+	TotalCost float64            `json:"total_cost"`
+	ByDomain  map[string]float64 `json:"by_domain,omitempty"`
+	ByProduct map[string]float64 `json:"by_product,omitempty"`
 }
 
 // CostTrendResponse 成本结构趋势响应；最大 90 天、超时 10s。[Ref: 01_设计 §成本趋势 API、12_API]

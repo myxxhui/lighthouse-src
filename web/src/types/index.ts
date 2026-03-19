@@ -1,15 +1,12 @@
 /** 成本透视时间范围 [Ref: 01_实践 front_end_time_ranges] */
 export type CostTimeRange =
-  | '1d'          // 昨天
-  | 'this_week'   // 这周：ISO 周周一至昨日
-  | 'last_week'   // 上周
-  | 'month'       // 这月
+  | 'month'       // 本月
   | 'last_month'  // 上月
   | 'quarter'     // 这季度
   | 'last_quarter'// 上季度
-  | 'this_year'   // 今年：1月1日至昨日
-  | 'last_year'   // 去年：上一自然年
-  | 'custom';     // 自定义（最多6个月内）
+  | 'this_year'   // 今年
+  | 'last_year'   // 去年
+  | 'custom';     // 自定义（月范围，最多3年）
 
 /** 成本对比模式 */
 export type CostCompareMode = 'none' | 'previous';
@@ -67,6 +64,8 @@ export interface CostMetrics {
    *   undefined   → 未知/不适用
    */
   billDataStatus?: string;
+  /** 展示说明：月粒度周期净退款已抵减时后端返回，前端可展示「该周期净退款已抵减」 */
+  displayNote?: string;
 }
 
 /** 产品级成本（账单详情 top-N 与详情跳转） */

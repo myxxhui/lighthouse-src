@@ -33,6 +33,8 @@ export interface CostQueryParams {
   /** D8-2/D8-5：日期选择，最多最近 6 个月内 */
   date_from?: string;
   date_to?: string;
+  /** 环境多选，逗号分隔，如 POC,FAT；不传或 all 表示全环境 [Ref: 用户需求 环境多选] */
+  envs?: string;
 }
 
 export const costService = {
@@ -46,6 +48,7 @@ export const costService = {
       if (params?.compareMode != null) query.compareMode = params.compareMode;
       if (params?.date_from != null) query.date_from = params.date_from;
       if (params?.date_to != null) query.date_to = params.date_to;
+      if (params?.envs != null && params.envs !== '') query.envs = params.envs;
       const config: { params: Record<string, string | undefined>; timeout?: number } = { params: query };
       if (params?.date_from != null && params?.date_to != null) {
         config.timeout = costService.DATE_RANGE_REQUEST_TIMEOUT_MS;
@@ -157,22 +160,23 @@ export const costService = {
     date_to?: string;
     /** 按环境过滤趋势数据，'all' 或空值表示全环境 */
     env?: string;
-  }): Promise<{ data: Array<{ date: string; total_cost: number; by_domain?: Record<string, number> }> }> {
+  }): Promise<{ data: Array<{ date: string; total_cost: number; by_domain?: Record<string, number>; by_product?: Record<string, number> }> }> {
     const query: Record<string, string> = {};
     if (params?.period) query.period = params.period;
     if (params?.date_from) query.date_from = params.date_from;
     if (params?.date_to) query.date_to = params.date_to;
     if (params?.env && params.env !== 'all') query.env = params.env;
-    const response = await apiClient.get<{ data: Array<{ date: string; total_cost?: number; by_domain?: Record<string, number> }> }>(
+    const response = await apiClient.get<{ data: Array<{ date: string; total_cost?: number; by_domain?: Record<string, number>; by_product?: Record<string, number> }> }>(
       `${COST_API_PREFIX}/trend`,
       { params: query, timeout: 15000 },
     );
     const data = response.data?.data ?? [];
     return {
-      data: data.map((d: { date: string; total_cost?: number; by_domain?: Record<string, number> }) => ({
+      data: data.map((d: { date: string; total_cost?: number; by_domain?: Record<string, number>; by_product?: Record<string, number> }) => ({
         date: d.date,
         total_cost: d.total_cost ?? 0,
         by_domain: d.by_domain,
+        by_product: d.by_product,
       })),
     };
   },

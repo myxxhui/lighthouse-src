@@ -66,7 +66,7 @@ func TestBillingWorker_Integration_RealPG_ETLThenGetGlobalCost(t *testing.T) {
 
 	// CostService 读同一 repo，应得到刚落库的数据
 	costSvc := service.NewCostService(repo)
-	resp, err := costSvc.GetGlobalCost(ctx, "month")
+	resp, err := costSvc.GetGlobalCost(ctx, "month", "payment", nil)
 	if err != nil {
 		t.Fatalf("GetGlobalCost: %v", err)
 	}

@@ -47,6 +47,12 @@ func main() {
 		cycle = time.Now().Format("2006-01")
 	}
 	worker := etl.NewBillingWorker(fetcher, repo, cycle)
+	worker.ETLData = &etl.ETLDataConfig{
+		DailyPullMonths:        cfg.CloudBilling.ETLData.DailyPullMonths,
+		DailyRetentionMonths:   cfg.CloudBilling.ETLData.DailyRetentionMonths,
+		MonthlyPullMonths:     cfg.CloudBilling.ETLData.MonthlyPullMonths,
+		MonthlyRetentionMonths: cfg.CloudBilling.ETLData.MonthlyRetentionMonths,
+	}
 	worker.OnPipelineFailAlert = func(step string, err error) {
 		log.Printf("WARN: billing backfill [%s]: %v", step, err)
 	}
@@ -116,5 +122,25 @@ func fillCloudBillingFromEnv(cfg *config.Config) {
 	}
 	if v := os.Getenv("CLOUD_BILLING_PERIOD"); v != "" {
 		cfg.CloudBilling.PeriodType = v
+	}
+	if v := os.Getenv("BILLING_DAILY_PULL_MONTHS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.CloudBilling.ETLData.DailyPullMonths = n
+		}
+	}
+	if v := os.Getenv("BILLING_DAILY_RETENTION_MONTHS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.CloudBilling.ETLData.DailyRetentionMonths = n
+		}
+	}
+	if v := os.Getenv("BILLING_MONTHLY_PULL_MONTHS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.CloudBilling.ETLData.MonthlyPullMonths = n
+		}
+	}
+	if v := os.Getenv("BILLING_MONTHLY_RETENTION_MONTHS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.CloudBilling.ETLData.MonthlyRetentionMonths = n
+		}
 	}
 }
