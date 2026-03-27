@@ -9,7 +9,7 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 
-# 阶段 2：构建
+# 阶段 2：构建（server + billing-backfill 供按需全量回填）[Ref: D2-6 去年/自定义月范围]
 FROM deps AS builder
 WORKDIR /app
 ARG GIT_COMMIT
@@ -19,12 +19,14 @@ COPY . .
 RUN CGO_ENABLED=0 go build \
   -ldflags="-X main.Version=${VERSION} -X main.GitCommit=${GIT_COMMIT} -X main.BuildTime=${BUILD_TIME}" \
   -o /server ./cmd/server
+RUN CGO_ENABLED=0 go build -o /billing-backfill ./cmd/billing-backfill
 
 FROM docker.io/library/alpine:3.20
 RUN apk --no-cache add ca-certificates wget
 RUN adduser -D -u 65532 nonroot
 WORKDIR /app
 COPY --from=builder /server .
+COPY --from=builder /billing-backfill .
 USER nonroot:nonroot
 EXPOSE 8080
 ENTRYPOINT ["/app/server"]

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"math"
+	"reflect"
 	"testing"
 	"time"
 
@@ -12,17 +13,104 @@ import (
 
 func TestNewCostService(t *testing.T) {
 	repo := postgres.NewMockRepository(postgres.DefaultMockConfig())
-	svc := NewCostService(repo)
+	svc := NewCostService(repo, "", nil)
 	if svc == nil {
 		t.Fatal("NewCostService returned nil")
 	}
 }
 
+func TestFinanceAccountIDsForPUBFromConfigs(t *testing.T) {
+	t.Parallel()
+	allPh := []postgres.EnvAccountConfig{
+		{Environment: "POC", AccountID: "POC"},
+		{Environment: "UAT", AccountID: "UAT"},
+	}
+	if got := financeAccountIDsForPUBFromConfigs(allPh, nil); got != nil {
+		t.Fatalf("all placeholders want nil, got %#v", got)
+	}
+	allReal := []postgres.EnvAccountConfig{
+		{Environment: "POC", AccountID: "1234567890123456"},
+		{Environment: "UAT", AccountID: "9876543210987654"},
+	}
+	got := financeAccountIDsForPUBFromConfigs(allReal, nil)
+	want := []string{"1234567890123456", "9876543210987654"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v want %#v", got, want)
+	}
+	mixed := []postgres.EnvAccountConfig{
+		{Environment: "POC", AccountID: "POC"},
+		{Environment: "UAT", AccountID: "999"},
+	}
+	if g := financeAccountIDsForPUBFromConfigs(mixed, nil); g != nil {
+		t.Fatalf("mixed want nil, got %#v", g)
+	}
+}
+
+func TestAggregateHeroTotalsFromDedupedList_duplicatePlaceholderAndRealID(t *testing.T) {
+	t.Parallel()
+	cfg := []postgres.EnvAccountConfig{
+		{Environment: "POC", AccountID: "1657988574642393"},
+		{Environment: "UAT", AccountID: "UAT"},
+	}
+	rows := []postgres.CloudBillAggregate{
+		{AccountID: "POC", TotalAmount: 100, ProductBreakdown: map[string]float64{"计算资源": 100}},
+		{AccountID: "1657988574642393", TotalAmount: 100, ProductBreakdown: map[string]float64{"计算资源": 100}},
+		{AccountID: "UAT", TotalAmount: 50, ProductBreakdown: map[string]float64{"存储": 50}},
+	}
+	total, merged, err := aggregateHeroTotalsFromDedupedList(rows, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// POC 仅计 165 一行（与 buildEnvBreakdownFromList 一致），不 100+100
+	if math.Abs(total-150) > 1e-6 {
+		t.Fatalf("total %v want 150", total)
+	}
+	if math.Abs(merged["计算资源"]-100) > 1e-6 || math.Abs(merged["存储"]-50) > 1e-6 {
+		t.Fatalf("merged %#v", merged)
+	}
+}
+
+func TestSumPerEnvFromAccountMap_duplicatePlaceholderAndRealID(t *testing.T) {
+	t.Parallel()
+	cfg := []postgres.EnvAccountConfig{
+		{Environment: "POC", AccountID: "5823052810429629"},
+		{Environment: "UAT", AccountID: "UAT"},
+	}
+	cur := map[string]float64{
+		"POC":              3542.85,
+		"5823052810429629": 3542.85,
+		"UAT":              539.33,
+		"1657988574642393": 539.33,
+	}
+	got := sumPerEnvFromAccountMap(cur, cfg)
+	want := 3542.85 + 539.33
+	if math.Abs(got-want) > 1e-2 {
+		t.Fatalf("sumPerEnvFromAccountMap got %v want %v", got, want)
+	}
+}
+
+func TestMatchEnvAccountConfig(t *testing.T) {
+	t.Parallel()
+	cfgF := []postgres.EnvAccountConfig{
+		{Environment: "POC", AccountID: "5823052810429629"},
+		{Environment: "UAT", AccountID: "1657988574642393"},
+	}
+	if c := matchEnvAccountConfig(cfgF, dto.EnvBreakdownItem{Environment: "POC", AccountID: "5823052810429629"}); c == nil || c.AccountID != "5823052810429629" {
+		t.Fatalf("POC exact match: got %#v", c)
+	}
+	if c := matchEnvAccountConfig(cfgF, dto.EnvBreakdownItem{Environment: "UAT", AccountID: ""}); c == nil || c.Environment != "UAT" {
+		t.Fatalf("UAT single row empty account_id: got %#v", c)
+	}
+	if c := matchEnvAccountConfig(cfgF, dto.EnvBreakdownItem{Environment: "POC", AccountID: "wrong"}); c != nil {
+		t.Fatalf("mismatch account_id want nil, got %#v", c)
+	}
+}
+
 func TestCostService_GetGlobalCost(t *testing.T) {
 	repo := postgres.NewMockRepository(postgres.DefaultMockConfig())
-	svc := NewCostService(repo)
+	svc := NewCostService(repo, "", nil)
 	ctx := context.Background()
-	resp, err := svc.GetGlobalCost(ctx, "month", "consumption", nil)
+	resp, err := svc.GetGlobalCost(ctx, "month", "consumption", nil, "")
 	if err != nil {
 		t.Fatalf("GetGlobalCost: %v", err)
 	}
@@ -34,31 +122,33 @@ func TestCostService_GetGlobalCost(t *testing.T) {
 	}
 }
 
-// TestCostService_GetGlobalCost_CloudBill 验证有 monthly_raw（上月）时返回月表现金 total 与 domain_breakdown（01_）。本月走日表，故用 last_month 测月表。
+// TestCostService_GetGlobalCost_CloudBill 验证有 cost_cloud_bill_aggregate（上月 payment）时返回 total 与 domain_breakdown。[Ref: 聚合表主路径]
 func TestCostService_GetGlobalCost_CloudBill(t *testing.T) {
 	repo := postgres.NewMockRepository(postgres.DefaultMockConfig())
 	ctx := context.Background()
 	prevCycle := time.Now().UTC().AddDate(0, -1, 0).Format("2006-01")
 	snap := time.Now()
-	err := repo.SaveCloudBillMonthlyRaw(ctx, postgres.CloudBillMonthlyRaw{
-		BillingCycle:         prevCycle,
-		TotalAmount:          125000,
-		ProductBreakdown:     map[string]float64{"计算资源": 85000, "存储": 25000, "网络": 15000},
-		CashTotalAmount:      125000,
-		CashProductBreakdown: map[string]float64{"计算资源": 85000, "存储": 25000, "网络": 15000},
-		SnapshotAt:           snap,
-		CreatedAt:            snap,
+	err := repo.SaveCloudBillAggregate(ctx, postgres.CloudBillAggregate{
+		ReportType:       "last_month",
+		PeriodKey:        prevCycle,
+		MetricType:       "payment",
+		TotalAmount:      125000,
+		ProductBreakdown: map[string]float64{"计算资源": 85000, "存储": 25000, "网络": 15000},
+		AccountID:        "default",
+		LastSuccessAt:    &snap,
+		CreatedAt:        snap,
+		UpdatedAt:        snap,
 	})
 	if err != nil {
-		t.Fatalf("SaveCloudBillMonthlyRaw: %v", err)
+		t.Fatalf("SaveCloudBillAggregate: %v", err)
 	}
-	svc := NewCostService(repo)
-	resp, err := svc.GetGlobalCost(ctx, "last_month", "payment", nil)
+	svc := NewCostService(repo, "", nil)
+	resp, err := svc.GetGlobalCost(ctx, "last_month", "payment", nil, "")
 	if err != nil {
 		t.Fatalf("GetGlobalCost: %v", err)
 	}
 	if resp.TotalCost != 125000 {
-		t.Errorf("TotalCost = %v, want 125000 (from monthly_raw)", resp.TotalCost)
+		t.Errorf("TotalCost = %v, want 125000 (from aggregate)", resp.TotalCost)
 	}
 	if len(resp.DomainBreakdown) != 5 {
 		t.Errorf("DomainBreakdown len = %d, want 5", len(resp.DomainBreakdown))
@@ -72,24 +162,47 @@ func TestCostService_GetGlobalCost_CloudBill(t *testing.T) {
 	}
 }
 
-// TestCostService_GetGlobalCost_CloudBillZero 验证 monthly_raw total=0 时不回退到 L1。
-func TestCostService_GetGlobalCost_CloudBillZero(t *testing.T) {
+// TestCostService_GetGlobalCost_EffectiveTrack 合法 track 时写入 metadata.effective_track。[Ref: 03_Phase6/01_FinOps双轨语义与全域成本契约_设计 §API、track 与 UX]
+func TestCostService_GetGlobalCost_EffectiveTrack(t *testing.T) {
 	repo := postgres.NewMockRepository(postgres.DefaultMockConfig())
+	svc := NewCostService(repo, "", nil)
 	ctx := context.Background()
-	svc := NewCostService(repo)
-	resp, err := svc.GetGlobalCost(ctx, "month", "payment", nil)
+	resp, err := svc.GetGlobalCost(ctx, "month", "payment", nil, "technical")
 	if err != nil {
 		t.Fatalf("GetGlobalCost: %v", err)
 	}
-	// 无 monthly_raw 和 daily_raw 时，会回退到 L1 聚合（mock 返回默认数据或空结构）
+	if resp.Metadata == nil || resp.Metadata.EffectiveTrack != "technical" {
+		t.Fatalf("EffectiveTrack want technical, got %+v", resp.Metadata)
+	}
+	resp2, err := svc.GetGlobalCost(ctx, "month", "payment", nil, "")
+	if err != nil {
+		t.Fatalf("GetGlobalCost: %v", err)
+	}
+	if resp2.Metadata != nil && resp2.Metadata.EffectiveTrack != "" {
+		t.Fatalf("legacy client should not set EffectiveTrack, got %+v", resp2.Metadata)
+	}
+}
+
+// TestCostService_GetGlobalCost_CloudBillZero 验证聚合表无数据时返回空结构，不降级。[Ref: 聚合表主路径]
+func TestCostService_GetGlobalCost_CloudBillZero(t *testing.T) {
+	repo := postgres.NewMockRepository(postgres.DefaultMockConfig())
+	ctx := context.Background()
+	svc := NewCostService(repo, "", nil)
+	resp, err := svc.GetGlobalCost(ctx, "month", "payment", nil, "")
+	if err != nil {
+		t.Fatalf("GetGlobalCost: %v", err)
+	}
 	if resp == nil {
 		t.Fatal("response should not be nil")
+	}
+	if resp.TotalCost != 0 {
+		t.Errorf("TotalCost = %v, want 0 (aggregate empty)", resp.TotalCost)
 	}
 }
 
 func TestCostService_MixedQueryTimeSeries(t *testing.T) {
 	repo := postgres.NewMockRepository(postgres.DefaultMockConfig())
-	svc := NewCostService(repo)
+	svc := NewCostService(repo, "", nil)
 	ctx := context.Background()
 	start := time.Now().Add(-24 * time.Hour)
 	end := time.Now()
@@ -100,6 +213,76 @@ func TestCostService_MixedQueryTimeSeries(t *testing.T) {
 	// Phase3 占位返回空
 	if pts != nil {
 		t.Errorf("Phase3 placeholder expected nil, got len=%d", len(pts))
+	}
+}
+
+// TestGlobalMetricTypeForTrack_Contract 全域聚合读数与 drilldown 双轨一致：technical→consumption；finance→metricTypeForPeriod；空 track 保持旧语义。[Ref: 03_Phase6/01_FinOps]
+func TestGlobalMetricTypeForTrack_Contract(t *testing.T) {
+	tests := []struct {
+		track, reportType, want string
+	}{
+		{"technical", "last_month", "consumption"},
+		{"finance", "last_month", "payment"},
+		{"", "last_month", "payment"},
+		{"finance", "month", "consumption"},
+		{"technical", "month", "consumption"},
+		{"", "month", "consumption"},
+	}
+	for _, tc := range tests {
+		got := globalMetricTypeForTrack(tc.track, tc.reportType)
+		if got != tc.want {
+			t.Errorf("globalMetricTypeForTrack(%q,%q)=%q want %q", tc.track, tc.reportType, got, tc.want)
+		}
+	}
+}
+
+// TestCostService_GetGlobalCost_DomainBreakdownUsesTrackMetric 同账期 payment 与 consumption 并存时，track 决定读哪条聚合行（成本分解与 Hero 同源）。[Ref: 03_Phase6/01_FinOps]
+func TestCostService_GetGlobalCost_DomainBreakdownUsesTrackMetric(t *testing.T) {
+	repo := postgres.NewMockRepository(postgres.DefaultMockConfig())
+	ctx := context.Background()
+	prevCycle := time.Now().UTC().AddDate(0, -1, 0).Format("2006-01")
+	snap := time.Now()
+	acct := "a1"
+	if err := repo.SaveCloudBillAggregate(ctx, postgres.CloudBillAggregate{
+		ReportType:       "last_month",
+		PeriodKey:        prevCycle,
+		MetricType:       "payment",
+		TotalAmount:      100,
+		ProductBreakdown: map[string]float64{"计算资源": 100},
+		AccountID:        acct,
+		LastSuccessAt:    &snap,
+		CreatedAt:        snap,
+		UpdatedAt:        snap,
+	}); err != nil {
+		t.Fatalf("SaveCloudBillAggregate payment: %v", err)
+	}
+	if err := repo.SaveCloudBillAggregate(ctx, postgres.CloudBillAggregate{
+		ReportType:       "last_month",
+		PeriodKey:        prevCycle,
+		MetricType:       "consumption",
+		TotalAmount:      500,
+		ProductBreakdown: map[string]float64{"计算资源": 500},
+		AccountID:        acct,
+		LastSuccessAt:    &snap,
+		CreatedAt:        snap,
+		UpdatedAt:        snap,
+	}); err != nil {
+		t.Fatalf("SaveCloudBillAggregate consumption: %v", err)
+	}
+	svc := NewCostService(repo, "", nil)
+	respFin, err := svc.GetGlobalCost(ctx, "last_month", "payment", nil, "finance")
+	if err != nil {
+		t.Fatalf("GetGlobalCost finance: %v", err)
+	}
+	if respFin.TotalCost != 100 {
+		t.Errorf("finance TotalCost=%v want 100", respFin.TotalCost)
+	}
+	respTech, err := svc.GetGlobalCost(ctx, "last_month", "payment", nil, "technical")
+	if err != nil {
+		t.Fatalf("GetGlobalCost technical: %v", err)
+	}
+	if respTech.TotalCost != 500 {
+		t.Errorf("technical TotalCost=%v want 500", respTech.TotalCost)
 	}
 }
 

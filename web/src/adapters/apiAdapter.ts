@@ -5,6 +5,9 @@ import {
   DrilldownItem,
   DrilldownCostBreakdown,
   EnvBreakdownItem,
+  type CostTrack,
+  type FinOpsLedger,
+  type FinOpsReconciliation,
 } from '@/types';
 
 /**
@@ -18,7 +21,23 @@ export interface GlobalCostApiResponse {
   env_breakdown?: EnvBreakdownApiItem[];
   namespaces: NamespaceCostSummaryApiItem[];
   timestamp: string;
-  metadata?: { last_updated_at?: string; data_status?: string; bill_data_status?: string; display_note?: string };
+  metadata?: {
+    last_updated_at?: string;
+    data_status?: string;
+    bill_data_status?: string;
+    display_note?: string;
+    /** 后端在合法 track 请求下返回 [Ref: 03_Phase6/01_FinOps双轨语义与全域成本契约_设计 §API、track 与 UX] */
+    effective_track?: 'technical' | 'finance';
+    /** 五维并列快照与守恒式说明 [Ref: 03_Phase6/01_FinOps双轨语义与全域成本契约_设计 §五维并列快照与 UX] */
+    ledger_snapshot_note?: string;
+    /** 与 FINOPS_CG_SOURCE 一致；多环境混用为 mixed [Ref: 03_Phase6/01_FinOps] */
+    finops_cg_source?: 'oss' | 'api' | 'mixed';
+    /** 按环境名实际 C/G 源（与 cost_env_account_config.environment 一致） [Ref: 03_Phase6/01_FinOps] */
+    finops_cg_source_by_env?: Partial<Record<string, 'oss' | 'api'>>;
+  };
+  /** FinOps 五维 [Ref: 03_Phase6/01_FinOps双轨语义与全域成本契约_设计] */
+  ledger?: Partial<Record<'C' | 'G' | 'P' | 'U' | 'B', number>>;
+  reconciliation?: FinOpsReconciliation;
 }
 
 export interface EnvBreakdownApiItem {
@@ -28,6 +47,10 @@ export interface EnvBreakdownApiItem {
   total_cost: number;
   previous_period_cost?: number;
   change_pct?: number;
+  ledger_g?: number;
+  ledger_p?: number;
+  ledger_u?: number;
+  ledger_b?: number;
 }
 
 export interface DomainBreakdownApiItem {
@@ -46,10 +69,19 @@ export interface NamespaceCostSummaryApiItem {
   node_count?: number;
 }
 
+export interface AdaptGlobalCostOptions {
+  /** 仅当 URL 含 track= 时传入 [Ref: 03_Phase6/01_FinOps双轨语义与全域成本契约_设计] */
+  requestTrack?: CostTrack;
+}
+
 /**
  * GlobalCostApiResponse -> CostMetrics
  */
-export function adaptGlobalCostToCostMetrics(res: GlobalCostApiResponse): CostMetrics {
+// [Ref: 03_Phase6/01_FinOps双轨语义与全域成本契约_设计 §数据流与契约（前端依赖）]
+export function adaptGlobalCostToCostMetrics(
+  res: GlobalCostApiResponse,
+  opts?: AdaptGlobalCostOptions,
+): CostMetrics {
   // 真实数据时后端可能返回 0 表示无可优化/效率数据，不臆造
   const totalOptimizable =
     res.total_optimizable !== undefined && res.total_optimizable !== null
@@ -81,6 +113,7 @@ export function adaptGlobalCostToCostMetrics(res: GlobalCostApiResponse): CostMe
     res.metadata?.last_updated_at != null ? res.metadata.last_updated_at : undefined;
   const billDataStatus = res.metadata?.bill_data_status ?? res.metadata?.data_status;
   const displayNote = res.metadata?.display_note ?? undefined;
+  const ledgerSnapshotNote = res.metadata?.ledger_snapshot_note ?? undefined;
   const envBreakdown: EnvBreakdownItem[] | undefined = res.env_breakdown?.map((e) => ({
     environment: e.environment,
     account_id: e.account_id,
@@ -88,6 +121,10 @@ export function adaptGlobalCostToCostMetrics(res: GlobalCostApiResponse): CostMe
     total_cost: e.total_cost,
     previous_period_cost: e.previous_period_cost,
     change_pct: e.change_pct,
+    ledger_g: e.ledger_g,
+    ledger_p: e.ledger_p,
+    ledger_u: e.ledger_u,
+    ledger_b: e.ledger_b,
   }));
   // [Ref: 用户需求 仅四大分类] 从 domain_breakdown 构建 billDetail（计算资源、存储、网络、安全）
   const billDetail =
@@ -99,6 +136,22 @@ export function adaptGlobalCostToCostMetrics(res: GlobalCostApiResponse): CostMe
           security: domainBreakdown.find((d) => d.domain === '安全')?.cost ?? 0,
         }
       : undefined;
+
+  const ledgerRaw = res.ledger;
+  const ledger: FinOpsLedger | undefined =
+    ledgerRaw && typeof ledgerRaw === 'object'
+      ? {
+          C: ledgerRaw.C,
+          G: ledgerRaw.G,
+          P: ledgerRaw.P,
+          U: ledgerRaw.U,
+          B: ledgerRaw.B,
+        }
+      : undefined;
+
+  const requestTrack = opts?.requestTrack ?? 'finance';
+  const reconciliation = res.reconciliation;
+
   return {
     totalBillableCost: res.total_cost,
     totalOptimizableSpace: totalOptimizable,
@@ -109,6 +162,10 @@ export function adaptGlobalCostToCostMetrics(res: GlobalCostApiResponse): CostMe
     lastUpdatedAt,
     billDataStatus,
     displayNote,
+    effectiveRequestTrack: requestTrack,
+    ledger,
+    reconciliation,
+    ledgerSnapshotNote,
   };
 }
 

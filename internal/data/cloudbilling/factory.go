@@ -4,6 +4,7 @@ package cloudbilling
 
 import (
 	"context"
+	"time"
 
 	"github.com/myxxhui/lighthouse-src/internal/data/cloudbilling/aliyun"
 )
@@ -50,6 +51,39 @@ func (a *aliCloudFetcher) FetchLineItems(ctx context.Context, req FetchLineItems
 		})
 	}
 	return &FetchLineItemsResponse{BillingDate: req.BillingDate, BillingCycle: billingCycle, Items: out}, nil
+}
+
+func (a *aliCloudFetcher) FetchBSSTransactions(ctx context.Context, start, end time.Time) ([]BSSTransactionItem, error) {
+	items, err := a.inner.FetchBSSTransactions(ctx, start, end)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]BSSTransactionItem, 0, len(items))
+	for _, it := range items {
+		out = append(out, BSSTransactionItem{
+			TransactionNumber: it.TransactionNumber,
+			TransactionTime:   it.TransactionTime,
+			Amount:            it.Amount,
+			TransactionType:   it.TransactionType,
+			TransactionFlow:   it.TransactionFlow,
+			RecordID:          it.RecordID,
+			BillingCycle:      it.BillingCycle,
+			Currency:          it.Currency,
+		})
+	}
+	return out, nil
+}
+
+func (a *aliCloudFetcher) FetchAccountBalanceSnapshot(ctx context.Context) (float64, string, error) {
+	return a.inner.FetchAccountBalanceSnapshot(ctx)
+}
+
+func (a *aliCloudFetcher) FetchOutstandingMonthly(ctx context.Context, billingCycle string) (float64, error) {
+	return a.inner.SumOutstandingMonthly(ctx, billingCycle)
+}
+
+func (a *aliCloudFetcher) FetchCallingAccountID(ctx context.Context, billingCycle string) (string, error) {
+	return a.inner.FetchCallingAccountID(ctx, billingCycle)
 }
 
 func (a *aliCloudFetcher) FetchAccountSummary(ctx context.Context, req FetchAccountSummaryRequest) (*FetchAccountSummaryResponse, error) {

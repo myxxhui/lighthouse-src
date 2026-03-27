@@ -19,7 +19,7 @@ import (
 
 func TestIntegration_CostGlobal_L0Performance(t *testing.T) {
 	mockRepo := postgres.NewMockRepository(postgres.DefaultMockConfig())
-	costSvc := service.NewCostService(mockRepo)
+	costSvc := service.NewCostService(mockRepo, "", nil)
 	cfg := &config.Config{
 		Env: config.EnvDevelopment,
 		Server: config.ServerConfig{
@@ -28,7 +28,7 @@ func TestIntegration_CostGlobal_L0Performance(t *testing.T) {
 			WriteTimeout: 30 * time.Second,
 		},
 	}
-	srv := NewHTTPServer(cfg, costSvc)
+	srv := NewHTTPServer(cfg, costSvc, nil)
 	engine := srv.Engine()
 
 	w := httptest.NewRecorder()
@@ -43,7 +43,7 @@ func TestIntegration_CostGlobal_L0Performance(t *testing.T) {
 
 func TestIntegration_CostGlobal_L0EqualsL1(t *testing.T) {
 	mockRepo := postgres.NewMockRepository(postgres.DefaultMockConfig())
-	costSvc := service.NewCostService(mockRepo)
+	costSvc := service.NewCostService(mockRepo, "", nil)
 	cfg := &config.Config{
 		Env: config.EnvDevelopment,
 		Server: config.ServerConfig{
@@ -52,7 +52,7 @@ func TestIntegration_CostGlobal_L0EqualsL1(t *testing.T) {
 			WriteTimeout: 30 * time.Second,
 		},
 	}
-	srv := NewHTTPServer(cfg, costSvc)
+	srv := NewHTTPServer(cfg, costSvc, nil)
 	engine := srv.Engine()
 
 	w := httptest.NewRecorder()

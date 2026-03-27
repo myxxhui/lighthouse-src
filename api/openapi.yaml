@@ -23,6 +23,8 @@ tags:
     description: Service Level Objective health monitoring APIs
   - name: ROI
     description: Return on Investment tracking and dashboard APIs
+  - name: FinOps
+    description: FinOps effective config and asynchronous data sync jobs [Ref Phase6/01_FinOps]
   - name: Health
     description: System health and readiness checks
 paths:
@@ -76,10 +78,50 @@ paths:
         - Cost
       summary: Global cost overview
       description: |
-        Returns global cost overview aggregated from L1 namespace costs.
-        **Performance**: Pure memory calculation, response time <10ms.
-        **Data consistency**: Guarantees L0 total equals sum of all L1 namespaces.
+        Returns global cost overview (Phase4 cloud bill aggregate path).
+        Optional **track** selects FinOps rail (`technical` | `finance`); when set, response includes `metadata.effective_track`.
+        **ledger** / **reconciliation** are populated when OSS/BSS ETL is ready; otherwise omitted or null.
+        [Ref: 03_Phase6/01_FinOps双轨语义与全域成本契约_设计 §API、track 与 UX]
       operationId: getGlobalCost
+      parameters:
+        - name: period
+          in: query
+          required: false
+          schema:
+            type: string
+            default: month
+          description: Time range preset (month, quarter, last_year, etc.)
+        - name: envs
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Comma-separated environments (e.g. POC,UAT)
+        - name: date_from
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Custom month range start (YYYY-MM)
+        - name: date_to
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Custom month range end (YYYY-MM)
+        - name: ledger_refresh
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Set to 1, true, or yes to run FinOps auxiliary sync (BSS balance, outstanding per billing cycle) for each configured account before reading PG. [Ref: 03_Phase6/01_FinOps]
+        - name: track
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [technical, finance]
+          description: FinOps rail; invalid or empty = legacy client behavior (no effective_track)
       responses:
         '200':
           description: Successful response
@@ -95,6 +137,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Service unavailable (e.g. fallback timeout)
 
   /cost/namespace/{namespace}:
     get:
@@ -421,8 +465,239 @@ paths:
         '500':
           description: Internal server error
 
+  /finops/effective-config:
+    get:
+      tags:
+        - FinOps
+      summary: Effective FinOps and ETL configuration (read-only, no secrets)
+      description: |
+        Returns process-effective FINOPS_CG_SOURCE, per-env overrides, cloud billing provider, billing cycle, ETL cron and pull/retention knobs.
+        [Ref: 03_Phase6/01_FinOps 主动同步]
+      operationId: getFinOpsEffectiveConfig
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FinOpsEffectiveConfigResponse'
+
+  /finops/sync-jobs:
+    post:
+      tags:
+        - FinOps
+      summary: Create asynchronous FinOps sync job
+      description: |
+        Queues sync_auxiliary (BSS/OSS FinOps pulls when configured) then billing ETL pipeline per BillingWorker.
+        Returns 409 if another job is queued or running. [Ref: 03_Phase6/01_FinOps 主动同步]
+      operationId: createFinOpsSyncJob
+      parameters:
+        - name: X-FinOps-Sync-Key
+          in: header
+          required: false
+          description: Required when server sets FINOPS_SYNC_JOB_API_KEY; may also use Authorization Bearer
+          schema:
+            type: string
+      responses:
+        '202':
+          description: Accepted — job created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FinOpsSyncJobCreateResponse'
+        '401':
+          description: FINOPS_SYNC_JOB_API_KEY is set but request lacks valid key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Another sync job is already active; `active_job_id` when resolvable for UI polling
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FinOpsSyncConflictResponse'
+        '503':
+          description: FinOps sync runner not configured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /finops/sync-jobs/active:
+    get:
+      tags:
+        - FinOps
+      summary: Get current active FinOps sync job
+      description: |
+        Returns full status for the current queued/running job (same schema as GET /finops/sync-jobs/{id}).
+        **404** when no active job — used by the frontend to restore progress after refresh. [Ref: 03_Phase6/01_FinOps 主动同步]
+      operationId: getFinOpsSyncJobActive
+      responses:
+        '200':
+          description: Active job status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FinOpsSyncJobStatusResponse'
+        '404':
+          description: No queued or running job
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: FinOps sync runner not configured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /finops/sync-jobs/{id}:
+    get:
+      tags:
+        - FinOps
+      summary: Get FinOps sync job status
+      operationId: getFinOpsSyncJob
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Job id returned by POST /finops/sync-jobs
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FinOpsSyncJobStatusResponse'
+        '404':
+          description: Job not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: FinOps sync runner not configured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
 components:
   schemas:
+    FinOpsEffectiveConfigResponse:
+      type: object
+      properties:
+        finops_cg_source:
+          type: string
+          example: oss
+        finops_cg_source_by_env:
+          type: object
+          additionalProperties:
+            type: string
+        cloud_billing_provider:
+          type: string
+        billing_cycle:
+          type: string
+        etl_schedule_cron:
+          type: string
+        etl_daily_pull_months:
+          type: integer
+        etl_daily_retention_months:
+          type: integer
+        etl_monthly_pull_months:
+          type: integer
+        etl_monthly_retention_months:
+          type: integer
+        sync_aux_timeout_seconds:
+          type: integer
+          description: Upper bound in seconds for sync_auxiliary phase (FINOPS_SYNC_AUX_TIMEOUT or default 30m)
+        sync_job_auth_required:
+          type: boolean
+          description: True when FINOPS_SYNC_JOB_API_KEY is configured; POST must send matching header
+    FinOpsSyncConflictResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        code:
+          type: string
+          example: FINOPS_SYNC_ACTIVE
+        active_job_id:
+          type: integer
+          format: int64
+          description: Current queued/running job id; client may GET /finops/sync-jobs/{id} for progress
+    FinOpsSyncJobCreateResponse:
+      type: object
+      required:
+        - job_id
+      properties:
+        job_id:
+          type: integer
+          format: int64
+    FinOpsSyncJobStatusResponse:
+      type: object
+      properties:
+        job_id:
+          type: integer
+          format: int64
+        status:
+          type: string
+          description: queued | running | succeeded | succeeded_with_warnings | failed
+        phase:
+          type: string
+        warnings:
+          type: array
+          items:
+            type: string
+        error_message:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+        data_version:
+          type: integer
+          format: int64
+        config_snapshot:
+          type: string
+          description: JSON string of effective config at job creation
+        progress_current:
+          type: integer
+          description: Completed step count (auxiliary sync + one step per billing worker); not time-based
+        progress_total:
+          type: integer
+          description: Total steps (1 auxiliary + len(billing workers))
+        phase_detail:
+          type: string
+          description: Short UI label e.g. auxiliary sync or env name
     HealthResponse:
       type: object
       properties:
@@ -459,6 +734,20 @@ components:
           type: number
           format: float
           example: 10000.0
+        total_optimizable:
+          type: number
+          format: float
+        global_efficiency:
+          type: number
+          format: float
+        domain_breakdown:
+          type: array
+          items:
+            $ref: '#/components/schemas/DomainBreakdownItem'
+        env_breakdown:
+          type: array
+          items:
+            $ref: '#/components/schemas/EnvBreakdownItem'
         namespaces:
           type: array
           items:
@@ -466,6 +755,119 @@ components:
         timestamp:
           type: string
           format: date-time
+        metadata:
+          $ref: '#/components/schemas/GlobalCostMetadata'
+        ledger:
+          $ref: '#/components/schemas/FinOpsLedger'
+          nullable: true
+        reconciliation:
+          $ref: '#/components/schemas/FinOpsReconciliation'
+          nullable: true
+    GlobalCostMetadata:
+      type: object
+      properties:
+        last_updated_at:
+          type: string
+          format: date-time
+        data_status:
+          type: string
+        bill_data_status:
+          type: string
+        report_type:
+          type: string
+        period_key:
+          type: string
+        display_note:
+          type: string
+        effective_track:
+          type: string
+          enum: [technical, finance]
+          description: Present when request included valid track
+        ledger_snapshot_note:
+          type: string
+          description: Optional short note; UI may omit; no formula [Ref Phase6]
+    DomainBreakdownItem:
+      type: object
+      properties:
+        domain:
+          type: string
+        cost:
+          type: number
+          format: float
+        optimizable_space:
+          type: number
+          format: float
+        efficiency:
+          type: number
+          format: float
+    EnvBreakdownItem:
+      type: object
+      properties:
+        environment:
+          type: string
+        account_id:
+          type: string
+        account_display_name:
+          type: string
+        total_cost:
+          type: number
+          format: float
+        previous_period_cost:
+          type: number
+          format: float
+        change_pct:
+          type: number
+          format: float
+        ledger_g:
+          type: number
+          format: float
+          description: 五维 G 按本环境消耗占比分摊（占位 account_id 时与 hero 一致）
+        ledger_p:
+          type: number
+          format: float
+        ledger_u:
+          type: number
+          format: float
+        ledger_b:
+          type: number
+          format: float
+    FinOpsLedger:
+      type: object
+      nullable: true
+      properties:
+        C:
+          type: number
+          format: float
+        G:
+          type: number
+          format: float
+        P:
+          type: number
+          format: float
+        U:
+          type: number
+          format: float
+        B:
+          type: number
+          format: float
+        previous:
+          type: object
+          properties:
+            C:
+              type: number
+              format: float
+            P:
+              type: number
+              format: float
+    FinOpsReconciliation:
+      type: object
+      nullable: true
+      properties:
+        residual:
+          type: number
+          format: float
+        explain:
+          type: string
 
     NamespaceCostSummary:
       type: object

@@ -1,6 +1,10 @@
 package config
 
-import "time"
+import (
+	"os"
+	"strings"
+	"time"
+)
 
 // Environment 应用环境类型
 type Environment string
@@ -189,6 +193,14 @@ type SecurityConfig struct {
 // Config 应用总配置
 type Config struct {
 	Env            Environment          `mapstructure:"env" env:"ENV"`
+	// FinOpsCGSource 五维 C/G 默认数据源：oss | api；可被 finops_cg_source_by_env 或 FINOPS_CG_SOURCE_<ENV> 覆盖。[Ref: 03_Phase6/01_FinOps FINOPS_CG_SOURCE]
+	FinOpsCGSource string `mapstructure:"finops_cg_source" env:"FINOPS_CG_SOURCE"`
+	// FinOpsCGSourceByEnv 按环境名覆盖 C/G 源（与 cost_env_account_config.environment 一致）；键大小写不敏感。[Ref: 03_Phase6/01_FinOps]
+	FinOpsCGSourceByEnv map[string]string `mapstructure:"finops_cg_source_by_env"`
+	// FinOpsSyncAuxTimeout 主动同步 Job 中 sync_auxiliary 阶段超时；0 或未设置表示使用 EffectiveFinOpsSyncAuxTimeout 默认（30m）。环境变量 FINOPS_SYNC_AUX_TIMEOUT，Go duration 如 30m、45m。[Ref: 03_Phase6/01_FinOps 主动同步]
+	FinOpsSyncAuxTimeout time.Duration `mapstructure:"finops_sync_aux_timeout" env:"FINOPS_SYNC_AUX_TIMEOUT"`
+	// FinOpsSyncJobAPIKey 非空时 POST /api/v1/finops/sync-jobs 须带请求头 X-FinOps-Sync-Key 或与之一致的 Bearer；密钥不入仓库。[Ref: 03_Phase6/01_FinOps 主动同步]
+	FinOpsSyncJobAPIKey string `mapstructure:"-" env:"FINOPS_SYNC_JOB_API_KEY"`
 	Server         ServerConfig         `mapstructure:"server"`
 	Postgres       PostgresConfig       `mapstructure:"postgres"`
 	ClickHouse     ClickHouseConfig     `mapstructure:"clickhouse"`
@@ -199,4 +211,88 @@ type Config struct {
 	Business       BusinessConfig       `mapstructure:"business"`
 	Security       SecurityConfig       `mapstructure:"security"`
 	CloudBilling   CloudBillingConfig   `mapstructure:"cloud_billing"`
+}
+
+// EffectiveFinOpsCGSource 返回小写 oss|api；空或非法时回退为 oss（与部署默认一致）。[Ref: 03_Phase6/01_FinOps]
+func EffectiveFinOpsCGSource(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "api":
+		return "api"
+	case "oss", "":
+		return "oss"
+	default:
+		return "oss"
+	}
+}
+
+// BuildFinOpsCGSourceByEnvMap 合并配置中的按环境覆盖并规范为大写环境名 → oss|api。[Ref: 03_Phase6/01_FinOps]
+func BuildFinOpsCGSourceByEnvMap(m map[string]string) map[string]string {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make(map[string]string)
+	for k, v := range m {
+		kk := strings.ToUpper(strings.TrimSpace(k))
+		if kk == "" {
+			continue
+		}
+		out[kk] = EffectiveFinOpsCGSource(v)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// parseFinOpsCGSourceByEnvFromEnviron 解析 FINOPS_CG_SOURCE_<ENV>（ENV 任意非空后缀，键大写）。[Ref: 03_Phase6/01_FinOps]
+func parseFinOpsCGSourceByEnvFromEnviron(environ []string) map[string]string {
+	prefix := "FINOPS_CG_SOURCE_"
+	out := make(map[string]string)
+	for _, kv := range environ {
+		idx := strings.IndexByte(kv, '=')
+		if idx <= 0 {
+			continue
+		}
+		key := kv[:idx]
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		suffix := strings.TrimSpace(key[len(prefix):])
+		if suffix == "" {
+			continue
+		}
+		val := kv[idx+1:]
+		out[strings.ToUpper(suffix)] = EffectiveFinOpsCGSource(val)
+	}
+	return out
+}
+
+// mergeFinOpsCGFromEnvironSlice 将 parseFinOpsCGSourceByEnvFromEnviron 结果合并入 cfg（覆盖同名键）。[Ref: 03_Phase6/01_FinOps]
+func mergeFinOpsCGFromEnvironSlice(cfg *Config, environ []string) {
+	if cfg == nil {
+		return
+	}
+	m := parseFinOpsCGSourceByEnvFromEnviron(environ)
+	if len(m) == 0 {
+		return
+	}
+	if cfg.FinOpsCGSourceByEnv == nil {
+		cfg.FinOpsCGSourceByEnv = make(map[string]string)
+	}
+	for k, v := range m {
+		cfg.FinOpsCGSourceByEnv[k] = v
+	}
+}
+
+// MergeFinOpsCGFromEnviron 将 FINOPS_CG_SOURCE_<ENV> 合并入 cfg（覆盖同名键）。须在 YAML 加载之后调用。[Ref: 03_Phase6/01_FinOps]
+func MergeFinOpsCGFromEnviron(cfg *Config) {
+	mergeFinOpsCGFromEnvironSlice(cfg, os.Environ())
+}
+
+// EffectiveFinOpsSyncAuxTimeout 返回 sync_auxiliary 阶段超时；d<=0 时默认 30 分钟。[Ref: 03_Phase6/01_FinOps 主动同步]
+func EffectiveFinOpsSyncAuxTimeout(d time.Duration) time.Duration {
+	if d <= 0 {
+		return 30 * time.Minute
+	}
+	return d
 }

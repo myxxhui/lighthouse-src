@@ -29,7 +29,7 @@ type DomainBreakdownItem struct {
 // GlobalCostMetadata D1-3：数据更新至、来源（聚合表/原始表降级）；含 report_type/period_key 便于校验时间范围对应关系。
 // [Ref: 16_云账单动态对账与高可靠处理规范 §三段式聚合] BillDataStatus 字段语义：
 //   - FINALIZED   : 已对账结算（历史月，权威级别）→ 前端展示「已财务核算」
-//   - PRELIMINARY : 当前月动态同步中（可信，未结算）→ 前端展示「动态同步中」
+//   - PRELIMINARY : 当前月动态同步（可信，未结算）→ 前端展示「动态同步」+ 自动调度说明
 //   - RECONCILING : 对账工作线运行中（修复中）→ 前端展示「对账中」
 //   - DIRTY       : 发现偏差，待修复              → 前端展示「数据偏差」
 //   - aggregate   : 来自聚合缓存（兼容旧语义）
@@ -42,9 +42,39 @@ type GlobalCostMetadata struct {
 	PeriodKey      string     `json:"period_key,omitempty"`       // 对应聚合表 period_key，用于校验当前时间范围
 	// DisplayNote 展示说明：月粒度周期内净退款导致现金合计为负时，后端将金额展示为 0 并设置本字段，前端可展示「该周期净退款已抵减」
 	DisplayNote string `json:"display_note,omitempty"`
+	// EffectiveTrack 仅当请求含合法 track（technical|finance）时设置，与请求一致。[Ref: 03_Phase6/01_FinOps双轨语义与全域成本契约_设计 §API、track 与 UX]
+	EffectiveTrack string `json:"effective_track,omitempty"`
+	// FinOpsCGSource 与默认 FINOPS_CG_SOURCE 或 uniform 时一致；多环境混用为 "mixed"。[Ref: 03_Phase6/01_FinOps]
+	FinOpsCGSource string `json:"finops_cg_source,omitempty"`
+	// FinOpsCGSourceByEnv 当前筛选下各环境实际 C/G 源（oss|api）。[Ref: 03_Phase6/01_FinOps]
+	FinOpsCGSourceByEnv map[string]string `json:"finops_cg_source_by_env,omitempty"`
+	// LedgerSnapshotNote 五维并列快照与守恒式说明（固定文案）；与 ledger 同传。[Ref: 03_Phase6/01_FinOps双轨语义与全域成本契约_设计 §五维并列快照与 UX]
+	LedgerSnapshotNote string `json:"ledger_snapshot_note,omitempty"`
 }
 
-// EnvBreakdownItem 按环境（POC/FAT/UAT/PROD）的总账与对比。[Ref: 01_设计 §按环境展示、12_API GlobalCostResponse]
+// FinOpsLedger 五维并列快照；整块未就绪时省略或 null。单维：查询成功则含数值（可为 0）；查询失败则 omit。[Ref: 03_Phase6/01_FinOps双轨语义与全域成本契约_设计 §ledger 单维语义]
+type FinOpsLedger struct {
+	C        *float64              `json:"C,omitempty"`
+	G        *float64              `json:"G,omitempty"`
+	P        *float64              `json:"P,omitempty"`
+	U        *float64              `json:"U,omitempty"`
+	B        *float64              `json:"B,omitempty"`
+	Previous *FinOpsLedgerPrevious `json:"previous,omitempty"`
+}
+
+// FinOpsLedgerPrevious 环比上期（可选 C/P）。
+type FinOpsLedgerPrevious struct {
+	C *float64 `json:"C,omitempty"`
+	P *float64 `json:"P,omitempty"`
+}
+
+// FinOpsReconciliation 守恒式闭合残差与说明。
+type FinOpsReconciliation struct {
+	Residual *float64 `json:"residual,omitempty"`
+	Explain  string   `json:"explain,omitempty"`
+}
+
+// EnvBreakdownItem 按环境的总账与对比；ledger_g/ledger_p 可按消耗占比从 hero 分摊；ledger_b/ledger_u 与各环境 canonical account 的 BSS/应付事实一致。[Ref: 01_设计 §按环境展示、12_API GlobalCostResponse]
 type EnvBreakdownItem struct {
 	Environment         string   `json:"environment"`
 	AccountID           string   `json:"account_id"`
@@ -52,6 +82,10 @@ type EnvBreakdownItem struct {
 	TotalCost           float64  `json:"total_cost"`
 	PreviousPeriodCost  float64  `json:"previous_period_cost,omitempty"`
 	ChangePct           float64  `json:"change_pct,omitempty"`
+	LedgerG             *float64 `json:"ledger_g,omitempty"`
+	LedgerP             *float64 `json:"ledger_p,omitempty"`
+	LedgerU             *float64 `json:"ledger_u,omitempty"`
+	LedgerB             *float64 `json:"ledger_b,omitempty"`
 }
 
 // GlobalCostResponse represents the response for global cost overview.
@@ -64,6 +98,8 @@ type GlobalCostResponse struct {
 	Namespaces       []NamespaceCostSummary  `json:"namespaces"`
 	Timestamp        time.Time               `json:"timestamp"`
 	Metadata         *GlobalCostMetadata     `json:"metadata,omitempty"`
+	Ledger           *FinOpsLedger           `json:"ledger,omitempty"`
+	Reconciliation   *FinOpsReconciliation   `json:"reconciliation,omitempty"`
 }
 
 // EnvDrilldownItem 按环境钻取：云产品维度成本。[Ref: 01_设计 §产品分类与按环境钻取、12_API]
@@ -204,6 +240,20 @@ type ErrorResponse struct {
 // =============================================
 // Helper Functions
 // =============================================
+
+// ApplyFinOpsGlobalMetadata 在请求含合法 track 时写入 metadata.effective_track。[Ref: 03_Phase6/01_FinOps双轨语义与全域成本契约_设计 §API、track 与 UX]
+func ApplyFinOpsGlobalMetadata(resp *GlobalCostResponse, track string) {
+	if track != "technical" && track != "finance" {
+		return
+	}
+	if resp == nil {
+		return
+	}
+	if resp.Metadata == nil {
+		resp.Metadata = &GlobalCostMetadata{}
+	}
+	resp.Metadata.EffectiveTrack = track
+}
 
 // ToCostBreakdown converts business model to DTO.
 func ToCostBreakdown(result costmodel.CostResult) CostBreakdown {

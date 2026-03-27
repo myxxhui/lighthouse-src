@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -398,24 +399,31 @@ func (p *PGRepository) SaveCloudBillAggregate(ctx context.Context, a CloudBillAg
 }
 
 func (p *PGRepository) GetCloudBillAggregate(ctx context.Context, reportType, periodKey string) (*CloudBillAggregate, error) {
-	list, err := p.ListCloudBillAggregateForReportPeriod(ctx, reportType, periodKey, "consumption")
+	list, err := p.ListCloudBillAggregateForReportPeriod(ctx, reportType, periodKey, "consumption", nil)
 	if err != nil || len(list) == 0 {
 		return nil, err
 	}
 	return &list[0], nil
 }
 
-// ListCloudBillAggregateForReportPeriod 返回指定 report_type+period_key+metric_type 下所有 account 的聚合行。
-// metricType 为 "" 时默认 "consumption"（消耗口径）。[Ref: 用户确认 消耗口径]
-func (p *PGRepository) ListCloudBillAggregateForReportPeriod(ctx context.Context, reportType, periodKey, metricType string) ([]CloudBillAggregate, error) {
+// ListCloudBillAggregateForReportPeriod 返回指定 report_type+period_key+metric_type 下 account 的聚合行；accountIDs 非空时仅返回其内 account。[Ref: 聚合表主路径 方案A]
+func (p *PGRepository) ListCloudBillAggregateForReportPeriod(ctx context.Context, reportType, periodKey, metricType string, accountIDs []string) ([]CloudBillAggregate, error) {
 	if metricType == "" {
 		metricType = "consumption"
 	}
-	rows, err := p.db.QueryContext(ctx,
-		`SELECT total_amount, product_breakdown, last_success_at, created_at, updated_at, COALESCE(account_id,''), metric_type
+	q := `SELECT total_amount, product_breakdown, last_success_at, created_at, updated_at, COALESCE(account_id,''), metric_type
 		 FROM cost_cloud_bill_aggregate
-		 WHERE report_type = $1 AND period_key = $2 AND metric_type = $3`,
-		reportType, periodKey, metricType)
+		 WHERE report_type = $1 AND period_key = $2 AND metric_type = $3`
+	args := []interface{}{reportType, periodKey, metricType}
+	if len(accountIDs) > 0 {
+		ph := make([]string, len(accountIDs))
+		for i, id := range accountIDs {
+			ph[i] = fmt.Sprintf("$%d", len(args)+1)
+			args = append(args, id)
+		}
+		q += ` AND account_id IN (` + strings.Join(ph, ",") + `)`
+	}
+	rows, err := p.db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -466,6 +474,19 @@ func (p *PGRepository) ListEnvAccountConfig(ctx context.Context) ([]EnvAccountCo
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// UpdateEnvAccountConfigAccountID 将 ETL/BSS 解析出的阿里云主账号 ID 写回 cost_env_account_config。[Ref: 03_Phase6/01_FinOps]
+func (p *PGRepository) UpdateEnvAccountConfigAccountID(ctx context.Context, environment, aliyunAccountID string) error {
+	environment = strings.TrimSpace(environment)
+	aliyunAccountID = strings.TrimSpace(aliyunAccountID)
+	if environment == "" || aliyunAccountID == "" {
+		return nil
+	}
+	_, err := p.db.ExecContext(ctx,
+		`UPDATE cost_env_account_config SET account_id = $1 WHERE environment = $2`,
+		aliyunAccountID, environment)
+	return err
 }
 
 func (p *PGRepository) GetProductCategory(ctx context.Context, productCode string) (string, bool) {
@@ -575,6 +596,87 @@ func unmarshalBreakdown(data []byte) map[string]float64 {
 
 func (p *PGRepository) HealthCheck(ctx context.Context) error {
 	return p.db.PingContext(ctx)
+}
+
+// --- FinOpsSyncJob [Ref: 03_Phase6/01_FinOps 主动同步] ---
+
+func jsonbOrEmpty(s string, empty []byte) []byte {
+	if strings.TrimSpace(s) == "" {
+		return empty
+	}
+	return []byte(s)
+}
+
+func (p *PGRepository) InsertFinOpsSyncJob(ctx context.Context, j FinOpsSyncJobRow) (int64, error) {
+	snap := jsonbOrEmpty(j.ConfigSnapshot, []byte("{}"))
+	warn := jsonbOrEmpty(j.Warnings, []byte("[]"))
+	var id int64
+	err := p.db.QueryRowContext(ctx,
+		`INSERT INTO finops_sync_job (status, phase, config_snapshot, warnings, data_version, progress_current, progress_total, phase_detail)
+		 VALUES ($1, $2, $3::jsonb, $4::jsonb, $5, $6, $7, $8) RETURNING id`,
+		j.Status, j.Phase, snap, warn, j.DataVersion, j.ProgressCurrent, j.ProgressTotal, j.PhaseDetail,
+	).Scan(&id)
+	return id, err
+}
+
+func (p *PGRepository) UpdateFinOpsSyncJob(ctx context.Context, j FinOpsSyncJobRow) error {
+	snap := jsonbOrEmpty(j.ConfigSnapshot, []byte("{}"))
+	warn := jsonbOrEmpty(j.Warnings, []byte("[]"))
+	_, err := p.db.ExecContext(ctx,
+		`UPDATE finops_sync_job SET status=$1, phase=$2, config_snapshot=$3::jsonb, warnings=$4::jsonb,
+		 error_message=NULLIF($5,''), started_at=$6, completed_at=$7, data_version=$8,
+		 progress_current=$9, progress_total=$10, phase_detail=$11 WHERE id=$12`,
+		j.Status, j.Phase, snap, warn, j.ErrorMessage, j.StartedAt, j.CompletedAt, j.DataVersion,
+		j.ProgressCurrent, j.ProgressTotal, j.PhaseDetail, j.ID,
+	)
+	return err
+}
+
+func (p *PGRepository) GetFinOpsSyncJob(ctx context.Context, id int64) (*FinOpsSyncJobRow, error) {
+	row := p.db.QueryRowContext(ctx,
+		`SELECT id, status, phase,
+		 COALESCE(config_snapshot::text,''), COALESCE(warnings::text,''),
+		 COALESCE(error_message,''), created_at, started_at, completed_at, data_version,
+		 progress_current, progress_total, COALESCE(phase_detail,'')
+		 FROM finops_sync_job WHERE id=$1`, id)
+	var j FinOpsSyncJobRow
+	var st, comp sql.NullTime
+	err := row.Scan(&j.ID, &j.Status, &j.Phase, &j.ConfigSnapshot, &j.Warnings, &j.ErrorMessage, &j.CreatedAt, &st, &comp, &j.DataVersion,
+		&j.ProgressCurrent, &j.ProgressTotal, &j.PhaseDetail)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, sql.ErrNoRows
+		}
+		return nil, err
+	}
+	if st.Valid {
+		t := st.Time
+		j.StartedAt = &t
+	}
+	if comp.Valid {
+		t := comp.Time
+		j.CompletedAt = &t
+	}
+	return &j, nil
+}
+
+func (p *PGRepository) CountActiveFinOpsSyncJobs(ctx context.Context) (int64, error) {
+	var n int64
+	err := p.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM finops_sync_job WHERE status IN ('queued','running')`,
+	).Scan(&n)
+	return n, err
+}
+
+func (p *PGRepository) GetActiveFinOpsSyncJobID(ctx context.Context) (int64, error) {
+	var id int64
+	err := p.db.QueryRowContext(ctx,
+		`SELECT id FROM finops_sync_job WHERE status IN ('queued','running') ORDER BY id DESC LIMIT 1`,
+	).Scan(&id)
+	if err != nil {
+		return 0, err
+	}
+	return id, nil
 }
 
 // --- AggregateDailyNamespaceCosts (L1 回退用) ---
@@ -713,6 +815,9 @@ func (r *pgTxRepository) DeleteCloudBillAggregateExcept(ctx context.Context, rep
 func (r *pgTxRepository) ListCloudBillDailyRawFromTo(ctx context.Context, from, to time.Time, accountID string) ([]CloudBillDailyRaw, error) {
 	return r.parent.ListCloudBillDailyRawFromTo(ctx, from, to, accountID)
 }
+func (r *pgTxRepository) UpdateEnvAccountConfigAccountID(ctx context.Context, environment, aliyunAccountID string) error {
+	return r.parent.UpdateEnvAccountConfigAccountID(ctx, environment, aliyunAccountID)
+}
 func (r *pgTxRepository) ListEnvAccountConfig(ctx context.Context) ([]EnvAccountConfig, error) {
 	return r.parent.ListEnvAccountConfig(ctx)
 }
@@ -722,10 +827,25 @@ func (r *pgTxRepository) GetProductCategory(ctx context.Context, productCode str
 func (r *pgTxRepository) UpsertProductCategory(ctx context.Context, productCode, category string) error {
 	return r.parent.UpsertProductCategory(ctx, productCode, category)
 }
-func (r *pgTxRepository) ListCloudBillAggregateForReportPeriod(ctx context.Context, reportType, periodKey, metricType string) ([]CloudBillAggregate, error) {
-	return r.parent.ListCloudBillAggregateForReportPeriod(ctx, reportType, periodKey, metricType)
+func (r *pgTxRepository) ListCloudBillAggregateForReportPeriod(ctx context.Context, reportType, periodKey, metricType string, accountIDs []string) ([]CloudBillAggregate, error) {
+	return r.parent.ListCloudBillAggregateForReportPeriod(ctx, reportType, periodKey, metricType, accountIDs)
 }
 func (r *pgTxRepository) HealthCheck(ctx context.Context) error { return r.parent.HealthCheck(ctx) }
+func (r *pgTxRepository) InsertFinOpsSyncJob(ctx context.Context, j FinOpsSyncJobRow) (int64, error) {
+	return r.parent.InsertFinOpsSyncJob(ctx, j)
+}
+func (r *pgTxRepository) UpdateFinOpsSyncJob(ctx context.Context, j FinOpsSyncJobRow) error {
+	return r.parent.UpdateFinOpsSyncJob(ctx, j)
+}
+func (r *pgTxRepository) GetFinOpsSyncJob(ctx context.Context, id int64) (*FinOpsSyncJobRow, error) {
+	return r.parent.GetFinOpsSyncJob(ctx, id)
+}
+func (r *pgTxRepository) CountActiveFinOpsSyncJobs(ctx context.Context) (int64, error) {
+	return r.parent.CountActiveFinOpsSyncJobs(ctx)
+}
+func (r *pgTxRepository) GetActiveFinOpsSyncJobID(ctx context.Context) (int64, error) {
+	return r.parent.GetActiveFinOpsSyncJobID(ctx)
+}
 func (r *pgTxRepository) BeginTx(ctx context.Context) (Transaction, error) {
 	return nil, errors.New("nested transaction not implemented")
 }
@@ -817,28 +937,33 @@ func (r *pgTxRepository) DeleteMetadata(ctx context.Context, key string) error {
 // --- [Ref: 16_云账单动态对账与高可靠处理规范 §三] 行级流水 + 月度状态 ---
 
 // UpsertCloudBillLineItem 幂等写入流水条目（ON CONFLICT record_id DO UPDATE）。
-// CashAmount 含负数冲正，不得在调用层过滤。
+// CashAmount 含负数冲正，不得在调用层过滤。ingestion_channel 见 03_Phase6/01_FinOps。
 func (p *PGRepository) UpsertCloudBillLineItem(ctx context.Context, item CloudBillLineItem) error {
 	d := item.BillDate.Truncate(24 * time.Hour).Format("2006-01-02")
 	now := time.Now()
+	ch := item.IngestionChannel
+	if ch == "" {
+		ch = "api_query_account_bill"
+	}
 	_, err := p.db.ExecContext(ctx,
 		`INSERT INTO cost_cloud_bill_line_items
 		 (record_id, bill_date, billing_cycle, product_code, product_name, sub_order_id, instance_id,
 		  billing_item, subscription_type, cash_amount, pretax_amount, pretax_gross_amount, currency,
-		  is_reversal, account_id, region, synced_at, created_at, updated_at)
-		 VALUES ($1, $2::date, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+		  is_reversal, account_id, ingestion_channel, region, synced_at, created_at, updated_at)
+		 VALUES ($1, $2::date, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
 		 ON CONFLICT (record_id) DO UPDATE SET
 		   cash_amount         = EXCLUDED.cash_amount,
 		   pretax_amount       = EXCLUDED.pretax_amount,
 		   pretax_gross_amount = EXCLUDED.pretax_gross_amount,
 		   is_reversal         = EXCLUDED.is_reversal,
+		   ingestion_channel   = EXCLUDED.ingestion_channel,
 		   synced_at           = EXCLUDED.synced_at,
 		   updated_at          = EXCLUDED.updated_at`,
 		item.RecordID, d, item.BillingCycle, item.ProductCode, item.ProductName,
 		item.SubOrderID, item.InstanceID, item.BillingItem, item.SubscriptionType,
 		item.CashAmount, item.PretaxAmount, item.PretaxGrossAmount,
 		nullStr(item.Currency, "CNY"), item.IsReversal,
-		nullStr(item.AccountID, ""), nullableStr(item.Region),
+		nullStr(item.AccountID, ""), ch, nullableStr(item.Region),
 		now, now, now)
 	return err
 }
@@ -884,6 +1009,369 @@ func (p *PGRepository) ListCloudBillLineItemsByDate(ctx context.Context, billDat
 		out = append(out, it)
 	}
 	return out, rows.Err()
+}
+
+// SumLineItemsPretaxCGByDateRange 按 bill_date 在 [from,to] 内汇总 C（pretax>0）、G（pretax<0）。[Ref: 03_Phase6/01_FinOps 采集与ETL_缺陷分析与最佳实践方案]
+func (p *PGRepository) SumLineItemsPretaxCGByDateRange(ctx context.Context, from, to time.Time, accountIDs []string) (c, g float64, err error) {
+	fromStr := from.Truncate(24 * time.Hour).Format("2006-01-02")
+	toStr := to.Truncate(24 * time.Hour).Format("2006-01-02")
+	query := `SELECT COALESCE(SUM(CASE WHEN pretax_amount > 0 THEN pretax_amount ELSE 0 END), 0),
+	                 COALESCE(SUM(CASE WHEN pretax_amount < 0 THEN pretax_amount ELSE 0 END), 0)
+	          FROM cost_cloud_bill_line_items WHERE bill_date >= $1::date AND bill_date <= $2::date`
+	args := []interface{}{fromStr, toStr}
+	if len(accountIDs) > 0 {
+		placeholders := make([]string, 0, len(accountIDs))
+		for i, id := range accountIDs {
+			placeholders = append(placeholders, fmt.Sprintf("$%d", i+3))
+			args = append(args, id)
+		}
+		query += fmt.Sprintf(" AND COALESCE(account_id,'') IN (%s)", strings.Join(placeholders, ","))
+	}
+	var cVal, gVal sql.NullFloat64
+	err = p.db.QueryRowContext(ctx, query, args...).Scan(&cVal, &gVal)
+	if err != nil {
+		return 0, 0, err
+	}
+	if cVal.Valid {
+		c = cVal.Float64
+	}
+	if gVal.Valid {
+		g = gVal.Float64
+	}
+	return c, g, nil
+}
+
+func lineItemsDateAccountFilter(fromStr, toStr string, accountIDs []string) (suffix string, args []interface{}) {
+	args = []interface{}{fromStr, toStr}
+	if len(accountIDs) == 0 {
+		return ` WHERE bill_date >= $1::date AND bill_date <= $2::date`, args
+	}
+	placeholders := make([]string, 0, len(accountIDs))
+	for i, id := range accountIDs {
+		placeholders = append(placeholders, fmt.Sprintf("$%d", i+3))
+		args = append(args, id)
+	}
+	return fmt.Sprintf(` WHERE bill_date >= $1::date AND bill_date <= $2::date AND COALESCE(account_id,'') IN (%s)`, strings.Join(placeholders, ",")), args
+}
+
+// SumLineItemsPretaxCGByDateRangePreferOSS 若区间内存在 oss_detail 行则仅汇总该渠道，否则与 SumLineItemsPretaxCGByDateRange 相同。[Ref: 03_Phase6/01_FinOps]
+func (p *PGRepository) SumLineItemsPretaxCGByDateRangePreferOSS(ctx context.Context, from, to time.Time, accountIDs []string) (c, g float64, err error) {
+	fromStr := from.Truncate(24 * time.Hour).Format("2006-01-02")
+	toStr := to.Truncate(24 * time.Hour).Format("2006-01-02")
+	suf, args := lineItemsDateAccountFilter(fromStr, toStr, accountIDs)
+	var n int
+	err = p.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM cost_cloud_bill_line_items`+suf+` AND COALESCE(ingestion_channel,'')='oss_detail'`, args...).Scan(&n)
+	if err != nil {
+		return 0, 0, err
+	}
+	if n > 0 {
+		return p.SumLineItemsPretaxCGByDateRangeWithChannel(ctx, from, to, accountIDs, "oss_detail")
+	}
+	return p.SumLineItemsPretaxCGByDateRange(ctx, from, to, accountIDs)
+}
+
+// SumLineItemsPretaxCGByDateRangeWithChannel 仅汇总指定 ingestion_channel 的 C/G。[Ref: 03_Phase6/01_FinOps FINOPS_CG_SOURCE]
+func (p *PGRepository) SumLineItemsPretaxCGByDateRangeWithChannel(ctx context.Context, from, to time.Time, accountIDs []string, channel string) (c, g float64, err error) {
+	fromStr := from.Truncate(24 * time.Hour).Format("2006-01-02")
+	toStr := to.Truncate(24 * time.Hour).Format("2006-01-02")
+	return p.sumLineItemsPretaxCGByDateRangeWithChannelStr(ctx, fromStr, toStr, accountIDs, channel)
+}
+
+func (p *PGRepository) sumLineItemsPretaxCGByDateRangeWithChannelStr(ctx context.Context, fromStr, toStr string, accountIDs []string, channel string) (c, g float64, err error) {
+	query := `SELECT COALESCE(SUM(CASE WHEN pretax_amount > 0 THEN pretax_amount ELSE 0 END), 0),
+	                 COALESCE(SUM(CASE WHEN pretax_amount < 0 THEN pretax_amount ELSE 0 END), 0)
+	          FROM cost_cloud_bill_line_items WHERE bill_date >= $1::date AND bill_date <= $2::date AND COALESCE(ingestion_channel,'')=$3`
+	args := []interface{}{fromStr, toStr, channel}
+	if len(accountIDs) > 0 {
+		placeholders := make([]string, 0, len(accountIDs))
+		for i, id := range accountIDs {
+			placeholders = append(placeholders, fmt.Sprintf("$%d", i+4))
+			args = append(args, id)
+		}
+		query += fmt.Sprintf(" AND COALESCE(account_id,'') IN (%s)", strings.Join(placeholders, ","))
+	}
+	var cVal, gVal sql.NullFloat64
+	err = p.db.QueryRowContext(ctx, query, args...).Scan(&cVal, &gVal)
+	if err != nil {
+		return 0, 0, err
+	}
+	if cVal.Valid {
+		c = cVal.Float64
+	}
+	if gVal.Valid {
+		g = gVal.Float64
+	}
+	return c, g, nil
+}
+
+// SumPretaxByChannelForDateRange 汇总 pretax_amount（带符号），用于 OSS/API 对账差额。[Ref: 03_Phase6/01_FinOps]
+func (p *PGRepository) SumPretaxByChannelForDateRange(ctx context.Context, from, to time.Time, accountIDs []string, channel string) (pretaxSum float64, err error) {
+	fromStr := from.Truncate(24 * time.Hour).Format("2006-01-02")
+	toStr := to.Truncate(24 * time.Hour).Format("2006-01-02")
+	query := `SELECT COALESCE(SUM(pretax_amount), 0) FROM cost_cloud_bill_line_items WHERE bill_date >= $1::date AND bill_date <= $2::date AND COALESCE(ingestion_channel,'')=$3`
+	args := []interface{}{fromStr, toStr, channel}
+	if len(accountIDs) > 0 {
+		placeholders := make([]string, 0, len(accountIDs))
+		for i, id := range accountIDs {
+			placeholders = append(placeholders, fmt.Sprintf("$%d", i+4))
+			args = append(args, id)
+		}
+		query += fmt.Sprintf(" AND COALESCE(account_id,'') IN (%s)", strings.Join(placeholders, ","))
+	}
+	var v sql.NullFloat64
+	err = p.db.QueryRowContext(ctx, query, args...).Scan(&v)
+	if err != nil {
+		return 0, err
+	}
+	if v.Valid {
+		pretaxSum = v.Float64
+	}
+	return pretaxSum, nil
+}
+
+// UpsertBSSTransaction 幂等写入 BSS 流水。[Ref: 03_Phase6/01_FinOps]
+func (p *PGRepository) UpsertBSSTransaction(ctx context.Context, tx BSSTransactionRow) error {
+	if tx.TransactionNumber == "" {
+		return fmt.Errorf("bss transaction_number required")
+	}
+	tm := tx.TransactionTime.UTC().Format("2006-01-02 15:04:05")
+	cur := tx.Currency
+	if cur == "" {
+		cur = "CNY"
+	}
+	_, err := p.db.ExecContext(ctx, `
+		INSERT INTO cost_bss_transactions (transaction_number, account_id, transaction_time, amount, transaction_type, transaction_flow, record_id, billing_cycle, currency, synced_at)
+		VALUES ($1,$2,$3::timestamp,$4,$5,$6,$7,$8,$9,NOW())
+		ON CONFLICT (transaction_number) DO UPDATE SET
+		  amount=EXCLUDED.amount, transaction_type=EXCLUDED.transaction_type, transaction_flow=EXCLUDED.transaction_flow,
+		  record_id=EXCLUDED.record_id, billing_cycle=EXCLUDED.billing_cycle, synced_at=NOW()`,
+		tx.TransactionNumber, nullStr(tx.AccountID, ""), tm, tx.Amount, nullStr(tx.TransactionType, ""), nullStr(tx.TransactionFlow, ""),
+		nullStr(tx.RecordID, ""), nullStr(tx.BillingCycle, ""), cur)
+	return err
+}
+
+// UpsertBSSBalanceSnapshot 写入账户余额快照（按日覆盖同键）。[Ref: 03_Phase6/01_FinOps]
+func (p *PGRepository) UpsertBSSBalanceSnapshot(ctx context.Context, s BSSBalanceSnapshotRow) error {
+	d := s.SnapshotDate.UTC().Format("2006-01-02")
+	cur := s.Currency
+	if cur == "" {
+		cur = "CNY"
+	}
+	_, err := p.db.ExecContext(ctx, `
+		INSERT INTO cost_bss_balance_snapshot (account_id, snapshot_date, available_amount, currency, synced_at)
+		VALUES ($1,$2::date,$3,$4,NOW())
+		ON CONFLICT (account_id, snapshot_date) DO UPDATE SET available_amount=EXCLUDED.available_amount, synced_at=NOW()`,
+		nullStr(s.AccountID, ""), d, s.AvailableAmount, cur)
+	return err
+}
+
+// UpsertBillOutstandingMonthly 账期维度应付/在途汇总（U）。[Ref: 03_Phase6/01_FinOps]
+func (p *PGRepository) UpsertBillOutstandingMonthly(ctx context.Context, o BillOutstandingMonthlyRow) error {
+	_, err := p.db.ExecContext(ctx, `
+		INSERT INTO cost_bill_outstanding_monthly (billing_cycle, account_id, outstanding_amount, synced_at)
+		VALUES ($1,$2,$3,NOW())
+		ON CONFLICT (billing_cycle, account_id) DO UPDATE SET outstanding_amount=EXCLUDED.outstanding_amount, synced_at=NOW()`,
+		o.BillingCycle, nullStr(o.AccountID, ""), o.OutstandingAmount)
+	return err
+}
+
+// SumBSSPaymentExpenseByDateRange 实付 P：Payment + Expense 流水金额绝对值之和。[Ref: 03_Phase6/01_FinOps]
+func (p *PGRepository) SumBSSPaymentExpenseByDateRange(ctx context.Context, from, to time.Time, accountIDs []string) (float64, error) {
+	fromStr := from.UTC().Format("2006-01-02 15:04:05")
+	toStr := to.UTC().Format("2006-01-02 15:04:05")
+	q := `SELECT COALESCE(SUM(ABS(amount)), 0) FROM cost_bss_transactions
+	      WHERE transaction_time >= $1::timestamp AND transaction_time <= $2::timestamp
+	      AND LOWER(COALESCE(transaction_type,'')) = 'payment' AND LOWER(COALESCE(transaction_flow,'')) = 'expense'`
+	args := []interface{}{fromStr, toStr}
+	if len(accountIDs) > 0 {
+		ph := make([]string, 0, len(accountIDs))
+		for i, id := range accountIDs {
+			ph = append(ph, fmt.Sprintf("$%d", i+3))
+			args = append(args, id)
+		}
+		q += fmt.Sprintf(" AND COALESCE(account_id,'') IN (%s)", strings.Join(ph, ","))
+	}
+	var v sql.NullFloat64
+	err := p.db.QueryRowContext(ctx, q, args...).Scan(&v)
+	if err != nil {
+		return 0, err
+	}
+	if v.Valid {
+		return v.Float64, nil
+	}
+	return 0, nil
+}
+
+// LatestBSSBalanceSum 各 account 截至 asOf 的最近一条快照 available 之和。[Ref: 03_Phase6/01_FinOps]
+// accountIDs 为空时汇总库内全部 account 的「最新一条」快照（与配置全量列表语义一致，避免未传 IN 时误返回 0）。
+func (p *PGRepository) LatestBSSBalanceSum(ctx context.Context, accountIDs []string, asOf time.Time) (float64, error) {
+	asOfD := asOf.UTC().Format("2006-01-02")
+	if len(accountIDs) == 0 {
+		q := `
+		WITH latest AS (
+		  SELECT DISTINCT ON (account_id) account_id, available_amount
+		  FROM cost_bss_balance_snapshot
+		  WHERE snapshot_date <= $1::date
+		  ORDER BY account_id, snapshot_date DESC
+		)
+		SELECT COALESCE(SUM(available_amount), 0) FROM latest`
+		var v sql.NullFloat64
+		err := p.db.QueryRowContext(ctx, q, asOfD).Scan(&v)
+		if err != nil {
+			return 0, err
+		}
+		if v.Valid {
+			return v.Float64, nil
+		}
+		return 0, nil
+	}
+	ph := make([]string, 0, len(accountIDs))
+	args := make([]interface{}, 0, len(accountIDs)+1)
+	args = append(args, asOfD)
+	for i, id := range accountIDs {
+		ph = append(ph, fmt.Sprintf("$%d", i+2))
+		args = append(args, id)
+	}
+	q := fmt.Sprintf(`
+		WITH latest AS (
+		  SELECT DISTINCT ON (account_id) account_id, available_amount
+		  FROM cost_bss_balance_snapshot
+		  WHERE snapshot_date <= $1::date AND COALESCE(account_id,'') IN (%s)
+		  ORDER BY account_id, snapshot_date DESC
+		)
+		SELECT COALESCE(SUM(available_amount), 0) FROM latest`, strings.Join(ph, ","))
+	var v sql.NullFloat64
+	err := p.db.QueryRowContext(ctx, q, args...).Scan(&v)
+	if err != nil {
+		return 0, err
+	}
+	if v.Valid {
+		return v.Float64, nil
+	}
+	return 0, nil
+}
+
+// LatestBSSBalanceMap 各 account 截至 asOf 的最近一条快照 available（不按 account 求和，供按环境去重）。[Ref: 03_Phase6/01_FinOps]
+func (p *PGRepository) LatestBSSBalanceMap(ctx context.Context, asOf time.Time) (map[string]float64, error) {
+	asOfD := asOf.UTC().Format("2006-01-02")
+	q := `
+		WITH latest AS (
+		  SELECT DISTINCT ON (account_id) account_id, available_amount
+		  FROM cost_bss_balance_snapshot
+		  WHERE snapshot_date <= $1::date
+		  ORDER BY account_id, snapshot_date DESC
+		)
+		SELECT account_id, available_amount FROM latest`
+	rows, err := p.db.QueryContext(ctx, q, asOfD)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string]float64)
+	for rows.Next() {
+		var aid string
+		var amt sql.NullFloat64
+		if err := rows.Scan(&aid, &amt); err != nil {
+			return nil, err
+		}
+		if amt.Valid {
+			out[aid] = amt.Float64
+		}
+	}
+	return out, rows.Err()
+}
+
+// ListBillOutstandingInBillingCycles 返回账期列表内全部应付行。[Ref: 03_Phase6/01_FinOps]
+func (p *PGRepository) ListBillOutstandingInBillingCycles(ctx context.Context, billingCycles []string) ([]BillOutstandingMonthlyRow, error) {
+	if len(billingCycles) == 0 {
+		return nil, nil
+	}
+	phC := make([]string, 0, len(billingCycles))
+	args := make([]interface{}, 0, len(billingCycles))
+	for i, c := range billingCycles {
+		phC = append(phC, fmt.Sprintf("$%d", i+1))
+		args = append(args, c)
+	}
+	q := `SELECT billing_cycle, account_id, outstanding_amount FROM cost_bill_outstanding_monthly WHERE billing_cycle IN (` + strings.Join(phC, ",") + `) ORDER BY billing_cycle, account_id`
+	rows, err := p.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []BillOutstandingMonthlyRow
+	for rows.Next() {
+		var r BillOutstandingMonthlyRow
+		if err := rows.Scan(&r.BillingCycle, &r.AccountID, &r.OutstandingAmount); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// SumOutstandingByBillingCycles U：多账期 outstanding 之和。[Ref: 03_Phase6/01_FinOps]
+func (p *PGRepository) SumOutstandingByBillingCycles(ctx context.Context, billingCycles []string, accountIDs []string) (float64, error) {
+	if len(billingCycles) == 0 {
+		return 0, nil
+	}
+	phC := make([]string, 0, len(billingCycles))
+	args := make([]interface{}, 0)
+	for i, c := range billingCycles {
+		phC = append(phC, fmt.Sprintf("$%d", i+1))
+		args = append(args, c)
+	}
+	q := `SELECT COALESCE(SUM(outstanding_amount), 0) FROM cost_bill_outstanding_monthly WHERE billing_cycle IN (` + strings.Join(phC, ",") + `)`
+	if len(accountIDs) > 0 {
+		phA := make([]string, 0, len(accountIDs))
+		base := len(args)
+		for i, id := range accountIDs {
+			phA = append(phA, fmt.Sprintf("$%d", base+i+1))
+			args = append(args, id)
+		}
+		q += fmt.Sprintf(" AND COALESCE(account_id,'') IN (%s)", strings.Join(phA, ","))
+	}
+	var v sql.NullFloat64
+	err := p.db.QueryRowContext(ctx, q, args...).Scan(&v)
+	if err != nil {
+		return 0, err
+	}
+	if v.Valid {
+		return v.Float64, nil
+	}
+	return 0, nil
+}
+
+// SumMonthlyCashTotalForBillingCycles 汇总指定账期列表下 cash_total_amount（资金轨 P 降级）。[Ref: 03_Phase6/01_FinOps]
+func (p *PGRepository) SumMonthlyCashTotalForBillingCycles(ctx context.Context, billingCycles []string, accountIDs []string) (float64, error) {
+	if len(billingCycles) == 0 {
+		return 0, nil
+	}
+	phC := make([]string, 0, len(billingCycles))
+	args := make([]interface{}, 0)
+	for i, c := range billingCycles {
+		phC = append(phC, fmt.Sprintf("$%d", i+1))
+		args = append(args, c)
+	}
+	q := `SELECT COALESCE(SUM(cash_total_amount), 0) FROM cost_cloud_bill_monthly_raw WHERE billing_cycle IN (` + strings.Join(phC, ",") + `)`
+	if len(accountIDs) > 0 {
+		phA := make([]string, 0, len(accountIDs))
+		base := len(args)
+		for i, id := range accountIDs {
+			phA = append(phA, fmt.Sprintf("$%d", base+i+1))
+			args = append(args, id)
+		}
+		q += fmt.Sprintf(" AND COALESCE(account_id,'') IN (%s)", strings.Join(phA, ","))
+	}
+	var v sql.NullFloat64
+	err := p.db.QueryRowContext(ctx, q, args...).Scan(&v)
+	if err != nil {
+		return 0, err
+	}
+	if v.Valid {
+		return v.Float64, nil
+	}
+	return 0, nil
 }
 
 // ListCloudBillLineItemsByBillingCycle 返回指定账期+账号的所有流水条目（用于按 billing_cycle 汇总月原始表，回退归属到被冲正账期）。[Ref: 16_ §四、§七]
@@ -1044,6 +1532,46 @@ func (r *pgTxRepository) ListDistinctBillingCyclesInDateRange(ctx context.Contex
 }
 func (r *pgTxRepository) SumLineItemsCashByBillingCycle(ctx context.Context, billingCycle, accountID string) (float64, error) {
 	return r.parent.SumLineItemsCashByBillingCycle(ctx, billingCycle, accountID)
+}
+func (r *pgTxRepository) SumLineItemsPretaxCGByDateRange(ctx context.Context, from, to time.Time, accountIDs []string) (c, g float64, err error) {
+	return r.parent.SumLineItemsPretaxCGByDateRange(ctx, from, to, accountIDs)
+}
+func (r *pgTxRepository) SumLineItemsPretaxCGByDateRangePreferOSS(ctx context.Context, from, to time.Time, accountIDs []string) (c, g float64, err error) {
+	return r.parent.SumLineItemsPretaxCGByDateRangePreferOSS(ctx, from, to, accountIDs)
+}
+
+func (r *pgTxRepository) SumLineItemsPretaxCGByDateRangeWithChannel(ctx context.Context, from, to time.Time, accountIDs []string, channel string) (c, g float64, err error) {
+	return r.parent.SumLineItemsPretaxCGByDateRangeWithChannel(ctx, from, to, accountIDs, channel)
+}
+func (r *pgTxRepository) SumPretaxByChannelForDateRange(ctx context.Context, from, to time.Time, accountIDs []string, channel string) (float64, error) {
+	return r.parent.SumPretaxByChannelForDateRange(ctx, from, to, accountIDs, channel)
+}
+func (r *pgTxRepository) UpsertBSSTransaction(ctx context.Context, tx BSSTransactionRow) error {
+	return r.parent.UpsertBSSTransaction(ctx, tx)
+}
+func (r *pgTxRepository) UpsertBSSBalanceSnapshot(ctx context.Context, s BSSBalanceSnapshotRow) error {
+	return r.parent.UpsertBSSBalanceSnapshot(ctx, s)
+}
+func (r *pgTxRepository) UpsertBillOutstandingMonthly(ctx context.Context, o BillOutstandingMonthlyRow) error {
+	return r.parent.UpsertBillOutstandingMonthly(ctx, o)
+}
+func (r *pgTxRepository) SumBSSPaymentExpenseByDateRange(ctx context.Context, from, to time.Time, accountIDs []string) (float64, error) {
+	return r.parent.SumBSSPaymentExpenseByDateRange(ctx, from, to, accountIDs)
+}
+func (r *pgTxRepository) LatestBSSBalanceSum(ctx context.Context, accountIDs []string, asOf time.Time) (float64, error) {
+	return r.parent.LatestBSSBalanceSum(ctx, accountIDs, asOf)
+}
+func (r *pgTxRepository) LatestBSSBalanceMap(ctx context.Context, asOf time.Time) (map[string]float64, error) {
+	return r.parent.LatestBSSBalanceMap(ctx, asOf)
+}
+func (r *pgTxRepository) ListBillOutstandingInBillingCycles(ctx context.Context, billingCycles []string) ([]BillOutstandingMonthlyRow, error) {
+	return r.parent.ListBillOutstandingInBillingCycles(ctx, billingCycles)
+}
+func (r *pgTxRepository) SumOutstandingByBillingCycles(ctx context.Context, billingCycles []string, accountIDs []string) (float64, error) {
+	return r.parent.SumOutstandingByBillingCycles(ctx, billingCycles, accountIDs)
+}
+func (r *pgTxRepository) SumMonthlyCashTotalForBillingCycles(ctx context.Context, billingCycles []string, accountIDs []string) (float64, error) {
+	return r.parent.SumMonthlyCashTotalForBillingCycles(ctx, billingCycles, accountIDs)
 }
 func (r *pgTxRepository) DeleteLineItemsOlderThan(ctx context.Context, before time.Time, accountID string) error {
 	return r.parent.DeleteLineItemsOlderThan(ctx, before, accountID)

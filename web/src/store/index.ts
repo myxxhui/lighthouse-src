@@ -10,6 +10,7 @@ import {
   CostCompareMode,
   ResourceDimension,
   CloudProductDrilldownItem,
+  type CostTrack,
 } from '@/types';
 import { costService } from '@/services/costService';
 import { mockApi } from '@/services/mockApi';
@@ -69,11 +70,11 @@ interface AppState {
 
   // Actions
   setTheme: (theme: 'light' | 'dark') => void;
-  /** envs 非空时仅请求所选环境的成本（与成本分解、云产品明细一致）[Ref: 用户需求 环境多选] */
-  fetchGlobalCostMetrics: (envs?: string[]) => Promise<void>;
+  /** envs 非空时仅请求所选环境的成本（与成本分解、云产品明细一致）[Ref: 用户需求 环境多选]；track 仅 URL 含 track= 时传入 [Ref: 03_Phase6/01_FinOps双轨语义与全域成本契约_设计] */
+  fetchGlobalCostMetrics: (envs?: string[], track?: CostTrack) => Promise<void>;
   fetchNamespaceCosts: () => Promise<void>;
-  /** [Ref: 01_设计 §云产品成本明细索引 索引区时间范围] override 为索引区独立时间范围；withCompare 为 true 时再拉上期明细填 drilldownGlobalProductsPrev */
-  fetchDrilldownGlobal: (env?: string, category?: string, sort?: string, override?: { period: CostTimeRange; dateRange: [string, string] | null }, withCompare?: boolean) => Promise<void>;
+  /** [Ref: 01_设计 §云产品成本明细索引 索引区时间范围] override 为索引区独立时间范围；withCompare 为 true 时再拉上期明细填 drilldownGlobalProductsPrev；track 与顶部视角一致 [Ref: 03_Phase6/01_FinOps] */
+  fetchDrilldownGlobal: (env?: string, category?: string, sort?: string, override?: { period: CostTimeRange; dateRange: [string, string] | null }, withCompare?: boolean, track?: CostTrack) => Promise<void>;
   fetchDrilldownData: (
     type: string,
     id: string,
@@ -81,7 +82,7 @@ interface AppState {
   ) => Promise<void>;
   setSelectedDimension: (dimension: ResourceDimension) => void;
   fetchSLOStatus: (scope?: SLOScope) => Promise<void>;
-  fetchCostTrend: (params?: { period?: string; date_from?: string; date_to?: string; env?: string }, withCompare?: boolean) => Promise<void>;
+  fetchCostTrend: (params?: { period?: string; date_from?: string; date_to?: string; env?: string; track?: CostTrack }, withCompare?: boolean) => Promise<void>;
   setCostTimeRange: (range: CostTimeRange) => void;
   setCostCompareMode: (mode: CostCompareMode) => void;
   setCostCustomDateRange: (range: [string, string] | null) => void;
@@ -140,24 +141,35 @@ export const useAppStore = create<AppState>()(
       // Actions
       setTheme: (theme: 'light' | 'dark') => set({ theme }),
 
-      fetchGlobalCostMetrics: async (envs?: string[]) => {
+      fetchGlobalCostMetrics: async (envs?: string[], track?: CostTrack) => {
         const { useMockData, costTimeRange, costCompareMode, costCustomDateRange } = get();
         set({ loadingGlobalMetrics: true, errorGlobalMetrics: null });
         const envsParam = envs?.length ? envs.join(',') : undefined;
+        const trackParam = track;
         try {
           let data: CostMetrics;
           const effectivePeriod = costTimeRange === 'custom' ? 'month' : costTimeRange;
           // [Ref: 16_ §三] 统计口径已移除，后端固定返回实际付款（payment）
           if (useMockData) {
-            data = await mockApi.getGlobalCostMetrics({ period: effectivePeriod, compareMode: costCompareMode });
+            data = await mockApi.getGlobalCostMetrics({
+              period: effectivePeriod,
+              compareMode: costCompareMode,
+              track: trackParam ?? 'finance',
+            });
           } else if (costTimeRange === 'custom' && costCustomDateRange != null && costCustomDateRange[0] && costCustomDateRange[1]) {
             data = await costService.getGlobalCostMetrics({
               date_from: costCustomDateRange[0],
               date_to: costCustomDateRange[1],
               envs: envsParam,
+              track: trackParam ?? 'finance',
             });
           } else {
-            data = await costService.getGlobalCostMetrics({ period: effectivePeriod, compareMode: costCompareMode, envs: envsParam });
+            data = await costService.getGlobalCostMetrics({
+              period: effectivePeriod,
+              compareMode: costCompareMode,
+              envs: envsParam,
+              track: trackParam ?? 'finance',
+            });
           }
           set({ globalCostMetrics: data, loadingGlobalMetrics: false });
         } catch (error) {
@@ -197,8 +209,9 @@ export const useAppStore = create<AppState>()(
         }
       },
 
-      fetchDrilldownGlobal: async (env?: string, category?: string, sort?: string, override?: { period: CostTimeRange; dateRange: [string, string] | null }, withCompare?: boolean) => {
+      fetchDrilldownGlobal: async (env?: string, category?: string, sort?: string, override?: { period: CostTimeRange; dateRange: [string, string] | null }, withCompare?: boolean, track?: CostTrack) => {
         const { useMockData, costTimeRange, costCustomDateRange } = get();
+        const trackParam = track ?? 'finance';
         const period = override?.period ?? costTimeRange;
         const dateRange = override?.dateRange ?? costCustomDateRange;
         const envFilter = env ?? 'all';
@@ -242,6 +255,7 @@ export const useAppStore = create<AppState>()(
               env: envFilter,
               category: category || undefined,
               sort: sortOrder,
+              track: trackParam,
             });
             set({ drilldownGlobalProducts: data, loadingDrilldownGlobal: false });
             if (withCompare) {
@@ -254,14 +268,14 @@ export const useAppStore = create<AppState>()(
               prevStart.setDate(prevStart.getDate() - days + 1);
               const prevFrom = prevStart.toISOString().slice(0, 10);
               const prevTo = prevEnd.toISOString().slice(0, 10);
-              const prevData = await costService.getDrilldownGlobal({ date_from: prevFrom, date_to: prevTo, env: envFilter, category: category || undefined, sort: sortOrder });
+              const prevData = await costService.getDrilldownGlobal({ date_from: prevFrom, date_to: prevTo, env: envFilter, category: category || undefined, sort: sortOrder, track: trackParam });
               set(state => ({ ...state, drilldownGlobalProductsPrev: prevData }));
             }
             return;
           }
           const report_type = reportTypeMap[period] ?? 'month';
           const period_key = periodKeyMap[period] ?? monthStr;
-          const data = await costService.getDrilldownGlobal({ report_type, period_key, env: envFilter, category: category || undefined, sort: sortOrder });
+          const data = await costService.getDrilldownGlobal({ report_type, period_key, env: envFilter, category: category || undefined, sort: sortOrder, track: trackParam });
           set({ drilldownGlobalProducts: data, loadingDrilldownGlobal: false });
           // [Ref: 用户需求 各时间范围均有对应环比] 上期与本期同源（report_type+period_key），保证产品维度一致、环比可算
           if (withCompare) {
@@ -295,6 +309,7 @@ export const useAppStore = create<AppState>()(
               env: envFilter,
               category: category || undefined,
               sort: sortOrder,
+              track: trackParam,
             });
             set(state => ({ ...state, drilldownGlobalProductsPrev: prevData }));
           }
@@ -361,10 +376,11 @@ export const useAppStore = create<AppState>()(
         }
       },
 
-      fetchCostTrend: async (params?: { period?: string; date_from?: string; date_to?: string; env?: string }, withCompare?: boolean) => {
+      fetchCostTrend: async (params?: { period?: string; date_from?: string; date_to?: string; env?: string; track?: CostTrack }, withCompare?: boolean) => {
         set({ loadingCostTrend: true, errorCostTrend: null, costTrendDataPrev: null });
+        const trackParam = params?.track ?? 'finance';
         try {
-          const res = await costService.getCostTrend(params);
+          const res = await costService.getCostTrend({ ...params, track: trackParam });
           const list = (res?.data ?? []).map(d => ({ date: d.date, total_cost: d.total_cost, by_product: d.by_product }));
           set(state => ({ ...state, costTrendData: list, loadingCostTrend: false }));
           if (withCompare && (params?.period || (params?.date_from && params?.date_to))) {
@@ -417,7 +433,11 @@ export const useAppStore = create<AppState>()(
                 prevFrom = `${y}-01`; prevTo = `${y}-12`;
               }
             }
-            const resPrev = await costService.getCostTrend(prevFrom && prevTo ? { date_from: prevFrom, date_to: prevTo, env: params?.env } : { period: params?.period, env: params?.env });
+            const resPrev = await costService.getCostTrend(
+              prevFrom && prevTo
+                ? { date_from: prevFrom, date_to: prevTo, env: params?.env, track: trackParam }
+                : { period: params?.period, env: params?.env, track: trackParam },
+            );
             const listPrev = (resPrev?.data ?? []).map(d => ({ date: d.date, total_cost: d.total_cost, by_product: d.by_product }));
             set(state => ({ ...state, costTrendDataPrev: listPrev }));
           }

@@ -77,6 +77,42 @@ type Repository interface {
 	ListDistinctBillingCyclesInDateRange(ctx context.Context, from, to time.Time, accountID string) ([]string, error)
 	// SumLineItemsCashByBillingCycle 计算指定账期所有条目的 CashAmount 代数和（含负数）
 	SumLineItemsCashByBillingCycle(ctx context.Context, billingCycle, accountID string) (float64, error)
+	// SumLineItemsPretaxCGByDateRange 按 bill_date 在区间内汇总 C=SUM(pretax_amount) WHERE pretax_amount>0，G=SUM(pretax_amount) WHERE pretax_amount<0。[Ref: 03_Phase6/01_FinOps 采集与ETL]
+	SumLineItemsPretaxCGByDateRange(ctx context.Context, from, to time.Time, accountIDs []string) (c, g float64, err error)
+	// SumLineItemsPretaxCGByDateRangePreferOSS 若区间内存在 oss_detail 行则仅汇总该渠道，否则汇总全部（含 api_query_account_bill）。[Ref: 03_Phase6/01_FinOps]
+	SumLineItemsPretaxCGByDateRangePreferOSS(ctx context.Context, from, to time.Time, accountIDs []string) (c, g float64, err error)
+	// SumLineItemsPretaxCGByDateRangeWithChannel 仅汇总指定 ingestion_channel 的 C/G（FINOPS_CG_SOURCE 单变量语义）。[Ref: 03_Phase6/01_FinOps]
+	SumLineItemsPretaxCGByDateRangeWithChannel(ctx context.Context, from, to time.Time, accountIDs []string, channel string) (c, g float64, err error)
+	// SumPretaxByChannelForDateRange 按 ingestion_channel 过滤汇总 C/G（用于 OSS vs API 对账）。[Ref: 03_Phase6/01_FinOps]
+	SumPretaxByChannelForDateRange(ctx context.Context, from, to time.Time, accountIDs []string, channel string) (pretaxSum float64, err error)
+
+	// [Ref: 03_Phase6/01_FinOps] BSS 实付流水与余额、账期应付
+	UpsertBSSTransaction(ctx context.Context, tx BSSTransactionRow) error
+	UpsertBSSBalanceSnapshot(ctx context.Context, s BSSBalanceSnapshotRow) error
+	UpsertBillOutstandingMonthly(ctx context.Context, o BillOutstandingMonthlyRow) error
+	// SumBSSPaymentExpenseByDateRange 汇总区间内 Payment+Expense 类流水金额（实付 P，取绝对值之和）。[Ref: 03_Phase6/01_FinOps]
+	SumBSSPaymentExpenseByDateRange(ctx context.Context, from, to time.Time, accountIDs []string) (p float64, err error)
+	// LatestBSSBalanceSum 各 account 在 asOf 日前最近一条快照的 available 之和（B）。[Ref: 03_Phase6/01_FinOps]
+	LatestBSSBalanceSum(ctx context.Context, accountIDs []string, asOf time.Time) (b float64, err error)
+	// LatestBSSBalanceMap 各 account 在 asOf 日前最近一条快照的 available，供按环境去重汇总 B（与 Hero 同键）。[Ref: 03_Phase6/01_FinOps]
+	LatestBSSBalanceMap(ctx context.Context, asOf time.Time) (map[string]float64, error)
+	// SumOutstandingByBillingCycles 多账期 outstanding 之和（U）。[Ref: 03_Phase6/01_FinOps]
+	SumOutstandingByBillingCycles(ctx context.Context, billingCycles []string, accountIDs []string) (u float64, err error)
+	// ListBillOutstandingInBillingCycles 返回账期列表内全部应付行，供按环境去重汇总 U。[Ref: 03_Phase6/01_FinOps]
+	ListBillOutstandingInBillingCycles(ctx context.Context, billingCycles []string) ([]BillOutstandingMonthlyRow, error)
+	// SumMonthlyCashTotalForBillingCycles 月表现金合计（BSS 无流水时 P 的降级来源）。[Ref: 03_Phase6/01_FinOps]
+	SumMonthlyCashTotalForBillingCycles(ctx context.Context, billingCycles []string, accountIDs []string) (float64, error)
+	// [Ref: Phase6 finops_billing_fact OLAP] 阿里云账单 CSV → 事实表；C/G 聚合优先于 line_items
+	DeleteFinOpsBillingFactsByBillingCycle(ctx context.Context, billingCycle, accountID string) error
+	BulkInsertFinOpsBillingFacts(ctx context.Context, rows []FinOpsBillingFactRow) error
+	// ReplaceFinOpsBillingCycleWithFacts 关账全量：单事务内 DELETE 该账期该账号后批量写入，消除滚动快照幽灵行。[Ref: 04_采集 §六]
+	ReplaceFinOpsBillingCycleWithFacts(ctx context.Context, billingCycle, accountID string, rows []FinOpsBillingFactRow) error
+	// GetFinOpsOSSSyncCheckpoint / SetFinOpsOSSSyncCheckpoint — OSS 增量同步水位（与 OSS_INCREMENTAL_SYNC）。[Ref: 04_采集 §七]
+	GetFinOpsOSSSyncCheckpoint(ctx context.Context, accountID string) (maxObjectLastModified time.Time, found bool, err error)
+	SetFinOpsOSSSyncCheckpoint(ctx context.Context, accountID string, maxObjectLastModified time.Time) error
+	CountFinOpsBillingFactsInDateRange(ctx context.Context, from, to time.Time, accountIDs []string) (int64, error)
+	SumFinOpsFactPretaxCGByDateRange(ctx context.Context, from, to time.Time, accountIDs []string) (c, g float64, err error)
+	SumFinOpsFactPretaxTotalByDateRange(ctx context.Context, from, to time.Time, accountIDs []string) (float64, error)
 	// DeleteLineItemsOlderThan 清理早于指定日期的流水条目（配合 daily_raw 10 个月滑动清理）
 	DeleteLineItemsOlderThan(ctx context.Context, before time.Time, accountID string) error
 
@@ -86,14 +122,24 @@ type Repository interface {
 
 	// [Ref: 01_设计 §环境与云账号配置 D9-3] 环境与产品配置
 	ListEnvAccountConfig(ctx context.Context) ([]EnvAccountConfig, error)
+	// UpdateEnvAccountConfigAccountID 将 BSS 解析的阿里云主账号 ID 写回 cost_env_account_config，与 ETL account_id 主键对齐。[Ref: 03_Phase6/01_FinOps]
+	UpdateEnvAccountConfigAccountID(ctx context.Context, environment, aliyunAccountID string) error
 	GetProductCategory(ctx context.Context, productCode string) (category string, ok bool)
 	UpsertProductCategory(ctx context.Context, productCode, category string) error
-	// ListCloudBillAggregateForReportPeriod 返回指定 report_type+period_key+metric_type 下所有 account 的聚合行（多账号时多行）
-	// metricType 为 "" 时默认 "payment"（仅保留实际付款聚合表）[Ref: 16_ §四]
-	ListCloudBillAggregateForReportPeriod(ctx context.Context, reportType, periodKey, metricType string) ([]CloudBillAggregate, error)
+	// ListCloudBillAggregateForReportPeriod 返回指定 report_type+period_key+metric_type 下 account 的聚合行。
+	// accountIDs 非空时仅返回其内 account；nil 则返回所有 account。[Ref: 聚合表主路径 方案A]
+	ListCloudBillAggregateForReportPeriod(ctx context.Context, reportType, periodKey, metricType string, accountIDs []string) ([]CloudBillAggregate, error)
 
 	// HealthCheck checks if the database is reachable.
 	HealthCheck(ctx context.Context) error
+
+	// FinOpsSyncJob 主动同步 Job（与部署配置一致的异步拉取+流水线）。[Ref: 03_Phase6/01_FinOps 主动同步]
+	InsertFinOpsSyncJob(ctx context.Context, j FinOpsSyncJobRow) (id int64, err error)
+	UpdateFinOpsSyncJob(ctx context.Context, j FinOpsSyncJobRow) error
+	GetFinOpsSyncJob(ctx context.Context, id int64) (*FinOpsSyncJobRow, error)
+	CountActiveFinOpsSyncJobs(ctx context.Context) (int64, error)
+	// GetActiveFinOpsSyncJobID 当前 queued/running 的 Job id（至多一个活跃；冲突 409 时供前端轮询）。[Ref: 03_Phase6/01_FinOps 主动同步]
+	GetActiveFinOpsSyncJobID(ctx context.Context) (int64, error)
 
 	// Transaction operations
 	BeginTx(ctx context.Context) (Transaction, error)
@@ -314,10 +360,74 @@ type CloudBillLineItem struct {
 	Currency          string    `json:"currency,omitempty"`
 	IsReversal        bool      `json:"is_reversal"`          // cash_amount < 0 时为 true
 	AccountID         string    `json:"account_id,omitempty"`
+	IngestionChannel  string    `json:"ingestion_channel,omitempty"` // oss_detail | api_query_account_bill [Ref: 03_Phase6/01_FinOps]
 	Region            string    `json:"region,omitempty"`
 	SyncedAt          time.Time `json:"synced_at"`
 	CreatedAt         time.Time `json:"created_at"`
 	UpdatedAt         time.Time `json:"updated_at"`
+}
+
+// BSSTransactionRow [Ref: 03_Phase6/01_FinOps] QueryAccountTransactions 落库
+type BSSTransactionRow struct {
+	TransactionNumber string
+	AccountID         string
+	TransactionTime   time.Time
+	Amount            float64
+	TransactionType   string
+	TransactionFlow   string
+	RecordID          string
+	BillingCycle      string
+	Currency          string
+}
+
+// BSSBalanceSnapshotRow [Ref: 03_Phase6/01_FinOps] QueryAccountBalance 快照
+type BSSBalanceSnapshotRow struct {
+	AccountID        string
+	SnapshotDate     time.Time
+	AvailableAmount  float64
+	Currency         string
+}
+
+// BillOutstandingMonthlyRow [Ref: 03_Phase6/01_FinOps] QueryAccountBill MONTHLY OutstandingAmount 汇总落库
+type BillOutstandingMonthlyRow struct {
+	BillingCycle       string
+	AccountID          string
+	OutstandingAmount  float64
+}
+
+// FinOpsSyncJobRow 主动同步 Job 持久化（多实例以 DB 为准）。[Ref: 03_Phase6/01_FinOps 主动同步]
+type FinOpsSyncJobRow struct {
+	ID             int64      `json:"id"`
+	Status         string     `json:"status"` // queued|running|succeeded|succeeded_with_warnings|failed
+	Phase          string     `json:"phase"`
+	ConfigSnapshot string     `json:"config_snapshot,omitempty"` // JSON
+	Warnings       string     `json:"warnings,omitempty"`        // JSON array
+	ErrorMessage   string     `json:"error_message,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	StartedAt      *time.Time `json:"started_at,omitempty"`
+	CompletedAt    *time.Time `json:"completed_at,omitempty"`
+	DataVersion    int64      `json:"data_version"`
+	// ProgressCurrent / ProgressTotal：步骤进度（1 步辅助同步 + 每环境 1 步流水线），非时间占比。[Ref: 03_Phase6/01_FinOps 主动同步]
+	ProgressCurrent int    `json:"progress_current"`
+	ProgressTotal   int    `json:"progress_total"`
+	PhaseDetail     string `json:"phase_detail"`
+}
+
+// FinOpsBillingFactRow [Ref: Phase6 OLAP] 账单明细事实行；dedup_key 为稳定业务幂等键（RecordID 或自然键哈希），与 (account_id) 组成 UNIQUE。[Ref: 04_采集 §5.6]
+type FinOpsBillingFactRow struct {
+	BillingCycle  string
+	UsageDate     time.Time
+	AccountAlias  string
+	AccountID     string
+	Env           string
+	ProductCode   string
+	InstanceID    string
+	ItemCode      string
+	Amount        float64
+	Currency      string
+	TagsJSON      []byte // nullable JSON
+	SourceObject  string
+	DedupKey      string
 }
 
 // [Ref: 16_云账单动态对账与高可靠处理规范 §三] 月度对账状态

@@ -3,6 +3,7 @@ package postgres
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -80,8 +81,11 @@ type MockRepository struct {
 	dailyStorageCosts     map[string]DailyStorageCost   // key: day-namespace-pvc_name
 	dailyNetworkCosts     map[string]DailyNetworkCost   // key: day-namespace-resource_id
 	// Phase4 01_：cost_cloud_bill_summary
-	cloudBillSummaries map[string]CloudBillSummary // key: day-billing_cycle
-	monthlyRaw         map[string]*CloudBillMonthlyRaw // key: billing_cycle
+	cloudBillSummaries   map[string]CloudBillSummary   // key: day-billing_cycle
+	monthlyRaw           map[string]*CloudBillMonthlyRaw // key: billing_cycle
+	cloudBillAggregates  map[string]*CloudBillAggregate  // key: reportType|periodKey|metricType|accountID
+	finopsSyncJobs       map[int64]*FinOpsSyncJobRow
+	nextFinopsJobID      int64
 }
 
 // MockTransaction is a mock implementation of the Transaction interface.
@@ -136,6 +140,8 @@ func NewMockRepository(config MockConfig) *MockRepository {
 		dailyStorageCosts:    make(map[string]DailyStorageCost),
 		dailyNetworkCosts:    make(map[string]DailyNetworkCost),
 		cloudBillSummaries:   make(map[string]CloudBillSummary),
+		finopsSyncJobs:       make(map[int64]*FinOpsSyncJobRow),
+		nextFinopsJobID:      1,
 	}
 
 	// Pre-populate with initial data
@@ -1033,6 +1039,14 @@ func (m *MockRepository) DeleteCloudBillMonthlyRawOlderThan(ctx context.Context,
 	return nil
 }
 func (m *MockRepository) SaveCloudBillAggregate(ctx context.Context, a CloudBillAggregate) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.cloudBillAggregates == nil {
+		m.cloudBillAggregates = make(map[string]*CloudBillAggregate)
+	}
+	key := a.ReportType + "|" + a.PeriodKey + "|" + a.MetricType + "|" + a.AccountID
+	c := a
+	m.cloudBillAggregates[key] = &c
 	return nil
 }
 func (m *MockRepository) GetCloudBillAggregate(ctx context.Context, reportType, periodKey string) (*CloudBillAggregate, error) {
@@ -1044,6 +1058,10 @@ func (m *MockRepository) DeleteCloudBillAggregateExcept(ctx context.Context, rep
 func (m *MockRepository) ListCloudBillDailyRawFromTo(ctx context.Context, from, to time.Time, accountID string) ([]CloudBillDailyRaw, error) {
 	return nil, nil
 }
+func (m *MockRepository) UpdateEnvAccountConfigAccountID(ctx context.Context, environment, aliyunAccountID string) error {
+	return nil
+}
+
 func (m *MockRepository) ListEnvAccountConfig(ctx context.Context) ([]EnvAccountConfig, error) {
 	return nil, nil
 }
@@ -1053,8 +1071,33 @@ func (m *MockRepository) GetProductCategory(ctx context.Context, productCode str
 func (m *MockRepository) UpsertProductCategory(ctx context.Context, productCode, category string) error {
 	return nil
 }
-func (m *MockRepository) ListCloudBillAggregateForReportPeriod(ctx context.Context, reportType, periodKey, metricType string) ([]CloudBillAggregate, error) {
-	return nil, nil
+func (m *MockRepository) ListCloudBillAggregateForReportPeriod(ctx context.Context, reportType, periodKey, metricType string, accountIDs []string) ([]CloudBillAggregate, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.cloudBillAggregates == nil {
+		return nil, nil
+	}
+	if metricType == "" {
+		metricType = "consumption"
+	}
+	accSet := make(map[string]bool)
+	for _, id := range accountIDs {
+		if id != "" {
+			accSet[id] = true
+		}
+	}
+	var out []CloudBillAggregate
+	prefix := reportType + "|" + periodKey + "|" + metricType + "|"
+	for k, v := range m.cloudBillAggregates {
+		if !strings.HasPrefix(k, prefix) {
+			continue
+		}
+		if len(accSet) > 0 && !accSet[v.AccountID] {
+			continue
+		}
+		out = append(out, *v)
+	}
+	return out, nil
 }
 
 // HealthCheck always returns nil (healthy) for mock repository.
@@ -1602,6 +1645,9 @@ func (tr *transactionRepository) DeleteCloudBillAggregateExcept(ctx context.Cont
 func (tr *transactionRepository) ListCloudBillDailyRawFromTo(ctx context.Context, from, to time.Time, accountID string) ([]CloudBillDailyRaw, error) {
 	return tr.tx.repo.ListCloudBillDailyRawFromTo(ctx, from, to, accountID)
 }
+func (tr *transactionRepository) UpdateEnvAccountConfigAccountID(ctx context.Context, environment, aliyunAccountID string) error {
+	return tr.tx.repo.UpdateEnvAccountConfigAccountID(ctx, environment, aliyunAccountID)
+}
 func (tr *transactionRepository) ListEnvAccountConfig(ctx context.Context) ([]EnvAccountConfig, error) {
 	return tr.tx.repo.ListEnvAccountConfig(ctx)
 }
@@ -1611,8 +1657,8 @@ func (tr *transactionRepository) GetProductCategory(ctx context.Context, product
 func (tr *transactionRepository) UpsertProductCategory(ctx context.Context, productCode, category string) error {
 	return tr.tx.repo.UpsertProductCategory(ctx, productCode, category)
 }
-func (tr *transactionRepository) ListCloudBillAggregateForReportPeriod(ctx context.Context, reportType, periodKey, metricType string) ([]CloudBillAggregate, error) {
-	return tr.tx.repo.ListCloudBillAggregateForReportPeriod(ctx, reportType, periodKey, metricType)
+func (tr *transactionRepository) ListCloudBillAggregateForReportPeriod(ctx context.Context, reportType, periodKey, metricType string, accountIDs []string) ([]CloudBillAggregate, error) {
+	return tr.tx.repo.ListCloudBillAggregateForReportPeriod(ctx, reportType, periodKey, metricType, accountIDs)
 }
 
 func (tr *transactionRepository) HealthCheck(ctx context.Context) error {
@@ -1639,6 +1685,67 @@ func (tr *transactionRepository) ListDistinctBillingCyclesInDateRange(ctx contex
 func (tr *transactionRepository) SumLineItemsCashByBillingCycle(ctx context.Context, billingCycle, accountID string) (float64, error) {
 	return 0, nil
 }
+func (tr *transactionRepository) SumLineItemsPretaxCGByDateRange(ctx context.Context, from, to time.Time, accountIDs []string) (c, g float64, err error) {
+	return 0, 0, nil
+}
+func (tr *transactionRepository) SumLineItemsPretaxCGByDateRangePreferOSS(ctx context.Context, from, to time.Time, accountIDs []string) (c, g float64, err error) {
+	return 0, 0, nil
+}
+func (tr *transactionRepository) SumLineItemsPretaxCGByDateRangeWithChannel(ctx context.Context, from, to time.Time, accountIDs []string, channel string) (c, g float64, err error) {
+	return 0, 0, nil
+}
+func (tr *transactionRepository) SumPretaxByChannelForDateRange(ctx context.Context, from, to time.Time, accountIDs []string, channel string) (float64, error) {
+	return 0, nil
+}
+func (tr *transactionRepository) UpsertBSSTransaction(ctx context.Context, tx BSSTransactionRow) error { return nil }
+func (tr *transactionRepository) UpsertBSSBalanceSnapshot(ctx context.Context, s BSSBalanceSnapshotRow) error {
+	return nil
+}
+func (tr *transactionRepository) UpsertBillOutstandingMonthly(ctx context.Context, o BillOutstandingMonthlyRow) error {
+	return nil
+}
+func (tr *transactionRepository) SumBSSPaymentExpenseByDateRange(ctx context.Context, from, to time.Time, accountIDs []string) (float64, error) {
+	return 0, nil
+}
+func (tr *transactionRepository) LatestBSSBalanceSum(ctx context.Context, accountIDs []string, asOf time.Time) (float64, error) {
+	return 0, nil
+}
+func (tr *transactionRepository) LatestBSSBalanceMap(ctx context.Context, asOf time.Time) (map[string]float64, error) {
+	return nil, nil
+}
+func (tr *transactionRepository) ListBillOutstandingInBillingCycles(ctx context.Context, billingCycles []string) ([]BillOutstandingMonthlyRow, error) {
+	return nil, nil
+}
+func (tr *transactionRepository) SumOutstandingByBillingCycles(ctx context.Context, billingCycles []string, accountIDs []string) (float64, error) {
+	return 0, nil
+}
+func (tr *transactionRepository) SumMonthlyCashTotalForBillingCycles(ctx context.Context, billingCycles []string, accountIDs []string) (float64, error) {
+	return 0, nil
+}
+func (tr *transactionRepository) DeleteFinOpsBillingFactsByBillingCycle(ctx context.Context, billingCycle, accountID string) error {
+	return nil
+}
+func (tr *transactionRepository) BulkInsertFinOpsBillingFacts(ctx context.Context, rows []FinOpsBillingFactRow) error {
+	return nil
+}
+func (tr *transactionRepository) ReplaceFinOpsBillingCycleWithFacts(ctx context.Context, billingCycle, accountID string, rows []FinOpsBillingFactRow) error {
+	return nil
+}
+func (tr *transactionRepository) GetFinOpsOSSSyncCheckpoint(ctx context.Context, accountID string) (time.Time, bool, error) {
+	return tr.tx.repo.GetFinOpsOSSSyncCheckpoint(ctx, accountID)
+}
+func (tr *transactionRepository) SetFinOpsOSSSyncCheckpoint(ctx context.Context, accountID string, maxObjectLastModified time.Time) error {
+	return tr.tx.repo.SetFinOpsOSSSyncCheckpoint(ctx, accountID, maxObjectLastModified)
+}
+func (tr *transactionRepository) CountFinOpsBillingFactsInDateRange(ctx context.Context, from, to time.Time, accountIDs []string) (int64, error) {
+	return 0, nil
+}
+func (tr *transactionRepository) SumFinOpsFactPretaxCGByDateRange(ctx context.Context, from, to time.Time, accountIDs []string) (c, g float64, err error) {
+	return 0, 0, nil
+}
+func (tr *transactionRepository) SumFinOpsFactPretaxTotalByDateRange(ctx context.Context, from, to time.Time, accountIDs []string) (float64, error) {
+	return 0, nil
+}
 func (tr *transactionRepository) DeleteLineItemsOlderThan(ctx context.Context, before time.Time, accountID string) error {
 	return nil
 }
@@ -1647,6 +1754,26 @@ func (tr *transactionRepository) UpsertCloudBillMonthStatus(ctx context.Context,
 }
 func (tr *transactionRepository) GetCloudBillMonthStatus(ctx context.Context, billingCycle, accountID string) (*CloudBillMonthStatus, error) {
 	return nil, nil
+}
+
+func (tr *transactionRepository) InsertFinOpsSyncJob(ctx context.Context, j FinOpsSyncJobRow) (int64, error) {
+	return tr.tx.repo.InsertFinOpsSyncJob(ctx, j)
+}
+
+func (tr *transactionRepository) UpdateFinOpsSyncJob(ctx context.Context, j FinOpsSyncJobRow) error {
+	return tr.tx.repo.UpdateFinOpsSyncJob(ctx, j)
+}
+
+func (tr *transactionRepository) GetFinOpsSyncJob(ctx context.Context, id int64) (*FinOpsSyncJobRow, error) {
+	return tr.tx.repo.GetFinOpsSyncJob(ctx, id)
+}
+
+func (tr *transactionRepository) CountActiveFinOpsSyncJobs(ctx context.Context) (int64, error) {
+	return tr.tx.repo.CountActiveFinOpsSyncJobs(ctx)
+}
+
+func (tr *transactionRepository) GetActiveFinOpsSyncJobID(ctx context.Context) (int64, error) {
+	return tr.tx.repo.GetActiveFinOpsSyncJobID(ctx)
 }
 
 // MockRepository stubs for new methods
@@ -1665,6 +1792,67 @@ func (m *MockRepository) ListDistinctBillingCyclesInDateRange(ctx context.Contex
 func (m *MockRepository) SumLineItemsCashByBillingCycle(ctx context.Context, billingCycle, accountID string) (float64, error) {
 	return 0, nil
 }
+func (m *MockRepository) SumLineItemsPretaxCGByDateRange(ctx context.Context, from, to time.Time, accountIDs []string) (c, g float64, err error) {
+	return 0, 0, nil
+}
+func (m *MockRepository) SumLineItemsPretaxCGByDateRangePreferOSS(ctx context.Context, from, to time.Time, accountIDs []string) (c, g float64, err error) {
+	return 0, 0, nil
+}
+func (m *MockRepository) SumLineItemsPretaxCGByDateRangeWithChannel(ctx context.Context, from, to time.Time, accountIDs []string, channel string) (c, g float64, err error) {
+	return 0, 0, nil
+}
+func (m *MockRepository) SumPretaxByChannelForDateRange(ctx context.Context, from, to time.Time, accountIDs []string, channel string) (float64, error) {
+	return 0, nil
+}
+func (m *MockRepository) UpsertBSSTransaction(ctx context.Context, tx BSSTransactionRow) error { return nil }
+func (m *MockRepository) UpsertBSSBalanceSnapshot(ctx context.Context, s BSSBalanceSnapshotRow) error {
+	return nil
+}
+func (m *MockRepository) UpsertBillOutstandingMonthly(ctx context.Context, o BillOutstandingMonthlyRow) error {
+	return nil
+}
+func (m *MockRepository) SumBSSPaymentExpenseByDateRange(ctx context.Context, from, to time.Time, accountIDs []string) (float64, error) {
+	return 0, nil
+}
+func (m *MockRepository) LatestBSSBalanceSum(ctx context.Context, accountIDs []string, asOf time.Time) (float64, error) {
+	return 0, nil
+}
+func (m *MockRepository) LatestBSSBalanceMap(ctx context.Context, asOf time.Time) (map[string]float64, error) {
+	return map[string]float64{}, nil
+}
+func (m *MockRepository) ListBillOutstandingInBillingCycles(ctx context.Context, billingCycles []string) ([]BillOutstandingMonthlyRow, error) {
+	return nil, nil
+}
+func (m *MockRepository) SumOutstandingByBillingCycles(ctx context.Context, billingCycles []string, accountIDs []string) (float64, error) {
+	return 0, nil
+}
+func (m *MockRepository) SumMonthlyCashTotalForBillingCycles(ctx context.Context, billingCycles []string, accountIDs []string) (float64, error) {
+	return 0, nil
+}
+func (m *MockRepository) DeleteFinOpsBillingFactsByBillingCycle(ctx context.Context, billingCycle, accountID string) error {
+	return nil
+}
+func (m *MockRepository) BulkInsertFinOpsBillingFacts(ctx context.Context, rows []FinOpsBillingFactRow) error {
+	return nil
+}
+func (m *MockRepository) ReplaceFinOpsBillingCycleWithFacts(ctx context.Context, billingCycle, accountID string, rows []FinOpsBillingFactRow) error {
+	return nil
+}
+func (m *MockRepository) GetFinOpsOSSSyncCheckpoint(ctx context.Context, accountID string) (time.Time, bool, error) {
+	return time.Time{}, false, nil
+}
+func (m *MockRepository) SetFinOpsOSSSyncCheckpoint(ctx context.Context, accountID string, maxObjectLastModified time.Time) error {
+	return nil
+}
+func (m *MockRepository) CountFinOpsBillingFactsInDateRange(ctx context.Context, from, to time.Time, accountIDs []string) (int64, error) {
+	return 0, nil
+}
+func (m *MockRepository) SumFinOpsFactPretaxCGByDateRange(ctx context.Context, from, to time.Time, accountIDs []string) (c, g float64, err error) {
+	return 0, 0, nil
+}
+func (m *MockRepository) SumFinOpsFactPretaxTotalByDateRange(ctx context.Context, from, to time.Time, accountIDs []string) (float64, error) {
+	return 0, nil
+}
 func (m *MockRepository) DeleteLineItemsOlderThan(ctx context.Context, before time.Time, accountID string) error {
 	return nil
 }
@@ -1673,6 +1861,68 @@ func (m *MockRepository) UpsertCloudBillMonthStatus(ctx context.Context, s Cloud
 }
 func (m *MockRepository) GetCloudBillMonthStatus(ctx context.Context, billingCycle, accountID string) (*CloudBillMonthStatus, error) {
 	return nil, nil
+}
+
+func (m *MockRepository) InsertFinOpsSyncJob(ctx context.Context, j FinOpsSyncJobRow) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	id := m.nextFinopsJobID
+	m.nextFinopsJobID++
+	j.ID = id
+	if j.CreatedAt.IsZero() {
+		j.CreatedAt = time.Now().UTC()
+	}
+	row := j
+	m.finopsSyncJobs[id] = &row
+	return id, nil
+}
+
+func (m *MockRepository) UpdateFinOpsSyncJob(ctx context.Context, j FinOpsSyncJobRow) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.finopsSyncJobs[j.ID] == nil {
+		return fmt.Errorf("finops_sync_job %d not found", j.ID)
+	}
+	*m.finopsSyncJobs[j.ID] = j
+	return nil
+}
+
+func (m *MockRepository) GetFinOpsSyncJob(ctx context.Context, id int64) (*FinOpsSyncJobRow, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if j := m.finopsSyncJobs[id]; j != nil {
+		return j, nil
+	}
+	return nil, sql.ErrNoRows
+}
+
+func (m *MockRepository) CountActiveFinOpsSyncJobs(ctx context.Context) (int64, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var n int64
+	for _, j := range m.finopsSyncJobs {
+		if j.Status == "queued" || j.Status == "running" {
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (m *MockRepository) GetActiveFinOpsSyncJobID(ctx context.Context) (int64, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var maxID int64
+	for _, j := range m.finopsSyncJobs {
+		if j.Status == "queued" || j.Status == "running" {
+			if j.ID > maxID {
+				maxID = j.ID
+			}
+		}
+	}
+	if maxID == 0 {
+		return 0, sql.ErrNoRows
+	}
+	return maxID, nil
 }
 
 // Helper methods for MockRepository

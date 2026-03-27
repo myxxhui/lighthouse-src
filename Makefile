@@ -18,10 +18,13 @@ DEPLOY_DIR := ../lighthouse-deploy
 
 # 镜像构建：默认仅当前平台以加速本地/CI；多架构可传 DOCKER_PLATFORM=linux/amd64,linux/arm64
 DOCKER_PLATFORM ?= linux/amd64
+# lighthouse 镜像保留最近 KEEP 个版本（与 deploy/scripts/docker-prune-lighthouse-images.sh 一致）
+KEEP ?= 5
 
 .PHONY: help build build-backend build-frontend build-all docker-backend docker-frontend \
         docker-all build-images run-local run-docker push-images test lint clean clean-env clean-dangling-images security-scan \
-        verify-build verify-phase1 verify-phase2 verify-phase3 generate-sbom sign-images
+        verify-build verify-phase1 verify-phase2 verify-phase3 generate-sbom sign-images \
+        prune-lighthouse
 
 # 默认目标：显示帮助
 help:
@@ -42,6 +45,7 @@ help:
 	@echo "  make clean             清理构建产物（含 docker system prune）"
 	@echo "  make clean-env         一键清理运行容器、数据卷与前后端镜像（deploy 环境）"
 	@echo "  make clean-dangling-images  仅清理悬空/残缺镜像（<none>:<none>，构建失败残留）"
+	@echo "  make prune-lighthouse  清理 BuildKit 缓存 + 悬空镜像 + 仅保留最近 KEEP 个 lighthouse 镜像（默认 KEEP=5）"
 	@echo "  make security-scan     安全扫描"
 	@echo "  make verify-build      验证构建结果"
 	@echo "  make verify-phase1     Phase1 一键验收（骨架+领域+配置）"
@@ -116,6 +120,11 @@ docker-frontend:
 docker-all: docker-backend docker-frontend
 # 与文档附录一致的一键构建入口
 build-images: docker-all
+
+# [Ref: lighthouse-deploy/scripts/docker-prune-lighthouse-images.sh] 释放磁盘：BuildKit + 悬空层 + 保留最近 KEEP 个 lighthouse 镜像
+prune-lighthouse:
+	@echo "🧹 prune-lighthouse（KEEP=$(KEEP)）..."
+	@cd $(DEPLOY_DIR) && KEEP=$(KEEP) ./scripts/docker-prune-lighthouse-images.sh
 
 # 本地开发运行
 run-local:

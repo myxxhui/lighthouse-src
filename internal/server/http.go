@@ -23,14 +23,16 @@ import (
 
 // HTTPServer encapsulates the HTTP server with Gin engine and configuration.
 type HTTPServer struct {
-	config      *config.Config
-	engine      *gin.Engine
-	server      *http.Server
-	costService *service.CostService
+	config       *config.Config
+	engine       *gin.Engine
+	server       *http.Server
+	costService  *service.CostService
+	finopsSync   *service.FinOpsSyncRunner
 }
 
 // NewHTTPServer creates a new HTTP server instance. Uses Mock data if costService is nil.
-func NewHTTPServer(cfg *config.Config, costService *service.CostService) *HTTPServer {
+// finopsSync 可为 nil：此时 POST/GET /finops/sync-jobs 返回 503；GET /finops/effective-config 仍返回进程内配置。[Ref: 03_Phase6/01_FinOps 主动同步]
+func NewHTTPServer(cfg *config.Config, costService *service.CostService, finopsSync *service.FinOpsSyncRunner) *HTTPServer {
 	// Set Gin mode based on environment
 	if cfg.Env == config.EnvProduction {
 		gin.SetMode(gin.ReleaseMode)
@@ -50,6 +52,7 @@ func NewHTTPServer(cfg *config.Config, costService *service.CostService) *HTTPSe
 		config:      cfg,
 		engine:      engine,
 		costService: costService,
+		finopsSync:  finopsSync,
 	}
 
 	// Setup routes
@@ -77,6 +80,9 @@ func (s *HTTPServer) setupRoutes() {
 		// ROI routes
 		roiGroup := apiV1.Group("/roi")
 		s.registerROIRoutes(roiGroup)
+
+		finopsGroup := apiV1.Group("/finops")
+		s.registerFinOpsRoutes(finopsGroup)
 	}
 
 	// Swagger documentation - enable in non-production environments
@@ -154,15 +160,32 @@ func parseMonthOrDay(s string) (time.Time, error) {
 	return time.Parse("2006-01-02", s)
 }
 
+// parseCostTrackQuery 返回 technical|finance；非法或空返回 ""（旧客户端语义）。[Ref: 03_Phase6/01_FinOps双轨语义与全域成本契约_设计 §API、track 与 UX]
+func parseCostTrackQuery(q string) string {
+	q = strings.ToLower(strings.TrimSpace(q))
+	switch q {
+	case "technical", "finance":
+		return q
+	default:
+		return ""
+	}
+}
+
 // globalCost handles GET /api/v1/cost/global?period=month|quarter|... 或 date_from=YYYY-MM&date_to=YYYY-MM（自定义月份范围，从月原始表叠加 [Ref: 04_01_成本透视真实数据]）
+// ledger_refresh=1|true：在读库前对各环境执行 BSS 余额/应付等 FinOps 辅助同步（拉取云 API 写入 PG）。[Ref: 03_Phase6/01_FinOps]
 func (s *HTTPServer) globalCost(c *gin.Context) {
+	ctx := c.Request.Context()
+	if q := strings.ToLower(strings.TrimSpace(c.Query("ledger_refresh"))); q == "1" || q == "true" || q == "yes" {
+		ctx = service.WithLedgerRefresh(ctx)
+	}
+	track := parseCostTrackQuery(c.Query("track"))
 	dateFrom := c.Query("date_from")
 	dateTo := c.Query("date_to")
 	if dateFrom != "" && dateTo != "" && s.costService != nil {
 		from, err1 := parseMonthOrDay(dateFrom)
 		to, err2 := parseMonthOrDay(dateTo)
 		if err1 == nil && err2 == nil {
-			resp, err := s.costService.GetGlobalCostByDateRange(c.Request.Context(), from, to)
+			resp, err := s.costService.GetGlobalCostByDateRange(ctx, from, to, track)
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return
@@ -171,7 +194,7 @@ func (s *HTTPServer) globalCost(c *gin.Context) {
 			if resp != nil {
 				c.JSON(http.StatusOK, resp)
 			} else {
-				c.JSON(http.StatusOK, gin.H{
+				empty := gin.H{
 					"total_cost":        0,
 					"total_optimizable": 0,
 					"global_efficiency": 0,
@@ -179,7 +202,11 @@ func (s *HTTPServer) globalCost(c *gin.Context) {
 					"env_breakdown":     []interface{}{},
 					"namespaces":        nil,
 					"timestamp":         time.Now().UTC(),
-				})
+				}
+				if track != "" {
+					empty["metadata"] = gin.H{"effective_track": track}
+				}
+				c.JSON(http.StatusOK, empty)
 			}
 			return
 		}
@@ -197,7 +224,7 @@ func (s *HTTPServer) globalCost(c *gin.Context) {
 		}
 	}
 	if s.costService != nil {
-		resp, err := s.costService.GetGlobalCost(c.Request.Context(), period, metricType, envs)
+		resp, err := s.costService.GetGlobalCost(ctx, period, metricType, envs, track)
 		if err != nil {
 			// D1-4：降级查询超时返回 503
 			if errors.Is(err, service.ErrFallbackTimeout) {
@@ -281,10 +308,11 @@ func (s *HTTPServer) drilldownEnvCost(c *gin.Context) {
 	sortOrder := c.DefaultQuery("sort", "cost_desc")
 	dateFromStr := c.Query("date_from")
 	dateToStr := c.Query("date_to")
+	track := parseCostTrackQuery(c.Query("track"))
 	if s.costService != nil && dateFromStr != "" && dateToStr != "" {
 		if from, err := parseMonthOrDay(dateFromStr); err == nil {
 			if to, err := parseMonthOrDay(dateToStr); err == nil {
-				list, err := s.costService.GetGlobalDrilldownByDateRange(c.Request.Context(), from, to, category, sortOrder, envId)
+				list, err := s.costService.GetGlobalDrilldownByDateRange(c.Request.Context(), from, to, category, sortOrder, envId, track)
 				if err != nil {
 					c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 					return
@@ -318,17 +346,18 @@ func (s *HTTPServer) drilldownEnvCost(c *gin.Context) {
 	c.JSON(http.StatusOK, []dto.EnvDrilldownItem{})
 }
 
-// drilldownGlobalCost handles GET /api/v1/cost/drilldown/global?report_type=&period_key=&category=&sort=&env= [Ref: 01_设计 D9-8、D6 云产品成本明细索引、12_API]
+// drilldownGlobalCost handles GET /api/v1/cost/drilldown/global?report_type=&period_key=&category=&sort=&env=&track= [Ref: 01_设计 D9-8、D6 云产品成本明细索引、12_API]
 func (s *HTTPServer) drilldownGlobalCost(c *gin.Context) {
 	category := c.Query("category")
 	sortOrder := c.DefaultQuery("sort", "cost_desc")
 	env := c.DefaultQuery("env", "all") // all | POC | FAT | UAT | PROD
 	dateFromStr := c.Query("date_from")
 	dateToStr := c.Query("date_to")
+	track := parseCostTrackQuery(c.Query("track"))
 	if s.costService != nil && dateFromStr != "" && dateToStr != "" {
 		if from, err := parseMonthOrDay(dateFromStr); err == nil {
 			if to, err := parseMonthOrDay(dateToStr); err == nil {
-				list, err := s.costService.GetGlobalDrilldownByDateRange(c.Request.Context(), from, to, category, sortOrder, env)
+				list, err := s.costService.GetGlobalDrilldownByDateRange(c.Request.Context(), from, to, category, sortOrder, env, track)
 				if err != nil {
 					c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 					return
@@ -347,7 +376,7 @@ func (s *HTTPServer) drilldownGlobalCost(c *gin.Context) {
 		periodKey = time.Now().UTC().AddDate(0, 0, -1).Format("2006-01-02")
 	}
 	if s.costService != nil {
-		list, err := s.costService.GetGlobalDrilldown(c.Request.Context(), reportType, periodKey, category, sortOrder, env)
+		list, err := s.costService.GetGlobalDrilldown(c.Request.Context(), reportType, periodKey, category, sortOrder, env, track)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -361,12 +390,13 @@ func (s *HTTPServer) drilldownGlobalCost(c *gin.Context) {
 	c.JSON(http.StatusOK, []dto.EnvDrilldownItem{})
 }
 
-// costTrend handles GET /api/v1/cost/trend?period=7d|30d|90d&env=POC|FAT|UAT|PROD|all [Ref: 01_设计 D9-9、12_API]
+// costTrend handles GET /api/v1/cost/trend?period=7d|30d|90d&env=POC|FAT|UAT|PROD|all&track=technical|finance [Ref: 01_设计 D9-9、12_API]
 func (s *HTTPServer) costTrend(c *gin.Context) {
 	period := c.Query("period")
 	dateFromStr := c.Query("date_from")
 	dateToStr := c.Query("date_to")
 	envFilter := c.Query("env")
+	track := parseCostTrackQuery(c.Query("track"))
 	var dateFrom, dateTo *time.Time
 	if dateFromStr != "" && dateToStr != "" {
 		if from, err := parseMonthOrDay(dateFromStr); err == nil {
@@ -377,7 +407,7 @@ func (s *HTTPServer) costTrend(c *gin.Context) {
 		}
 	}
 	if s.costService != nil {
-		resp, err := s.costService.GetCostTrend(c.Request.Context(), period, dateFrom, dateTo, envFilter)
+		resp, err := s.costService.GetCostTrend(c.Request.Context(), period, dateFrom, dateTo, envFilter, track)
 		if err != nil {
 			if errors.Is(err, service.ErrFallbackTimeout) {
 				c.JSON(http.StatusServiceUnavailable, gin.H{"error": "cost trend query timeout"})

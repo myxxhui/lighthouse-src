@@ -32,11 +32,19 @@ class ApiClient {
         return response;
       },
       error => {
-        const data = error.response?.data as { message?: string; error?: string; code?: string } | undefined;
+        const data = error.response?.data as {
+          message?: string;
+          error?: string;
+          code?: string;
+          active_job_id?: number;
+        } | undefined;
         const apiError: ApiError = {
           message: data?.error || data?.message || error.message || '未知错误',
           code: data?.code || (error.response ? String(error.response.status) : 'UNKNOWN_ERROR'),
           timestamp: new Date().toISOString(),
+          ...(typeof data?.active_job_id === 'number' && data.active_job_id > 0
+            ? { active_job_id: data.active_job_id }
+            : {}),
         };
         return Promise.reject(apiError);
       },

@@ -91,6 +91,7 @@ CREATE TABLE IF NOT EXISTS cost_cloud_bill_line_items (
     currency            VARCHAR(8) DEFAULT 'CNY',
     is_reversal         BOOLEAN NOT NULL DEFAULT FALSE,
     account_id          VARCHAR(64) NOT NULL DEFAULT '',
+    ingestion_channel   VARCHAR(32) DEFAULT 'api_query_account_bill',
     region              VARCHAR(32),
     raw_payload         JSONB,
     synced_at           TIMESTAMP NOT NULL DEFAULT NOW(),
@@ -118,6 +119,70 @@ CREATE TABLE IF NOT EXISTS cost_cloud_bill_month_status (
     updated_at          TIMESTAMP NOT NULL DEFAULT NOW(),
     PRIMARY KEY (billing_cycle, account_id)
 );
+-- [Ref: 03_Phase6/01_FinOps] BSS 与账期应付(U)
+CREATE TABLE IF NOT EXISTS cost_bss_transactions (
+    transaction_number VARCHAR(128) NOT NULL,
+    account_id         VARCHAR(64) NOT NULL DEFAULT '',
+    transaction_time   TIMESTAMP NOT NULL,
+    amount             NUMERIC(14, 6) NOT NULL,
+    transaction_type   VARCHAR(32),
+    transaction_flow   VARCHAR(16),
+    record_id          VARCHAR(128),
+    billing_cycle      VARCHAR(16),
+    currency           VARCHAR(8) DEFAULT 'CNY',
+    synced_at          TIMESTAMP NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (transaction_number)
+);
+CREATE INDEX IF NOT EXISTS idx_bss_tx_account_time ON cost_bss_transactions(account_id, transaction_time);
+CREATE TABLE IF NOT EXISTS cost_bss_balance_snapshot (
+    account_id        VARCHAR(64) NOT NULL,
+    snapshot_date     DATE NOT NULL,
+    available_amount  NUMERIC(14, 6) NOT NULL,
+    currency          VARCHAR(8) DEFAULT 'CNY',
+    synced_at         TIMESTAMP NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (account_id, snapshot_date)
+);
+CREATE TABLE IF NOT EXISTS cost_bill_outstanding_monthly (
+    billing_cycle        VARCHAR(32) NOT NULL,
+    account_id           VARCHAR(64) NOT NULL DEFAULT '',
+    outstanding_amount   NUMERIC(14, 6) NOT NULL,
+    synced_at            TIMESTAMP NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (billing_cycle, account_id)
+);
+-- [Ref: Phase6 OLAP] OSS 账单明细事实表；bulk UPSERT ON CONFLICT (account_id, dedup_key)。[Ref: 04_采集 §5.6]
+CREATE TABLE IF NOT EXISTS finops_billing_fact (
+    id              BIGSERIAL PRIMARY KEY,
+    billing_cycle   VARCHAR(7) NOT NULL,
+    usage_date      DATE NOT NULL,
+    account_alias   VARCHAR(256),
+    account_id      VARCHAR(64) NOT NULL DEFAULT '',
+    env             VARCHAR(32) NOT NULL DEFAULT 'UNTAGGED',
+    product_code    VARCHAR(128),
+    instance_id     VARCHAR(512),
+    item_code       VARCHAR(1024) NOT NULL DEFAULT '',
+    amount          NUMERIC(18, 6) NOT NULL,
+    currency        VARCHAR(8) DEFAULT 'CNY',
+    tags_json       JSONB,
+    source_object   VARCHAR(1024),
+    dedup_key       VARCHAR(128) NOT NULL,
+    ingested_at     TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE (account_id, dedup_key)
+);
+CREATE INDEX IF NOT EXISTS idx_finops_fact_cycle_date ON finops_billing_fact(billing_cycle, usage_date);
+CREATE INDEX IF NOT EXISTS idx_finops_fact_account_date ON finops_billing_fact(account_id, usage_date);
+CREATE INDEX IF NOT EXISTS idx_finops_fact_env ON finops_billing_fact(env, usage_date);
+CREATE OR REPLACE VIEW finops_cash_flow AS
+SELECT
+    transaction_number AS flow_id,
+    account_id,
+    transaction_time   AS occurred_at,
+    amount,
+    transaction_type   AS flow_type,
+    transaction_flow,
+    billing_cycle,
+    currency,
+    synced_at
+FROM cost_bss_transactions;
 
 -- [Ref: 06_ 成本云账单三表] 月/日原始表主键含 account_id，多环境各写一行 [Ref: 01_多环境 UAT]
 CREATE TABLE IF NOT EXISTS cost_cloud_bill_monthly_raw (
@@ -166,8 +231,11 @@ CREATE TABLE IF NOT EXISTS cost_env_account_config (
     created_at      TIMESTAMP DEFAULT NOW()
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_env_account ON cost_env_account_config(environment);
--- [Ref: 01_设计 §环境与云账号配置] 单账号时至少一条映射，供按环境总账展示；多账号可后续插入 FAT/UAT/PROD
+-- [Ref: 01_设计 §环境与云账号配置、01_多环境 UAT] 预置 POC/UAT/FAT/PROD，多账号时 ETL 按 account_id 写入，聚合时可展示各环境
 INSERT INTO cost_env_account_config (environment, account_id, display_name, sort_order) VALUES ('POC', 'POC', 'POC 演示账号', 1) ON CONFLICT (environment) DO NOTHING;
+INSERT INTO cost_env_account_config (environment, account_id, display_name, sort_order) VALUES ('UAT', 'UAT', 'UAT 中国站', 2) ON CONFLICT (environment) DO NOTHING;
+INSERT INTO cost_env_account_config (environment, account_id, display_name, sort_order) VALUES ('FAT', 'FAT', 'FAT 测试', 3) ON CONFLICT (environment) DO NOTHING;
+INSERT INTO cost_env_account_config (environment, account_id, display_name, sort_order) VALUES ('PROD', 'PROD', 'PROD 生产', 4) ON CONFLICT (environment) DO NOTHING;
 
 -- [Ref: 01_设计 §产品分类与按环境钻取、06_ §2.1] 云产品与成本分类映射
 CREATE TABLE IF NOT EXISTS product_category_mapping (

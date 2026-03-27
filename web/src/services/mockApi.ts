@@ -7,6 +7,7 @@ import {
   CostTimeRange,
   CostCompareMode,
   ResourceDimension,
+  type CostTrack,
 } from '@/types';
 
 // 按时间范围生成确定性的基准倍数（用于区分 1d/这周/近7天/30d/month/quarter 数据差异）；custom 按 30d 处理；这周与近七天须区分
@@ -34,6 +35,8 @@ const PREVIOUS_EFF_DELTA = -2;       // 上期效率 = 本期 - 2 个百分点
 const generateMockCostMetrics = (opts?: {
   period?: CostTimeRange;
   compareMode?: CostCompareMode;
+  /** [Ref: 03_Phase6/01_FinOps双轨语义与全域成本契约_设计] 仅 URL 含 track 时传入 */
+  track?: CostTrack;
 }): CostMetrics => {
   const period = opts?.period ?? '30d';
   const m = periodMultipliers[period];
@@ -47,6 +50,19 @@ const generateMockCostMetrics = (opts?: {
     { domain: '网络资源', cost: Math.round(15000 * m.cost), optimizableSpace: Math.round(4500 * m.optim), efficiency: baseEff },
   ];
 
+  const track = opts?.track;
+  const gMock = -Math.round(3200 * m.cost * 0.01);
+  const ledger =
+    track != null
+      ? {
+          C: baseCost * 1.02,
+          G: gMock,
+          P: baseCost * 0.98,
+          U: Math.round(9800 * m.cost * 0.01),
+          B: Math.round(41200 * m.cost * 0.01),
+        }
+      : undefined;
+
   const result: CostMetrics = {
     totalBillableCost: baseCost,
     totalOptimizableSpace: baseOptim,
@@ -59,6 +75,9 @@ const generateMockCostMetrics = (opts?: {
       security: 0,
     },
     lastUpdatedAt: new Date().toISOString(),
+    effectiveRequestTrack: track,
+    ledger,
+    reconciliation: track != null ? { residual: 0, explain: 'mock 对账占位' } : undefined,
     envBreakdown: [
       { environment: 'POC', account_id: 'mock-poc', account_display_name: 'POC 演示账号', total_cost: baseCost, previous_period_cost: opts?.compareMode === 'previous' ? Math.round(baseCost * PREVIOUS_COST_RATIO) : undefined, change_pct: opts?.compareMode === 'previous' ? 6.38 : undefined },
       { environment: 'FAT', account_id: '', account_display_name: '未配置', total_cost: 0 },
@@ -464,6 +483,7 @@ export const mockApi = {
   getGlobalCostMetrics: (params?: {
     period?: CostTimeRange;
     compareMode?: CostCompareMode;
+    track?: CostTrack;
   }): Promise<CostMetrics> => {
     return Promise.resolve(generateMockCostMetrics(params));
   },

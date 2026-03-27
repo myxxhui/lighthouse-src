@@ -11,6 +11,23 @@ export type CostTimeRange =
 /** 成本对比模式 */
 export type CostCompareMode = 'none' | 'previous';
 
+/** FinOps 双轨视角 [Ref: 03_Phase6/01_FinOps双轨语义与全域成本契约_设计 §前端展示规划] */
+export type CostTrack = 'technical' | 'finance';
+
+/** 五维账本 C/G/P/U/B */
+export interface FinOpsLedger {
+  C?: number;
+  G?: number;
+  P?: number;
+  U?: number;
+  B?: number;
+}
+
+export interface FinOpsReconciliation {
+  residual?: number;
+  explain?: string;
+}
+
 /** 成本账单详情：按四大类拆分的费用（与领域可对齐）；仅四大类，无其它。[Ref: 用户需求 仅四大分类] */
 export interface BillDetail {
   compute: number;
@@ -30,7 +47,7 @@ export interface DrilldownCostBreakdown {
   network: number;
 }
 
-/** 按环境（POC/FAT/UAT/PROD）总账与对比 [Ref: 01_设计 D9-4] */
+/** 按环境总账与对比；ledger_* 为五维按环境分摊（与 hero 五维一致） [Ref: 01_设计 D9-4、03_Phase6/01_FinOps] */
 export interface EnvBreakdownItem {
   environment: string;
   account_id: string;
@@ -38,6 +55,10 @@ export interface EnvBreakdownItem {
   total_cost: number;
   previous_period_cost?: number;
   change_pct?: number;
+  ledger_g?: number;
+  ledger_p?: number;
+  ledger_u?: number;
+  ledger_b?: number;
 }
 
 export interface CostMetrics {
@@ -58,7 +79,7 @@ export interface CostMetrics {
   /**
    * 账单对账状态标识 [Ref: 16_云账单动态对账与高可靠处理规范 §三段式]
    *   FINALIZED   → 已财务核算（历史月，权威）
-   *   PRELIMINARY → 动态同步中（当前月/近期数据）
+   *   PRELIMINARY → 动态同步（当前月/近期数据；UI 附自动调度说明）
    *   RECONCILING → 对账中
    *   DIRTY       → 数据偏差
    *   undefined   → 未知/不适用
@@ -66,6 +87,13 @@ export interface CostMetrics {
   billDataStatus?: string;
   /** 展示说明：月粒度周期净退款已抵减时后端返回，前端可展示「该周期净退款已抵减」 */
   displayNote?: string;
+  /** 请求携带的 track（仅 URL 含 track= 时）；用于 Hero Tag 与口径说明 [Ref: 03_Phase6/01_FinOps双轨语义与全域成本契约_设计] */
+  effectiveRequestTrack?: CostTrack;
+  /** 五维快照 */
+  ledger?: FinOpsLedger;
+  reconciliation?: FinOpsReconciliation;
+  /** 与后端 metadata.ledger_snapshot_note 一致；五维并列与守恒式说明 [Ref: 03_Phase6/01_FinOps双轨语义与全域成本契约_设计] */
+  ledgerSnapshotNote?: string;
 }
 
 /** 产品级成本（账单详情 top-N 与详情跳转） */
@@ -151,4 +179,6 @@ export interface ApiError {
   message: string;
   code: string;
   timestamp: string;
+  /** POST /finops/sync-jobs 409 FINOPS_SYNC_ACTIVE 时由后端返回，用于订阅进行中任务的进度 [Ref: 03_Phase6/01_FinOps 主动同步] */
+  active_job_id?: number;
 }

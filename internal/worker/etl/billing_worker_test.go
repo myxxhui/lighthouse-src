@@ -115,6 +115,36 @@ func (m *mockPipelineRepo) GetCloudBillMonthStatus(ctx context.Context, billingC
 	return nil, nil
 }
 
+func (m *mockPipelineRepo) UpsertBSSTransaction(ctx context.Context, tx postgres.BSSTransactionRow) error {
+	return nil
+}
+func (m *mockPipelineRepo) UpsertBSSBalanceSnapshot(ctx context.Context, s postgres.BSSBalanceSnapshotRow) error {
+	return nil
+}
+func (m *mockPipelineRepo) UpsertBillOutstandingMonthly(ctx context.Context, o postgres.BillOutstandingMonthlyRow) error {
+	return nil
+}
+
+func (m *mockPipelineRepo) DeleteFinOpsBillingFactsByBillingCycle(ctx context.Context, billingCycle, accountID string) error {
+	return nil
+}
+func (m *mockPipelineRepo) BulkInsertFinOpsBillingFacts(ctx context.Context, rows []postgres.FinOpsBillingFactRow) error {
+	return nil
+}
+func (m *mockPipelineRepo) ReplaceFinOpsBillingCycleWithFacts(ctx context.Context, billingCycle, accountID string, rows []postgres.FinOpsBillingFactRow) error {
+	return nil
+}
+func (m *mockPipelineRepo) GetFinOpsOSSSyncCheckpoint(ctx context.Context, accountID string) (time.Time, bool, error) {
+	return time.Time{}, false, nil
+}
+func (m *mockPipelineRepo) SetFinOpsOSSSyncCheckpoint(ctx context.Context, accountID string, maxObjectLastModified time.Time) error {
+	return nil
+}
+
+func (m *mockPipelineRepo) UpdateEnvAccountConfigAccountID(ctx context.Context, environment, aliyunAccountID string) error {
+	return nil
+}
+
 // mockBillingFetcher 返回固定数据的拉取器。
 type mockBillingFetcher struct {
 	resp *cloudbilling.FetchAccountSummaryResponse
@@ -143,6 +173,34 @@ func (m *mockBillingFetcher) FetchLineItems(ctx context.Context, req cloudbillin
 		BillingCycle: func() string { if len(req.BillingDate) >= 7 { return req.BillingDate[:7] }; return req.BillingDate }(),
 		Items:        nil,
 	}, nil
+}
+
+func (m *mockBillingFetcher) FetchBSSTransactions(ctx context.Context, start, end time.Time) ([]cloudbilling.BSSTransactionItem, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return nil, nil
+}
+
+func (m *mockBillingFetcher) FetchAccountBalanceSnapshot(ctx context.Context) (float64, string, error) {
+	if m.err != nil {
+		return 0, "", m.err
+	}
+	return 0, "CNY", nil
+}
+
+func (m *mockBillingFetcher) FetchOutstandingMonthly(ctx context.Context, billingCycle string) (float64, error) {
+	if m.err != nil {
+		return 0, m.err
+	}
+	return 0, nil
+}
+
+func (m *mockBillingFetcher) FetchCallingAccountID(ctx context.Context, billingCycle string) (string, error) {
+	if m.err != nil {
+		return "", m.err
+	}
+	return "", nil
 }
 
 func TestBillingWorker_Run_NilFetcher(t *testing.T) {

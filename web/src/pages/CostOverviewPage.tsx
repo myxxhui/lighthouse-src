@@ -1,25 +1,25 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'umi';
 import {
   Button, Statistic, Switch, Alert, Tooltip,
-  Select, Segmented, Radio, Modal, Descriptions, Table, DatePicker, Tag,
+  Select, Segmented, Radio, Modal, Descriptions, Table, DatePicker, Tag, message,
 } from 'antd';
 import dayjs, { type Dayjs } from 'dayjs';
 import {
-  LoadingOutlined, QuestionCircleOutlined,
+  LoadingOutlined, QuestionCircleOutlined, InfoCircleOutlined,
   CloudServerOutlined, DatabaseOutlined, GlobalOutlined, SafetyCertificateOutlined,
-  ArrowUpOutlined, ArrowDownOutlined,
+  ArrowUpOutlined, ArrowDownOutlined, SyncOutlined,
 } from '@ant-design/icons';
-import EfficiencyChart from '@/components/EfficiencyChart';
 import { useAppStore } from '@/store';
 import {
   AreaChart, Area, LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip as RTooltip,
   ResponsiveContainer, Legend,
 } from 'recharts';
-import type { CostTimeRange, CostCompareMode, CloudProductDrilldownItem } from '@/types';
+import type { ApiError, CostTimeRange, CostCompareMode, CloudProductDrilldownItem, CostTrack, EnvBreakdownItem } from '@/types';
 import type { DomainBreakdown } from '@/types';
 import { CURRENCY_SYMBOL } from '@/constants';
+import { costService } from '@/services/costService';
 
 /* ─── Static Config ──────────────────────────────────────────────────────── */
 // [Ref: 01_实践 §3.1 DNA front_end_time_ranges]
@@ -44,6 +44,14 @@ const DOMAIN_TO_CATEGORY: Record<string, string> = {
 const CATEGORY_TO_LABEL: Record<string, string> = {
   compute: '计算资源', storage: '存储', network: '网络', security: '安全',
 };
+// 五维格 Tooltip：极简提示，不展示恒等式或长说明 [Ref: 03_Phase6/01_FinOps]
+const FIVE_DIM_CELL_TIPS: Record<'C' | 'G' | 'P' | 'U' | 'B', string> = {
+  C: '账期内资源消耗（所选时间范围叠加）',
+  G: '回血与调账（所选时间范围叠加）',
+  P: '资金流水实付；本月未闭合账期时不展示该项',
+  U: '所选时间范围覆盖的账期下 outstanding 合计（应付在途）',
+  B: '各云账户可用余额快照之和；为当前时点，不随页顶时间范围变化',
+};
 // Domain visual metadata
 const DOMAIN_META: Record<string, { icon: React.ReactNode; color: string; gradStart: string; gradEnd: string }> = {
   '计算资源': { icon: <CloudServerOutlined />,      color: '#3b82f6', gradStart: 'rgba(59,130,246,0.18)',  gradEnd: 'rgba(59,130,246,0.04)'  },
@@ -51,6 +59,13 @@ const DOMAIN_META: Record<string, { icon: React.ReactNode; color: string; gradSt
   '网络':     { icon: <GlobalOutlined />,            color: '#06b6d4', gradStart: 'rgba(6,182,212,0.18)',   gradEnd: 'rgba(6,182,212,0.04)'   },
   '安全':     { icon: <SafetyCertificateOutlined />, color: '#f59e0b', gradStart: 'rgba(245,158,11,0.18)',  gradEnd: 'rgba(245,158,11,0.04)'  },
 };
+/** 账单「动态同步」徽标旁说明；与后端默认 ETL 调度一致（默认 cron UTC 01:00，见 ETL_SCHEDULE_CRON） [Ref: 03_Phase4/01_成本] */
+const BILL_DYNAMIC_SYNC_TOOLTIP =
+  '当前视图含未关账或滚动更新的账单区间，展示金额可能随云侧出账变化。云账单拉取默认按服务端调度每日 UTC 01:00 自动执行（约北京时间 09:00；实际以部署环境变量 ETL_SCHEDULE_CRON 为准）。';
+/** 「同步数据」按钮：手动触发异步任务，与定时 ETL 互补 [Ref: 03_Phase6/01_FinOps 主动同步] */
+const FINOPS_SYNC_MANUAL_TOOLTIP =
+  '手动触发 FinOps 辅助数据与云账单流水线异步任务，用于立即拉取最新账单并对齐聚合；与每日定时自动拉取互补。进行中会显示步骤进度，完成后本页数据将自动刷新。';
+
 const ENV_COLORS: Record<string, string> = { POC: '#3b82f6', FAT: '#10b981', UAT: '#f59e0b', PROD: '#ef4444' };
 const ENV_SELECTED_BG: Record<string, [string, string]> = {
   POC:  ['rgba(59,130,246,0.15)',  'rgba(59,130,246,0.08)'],
@@ -58,6 +73,24 @@ const ENV_SELECTED_BG: Record<string, [string, string]> = {
   UAT:  ['rgba(245,158,11,0.15)', 'rgba(245,158,11,0.08)'],
   PROD: ['rgba(239,68,68,0.15)',  'rgba(239,68,68,0.08)'],
 };
+
+/** 未知环境名：稳定 HSL 色，与预置四环境并存 [Ref: 03_Phase6/01_FinOps 多环境] */
+function envHue(env: string): number {
+  let h = 0;
+  for (let i = 0; i < env.length; i++) h = (h * 31 + env.charCodeAt(i)) % 360;
+  return h;
+}
+function getEnvColor(env: string): string {
+  const c = ENV_COLORS[env];
+  if (c) return c;
+  return `hsl(${envHue(env)}, 58%, 52%)`;
+}
+function getEnvSelectedBg(env: string, isDark: boolean): string {
+  const pair = ENV_SELECTED_BG[env];
+  if (pair) return pair[isDark ? 0 : 1] ?? '';
+  const h = envHue(env);
+  return isDark ? `hsla(${h}, 55%, 50%, 0.18)` : `hsla(${h}, 55%, 50%, 0.08)`;
+}
 
 type DetailModalType = 'bill' | 'efficiency' | null;
 
@@ -79,6 +112,16 @@ const CostOverviewPage: React.FC = () => {
   const [trendModalOpen, setTrendModalOpen] = useState(false);
   /** 从云产品明细行点击趋势图打开大图时，展示该产品趋势；否则展示总成本趋势 [Ref: 单产品趋势大图] */
   const [trendModalProductCode, setTrendModalProductCode] = useState<string | null>(null);
+  /** FinOps 主动同步 Job（POST + 轮询 GET + 步骤进度填充条） [Ref: 03_Phase6/01_FinOps 主动同步] */
+  const [finopsSyncLoading, setFinopsSyncLoading] = useState(false);
+  const [finopsSyncPoll, setFinopsSyncPoll] = useState<{
+    pct: number;
+    phaseDetail: string;
+    phase: string;
+  } | null>(null);
+  /** 防止重复轮询（刷新恢复与点击并发） [Ref: 03_Phase6/01_FinOps 主动同步] */
+  const finopsPollLockRef = useRef(false);
+  const pollFinopsJobUntilDoneRef = useRef<(jobId: number) => Promise<void>>(async () => {});
   // [Ref: 用户需求] 分页 state：受控 pageSize + currentPage，确保 showSizeChanger 选择后自动跳回第1页
   const [tablePageSize, setTablePageSize] = useState(20);
   const [tablePage, setTablePage] = useState(1);
@@ -115,9 +158,36 @@ const CostOverviewPage: React.FC = () => {
   const selectedEnvs: string[] = envsFromUrl && envsFromUrl !== 'all'
     ? envsFromUrl.split(',').map(s => s.trim()).filter(Boolean)
     : [];
+
+  /** 环境卡：以 API env_breakdown 顺序为准；URL 已选但尚未出现在 breakdown 中的环境追加在末尾 [Ref: 03_Phase6/01_FinOps 多环境] */
+  const envCardEnvironments = React.useMemo(() => {
+    const br = globalCostMetrics?.envBreakdown;
+    const ordered = br && br.length > 0 ? br.map(e => e.environment) : ['POC', 'FAT', 'UAT', 'PROD'];
+    const seen = new Set(ordered);
+    const extra = selectedEnvs.filter(e => e && !seen.has(e));
+    return [...ordered, ...extra];
+  }, [globalCostMetrics?.envBreakdown, selectedEnvs]);
+
+  const envFilterOptions = React.useMemo(() => {
+    const br = globalCostMetrics?.envBreakdown;
+    if (br && br.length > 0) {
+      return br.map(e => ({
+        label: e.account_display_name ? `${e.environment} (${e.account_display_name})` : e.environment,
+        value: e.environment,
+      }));
+    }
+    return ['POC', 'FAT', 'UAT', 'PROD'].map(e => ({ label: e, value: e }));
+  }, [globalCostMetrics?.envBreakdown]);
+
   const drilldownEnv = selectedEnvs.length ? selectedEnvs.join(',') : 'all';
   const drilldownCategory = searchParams.get('category') || undefined;
   const drilldownSort = searchParams.get('sort') || 'cost_desc';
+  /** 默认资金经营轨；仅 URL track=technical 时切技术消耗 [Ref: 03_Phase6/01_FinOps] */
+  const requestTrack: CostTrack = (() => {
+    const t = searchParams.get('track');
+    return t === 'technical' ? 'technical' : 'finance';
+  })();
+  const segmentTrackValue: CostTrack = requestTrack;
   // [Ref: 用户需求] 默认开启环比与趋势图；通过 ?compare_trend=0 / ?show_trend=0 可显式关闭
   const drilldownCompare = searchParams.get('compare_trend') !== '0';
   const showTrendChart = searchParams.get('show_trend') !== '0';
@@ -129,23 +199,165 @@ const CostOverviewPage: React.FC = () => {
   const effectiveDrilldownDateRange: [string, string] | null =
     (indexPeriod === 'custom' && indexDateFrom && indexDateTo ? [indexDateFrom, indexDateTo] : null) ?? costCustomDateRange;
 
+  const hasPreviousPeriodData = (m?: { envBreakdown?: { previous_period_cost?: number }[] } | null) =>
+    (m?.envBreakdown?.some(e => (e.previous_period_cost ?? 0) > 0)) ?? false;
+
   useEffect(() => {
-    fetchGlobalCostMetrics(selectedEnvs.length ? selectedEnvs : undefined);
+    fetchGlobalCostMetrics(selectedEnvs.length ? selectedEnvs : undefined, requestTrack);
     fetchNamespaceCosts();
-    fetchDrilldownGlobal(drilldownEnv, drilldownCategory, drilldownSort, { period: effectiveDrilldownPeriod, dateRange: effectiveDrilldownDateRange }, drilldownCompare);
-  }, [fetchGlobalCostMetrics, fetchNamespaceCosts, fetchDrilldownGlobal, costTimeRange, costCompareMode, costCustomDateRange, drilldownEnv, drilldownCategory, drilldownSort, effectiveDrilldownPeriod, effectiveDrilldownDateRange, drilldownCompare]);
+    fetchDrilldownGlobal(drilldownEnv, drilldownCategory, drilldownSort, { period: effectiveDrilldownPeriod, dateRange: effectiveDrilldownDateRange }, drilldownCompare, requestTrack);
+  }, [fetchGlobalCostMetrics, fetchNamespaceCosts, fetchDrilldownGlobal, costTimeRange, costCompareMode, costCustomDateRange, drilldownEnv, drilldownCategory, drilldownSort, effectiveDrilldownPeriod, effectiveDrilldownDateRange, drilldownCompare, requestTrack]);
 
   useEffect(() => {
     const period = effectiveDrilldownPeriod === '7d_range' ? '7d' : effectiveDrilldownPeriod === 'custom' ? undefined : effectiveDrilldownPeriod;
     const dateFrom = effectiveDrilldownDateRange?.[0];
     const dateTo = effectiveDrilldownDateRange?.[1];
     const envParam = drilldownEnv !== 'all' ? drilldownEnv : undefined;
+    const tr = requestTrack;
     if (effectiveDrilldownPeriod === 'custom' && dateFrom && dateTo) {
-      fetchCostTrend({ date_from: dateFrom, date_to: dateTo, env: envParam }, drilldownCompare);
+      fetchCostTrend({ date_from: dateFrom, date_to: dateTo, env: envParam, track: tr }, drilldownCompare);
     } else if (period) {
-      fetchCostTrend({ period, env: envParam }, drilldownCompare);
+      fetchCostTrend({ period, env: envParam, track: tr }, drilldownCompare);
     }
-  }, [effectiveDrilldownPeriod, effectiveDrilldownDateRange, drilldownCompare, drilldownEnv, fetchCostTrend]);
+  }, [effectiveDrilldownPeriod, effectiveDrilldownDateRange, drilldownCompare, drilldownEnv, fetchCostTrend, requestTrack]);
+
+  const pollFinopsJobUntilDone = useCallback(
+    async (jobId: number) => {
+      if (finopsPollLockRef.current) {
+        return;
+      }
+      finopsPollLockRef.current = true;
+      setFinopsSyncLoading(true);
+      try {
+        let terminal: string | null = null;
+        /** 最长约 4h；步骤进度来自 progress_current/total [Ref: 03_Phase6/01_FinOps 主动同步] */
+        const maxPolls = 7200;
+        const pollMs = 2000;
+        for (let i = 0; i < maxPolls; i++) {
+          if (i > 0) {
+            await new Promise<void>(r => setTimeout(r, pollMs));
+          }
+          const st = await costService.getFinOpsSyncJob(jobId);
+          const t = st.progress_total ?? 0;
+          const c = st.progress_current ?? 0;
+          const pct = t > 0 ? Math.min(100, Math.round((c / t) * 100)) : 0;
+          setFinopsSyncPoll({
+            pct,
+            phaseDetail: (st.phase_detail && String(st.phase_detail).trim()) ? String(st.phase_detail) : (st.phase || '—'),
+            phase: st.phase || '',
+          });
+          if (st.status === 'succeeded' || st.status === 'succeeded_with_warnings' || st.status === 'failed') {
+            terminal = st.status;
+            if (st.status === 'failed') {
+              message.error(st.error_message || '同步失败');
+            } else if (st.status === 'succeeded_with_warnings') {
+              message.warning(`同步完成（${(st.warnings ?? []).length} 条警告）`);
+            } else {
+              message.success('同步完成');
+            }
+            break;
+          }
+        }
+        if (!terminal) {
+          message.warning('同步超时，请稍后手动刷新页面');
+        }
+        await fetchGlobalCostMetrics(selectedEnvs.length ? selectedEnvs : undefined, requestTrack);
+        await fetchNamespaceCosts();
+        await fetchDrilldownGlobal(
+          drilldownEnv,
+          drilldownCategory,
+          drilldownSort,
+          { period: effectiveDrilldownPeriod, dateRange: effectiveDrilldownDateRange },
+          drilldownCompare,
+          requestTrack,
+        );
+      } finally {
+        finopsPollLockRef.current = false;
+        setFinopsSyncPoll(null);
+        setFinopsSyncLoading(false);
+      }
+    },
+    [
+      fetchGlobalCostMetrics,
+      fetchNamespaceCosts,
+      fetchDrilldownGlobal,
+      selectedEnvs,
+      requestTrack,
+      drilldownEnv,
+      drilldownCategory,
+      drilldownSort,
+      effectiveDrilldownPeriod,
+      effectiveDrilldownDateRange,
+      drilldownCompare,
+    ],
+  );
+
+  pollFinopsJobUntilDoneRef.current = pollFinopsJobUntilDone;
+
+  /** 刷新后恢复：有 queued/running Job 则自动轮询，无需再点「同步数据」 [Ref: 03_Phase6/01_FinOps 主动同步] */
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const st = await costService.getFinOpsSyncJobActive();
+        if (cancelled || !st) {
+          return;
+        }
+        if (st.status !== 'queued' && st.status !== 'running') {
+          return;
+        }
+        if (cancelled) {
+          return;
+        }
+        await pollFinopsJobUntilDoneRef.current(st.job_id);
+      } catch {
+        /* 忽略 active 接口不可用，不打断大盘 */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const runFinopsSync = useCallback(async () => {
+    if (finopsPollLockRef.current) {
+      message.info('同步任务已在进行中');
+      return;
+    }
+    setFinopsSyncLoading(true);
+    setFinopsSyncPoll({ pct: 0, phaseDetail: '提交中…', phase: '' });
+    let jobId: number;
+    try {
+      try {
+        const r = await costService.createFinOpsSyncJob();
+        jobId = r.job_id;
+      } catch (e: unknown) {
+        const ae = e as ApiError;
+        if (ae.code === 'FINOPS_SYNC_ACTIVE' && typeof ae.active_job_id === 'number' && ae.active_job_id > 0) {
+          jobId = ae.active_job_id;
+          message.info('已有同步任务进行中，正在显示进度…');
+        } else if (ae.code === 'FINOPS_SYNC_ACTIVE') {
+          message.warning('已有同步任务进行中，请稍后重试');
+          setFinopsSyncPoll(null);
+          setFinopsSyncLoading(false);
+          return;
+        } else {
+          throw e;
+        }
+      }
+      await pollFinopsJobUntilDone(jobId);
+    } catch (e: unknown) {
+      const ae = e as ApiError;
+      const msg = ae.message || '同步请求失败';
+      if (ae.code === 'FINOPS_SYNC_AUTH_REQUIRED' || ae.code === '401') {
+        message.error('未授权：后端已启用同步密钥，请配置构建环境变量 FINOPS_SYNC_JOB_KEY 与 FINOPS_SYNC_JOB_API_KEY 一致，或由网关注入请求头');
+      } else {
+        message.error(msg);
+      }
+      setFinopsSyncPoll(null);
+      setFinopsSyncLoading(false);
+    }
+  }, [pollFinopsJobUntilDone]);
 
   /* ─── Theme-aware Color Palette ─────────────────────────────────────────── */
   const isDark = theme === 'dark';
@@ -191,11 +403,13 @@ const CostOverviewPage: React.FC = () => {
   const BillDataStatusBadge = ({ status, isDark: dark }: { status: string; isDark: boolean }) => {
     const cfg: Record<string, { label: string; color: string; bg: string; dot: string }> = {
       FINALIZED:    { label: '已财务核算', color: '#10b981', bg: 'rgba(16,185,129,0.12)', dot: '#10b981' },
-      PRELIMINARY:  { label: '动态同步中', color: '#f59e0b', bg: 'rgba(245,158,11,0.12)',  dot: '#f59e0b' },
+      PRELIMINARY:  { label: '动态同步', color: '#f59e0b', bg: 'rgba(245,158,11,0.12)',  dot: '#f59e0b' },
       RECONCILING:  { label: '对账中',    color: '#3b82f6', bg: 'rgba(59,130,246,0.12)',  dot: '#3b82f6' },
       DIRTY:        { label: '数据偏差',  color: '#ef4444', bg: 'rgba(239,68,68,0.12)',   dot: '#ef4444' },
     };
-    const c = cfg[status] ?? { label: '动态同步中', color: '#f59e0b', bg: 'rgba(245,158,11,0.12)', dot: '#f59e0b' };
+    const c = cfg[status] ?? { label: '动态同步', color: '#f59e0b', bg: 'rgba(245,158,11,0.12)', dot: '#f59e0b' };
+    const isPreliminaryLike = status === 'PRELIMINARY' || !(status in cfg);
+    const showDynamicHelp = c.label === '动态同步';
     return (
       <span style={{
         display: 'inline-flex', alignItems: 'center', gap: 5,
@@ -206,11 +420,21 @@ const CostOverviewPage: React.FC = () => {
       }}>
         <span style={{
           width: 5, height: 5, borderRadius: '50%', background: c.dot,
-          boxShadow: status === 'PRELIMINARY' || status === 'RECONCILING' ? `0 0 4px ${c.dot}` : 'none',
-          animation: status === 'PRELIMINARY' ? 'pulse 2s infinite' : 'none',
+          boxShadow: isPreliminaryLike || status === 'RECONCILING' ? `0 0 4px ${c.dot}` : 'none',
+          animation: isPreliminaryLike ? 'pulse 2s infinite' : 'none',
           flexShrink: 0,
         }} />
         {c.label}
+        {showDynamicHelp && (
+          <Tooltip title={BILL_DYNAMIC_SYNC_TOOLTIP} placement="bottom" overlayStyle={{ maxWidth: 360 }}>
+            <InfoCircleOutlined
+              role="img"
+              aria-label="动态同步说明"
+              style={{ fontSize: 11, color: c.color, opacity: 0.9, cursor: 'help' }}
+              onClick={e => e.stopPropagation()}
+            />
+          </Tooltip>
+        )}
       </span>
     );
   };
@@ -234,14 +458,62 @@ const CostOverviewPage: React.FC = () => {
     );
   };
 
-  /* ─── Hero 全环境总成本：以 API total_cost 为唯一来源，与后端聚合一致 [Ref: 去掉总账单功能，与全环境总成本统一] ────────────────────────────────────────────────────── */
-  const totalCost = Number(globalCostMetrics?.totalBillableCost ?? 0);
+  /* ─── Hero 主金额：URL requestTrack 为口径。technical：C 与月表合计不一致时（C 为 0 但 total>0）回退 total。finance：ledger.P 已返回时以 P 为准（含 0），不把聚合 consumption 的 total 误作实付 [Ref: 03_Phase6/01_FinOps双轨语义与全域成本契约_设计] ────────────────────────────────────────────────────── */
+  const heroPrimaryAmount = React.useMemo(() => {
+    const m = globalCostMetrics;
+    if (!m) return 0;
+    const total = Number(m.totalBillableCost ?? 0);
+    let amt = total;
+    if (requestTrack === 'technical') {
+      const c = m.ledger?.C != null ? Number(m.ledger.C) : null;
+      if (c != null && !Number.isNaN(c) && (c > 0 || total <= 0)) amt = c;
+    } else if (requestTrack === 'finance') {
+      if (m.ledger?.P != null) {
+        const p = Number(m.ledger.P);
+        amt = Number.isNaN(p) ? total : p;
+      }
+    }
+    return amt;
+  }, [globalCostMetrics, requestTrack]);
   const prevTotalCost = globalCostMetrics?.previousPeriod?.totalBillableCost ?? null;
 
   const heroChangePct =
     costCompareMode === 'previous' && prevTotalCost && prevTotalCost > 0
-      ? ((totalCost - prevTotalCost) / prevTotalCost) * 100
+      ? ((heroPrimaryAmount - prevTotalCost) / prevTotalCost) * 100
       : null;
+
+  /** [Ref: 01_FinOps双轨] 默认 FinOps 轨；Hero 以 requestTrack（URL/默认）为真相源，不依赖 API 返回 effectiveRequestTrack */
+  const heroTitleLabel = requestTrack === 'technical' ? '全环境 · 消耗口径 (C)' : '全环境 · 实付 (P)';
+  const heroTagLabel = requestTrack === 'technical' ? '技术口径' : '资金口径';
+
+  /** 环境卡五维分摊分母：与后端 enrichEnvBreakdownLedgerDims 正额合计一致 [Ref: 03_Phase6/01_FinOps] */
+  const envBreakdownPositiveSum = React.useMemo(() => {
+    const br = globalCostMetrics?.envBreakdown;
+    if (!br?.length) return 0;
+    return br.reduce((s, e) => s + Math.max(0, e.total_cost ?? 0), 0);
+  }, [globalCostMetrics?.envBreakdown]);
+
+  /** 环境卡主数字：资金经营优先 ledger 分摊 P；技术消耗为各环境聚合消耗（C）[Ref: 03_Phase6/01_FinOps] */
+  const envCardPrimaryAmount = (item: EnvBreakdownItem) => {
+    if (requestTrack === 'finance') {
+      if (item.ledger_p != null && !Number.isNaN(Number(item.ledger_p))) return Number(item.ledger_p);
+      return item.total_cost ?? 0;
+    }
+    return item.total_cost ?? 0;
+  };
+
+  /** 环境卡 C：技术=聚合消耗；资金=按正额占比分摊全局 ledger.C（无则 0.00）[Ref: 03_Phase6/01_FinOps] */
+  const envCardDimC = (item: EnvBreakdownItem) => {
+    if (requestTrack === 'technical') return item.total_cost ?? 0;
+    const glC = globalCostMetrics?.ledger?.C;
+    if (glC != null && !Number.isNaN(Number(glC)) && envBreakdownPositiveSum > 0) {
+      return ((item.total_cost ?? 0) / envBreakdownPositiveSum) * Number(glC);
+    }
+    return 0;
+  };
+
+  const fmtDim = (v: number) =>
+    `${CURRENCY_SYMBOL}${Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   /* ─── Render: Filter Bar ─────────────────────────────────────────────────── */
   const renderFilterBar = () => (
@@ -259,7 +531,14 @@ const CostOverviewPage: React.FC = () => {
                 const val = e.target.value as CostTimeRange;
                 setCostCustomDateRange(null);
                 setCostTimeRange(val);
-                updateParams(n => { n.set('period', val); n.delete('date_from'); n.delete('date_to'); });
+                updateParams(n => {
+                  n.set('period', val);
+                  n.delete('date_from');
+                  n.delete('date_to');
+                  n.delete('index_period');
+                  n.delete('index_date_from');
+                  n.delete('index_date_to');
+                });
               }}
               optionType="button"
               buttonStyle="solid"
@@ -287,17 +566,48 @@ const CostOverviewPage: React.FC = () => {
                 if (!dates || !dates[0] || !dates[1]) {
                   setCostTimeRange('month');
                   setCostCustomDateRange(null);
-                  updateParams(n => { n.set('period', 'month'); n.delete('date_from'); n.delete('date_to'); });
+                  updateParams(n => {
+                    n.set('period', 'month');
+                    n.delete('date_from');
+                    n.delete('date_to');
+                    n.delete('index_period');
+                    n.delete('index_date_from');
+                    n.delete('index_date_to');
+                  });
                   return;
                 }
                 const from = dates[0].format('YYYY-MM');
                 const to   = dates[1].format('YYYY-MM');
                 setCostCustomDateRange([from, to]);
                 setCostTimeRange('custom');
-                updateParams(n => { n.set('period', 'custom'); n.set('date_from', from); n.set('date_to', to); });
+                updateParams(n => {
+                  n.set('period', 'custom');
+                  n.set('date_from', from);
+                  n.set('date_to', to);
+                  n.delete('index_period');
+                  n.delete('index_date_from');
+                  n.delete('index_date_to');
+                });
               }}
             />
           </div>
+        </div>
+        {/* FinOps 双轨视角 [Ref: 03_Phase6/01_FinOps双轨语义与全域成本契约_设计] */}
+        <div>
+          <div style={{ fontSize: 11, color: txt2, marginBottom: 6, letterSpacing: '0.04em', textTransform: 'uppercase', fontWeight: 500 }}>
+            视角
+          </div>
+          <Segmented
+            value={segmentTrackValue}
+            onChange={v => {
+              updateParams(n => { n.set('track', v as string); });
+            }}
+            options={[
+              { label: '技术消耗', value: 'technical' },
+              { label: '资金经营', value: 'finance' },
+            ]}
+            size="small"
+          />
         </div>
         {/* Compare */}
         <div>
@@ -338,6 +648,7 @@ const CostOverviewPage: React.FC = () => {
   /* ─── Render: Hero + Env Bento ───────────────────────────────────────────── */
   // [Ref: 01_实践] 全环境总成本与环境卡片框架始终渲染；无数据/报错时展示占位（— 或 0.00），不因数据缺失隐藏框架
   const renderHeroBento = () => (
+    <>
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gridTemplateRows: 'auto auto', gap: 12, marginBottom: 14 }}>
         {/* Hero card */}
         <div
@@ -366,8 +677,17 @@ const CostOverviewPage: React.FC = () => {
           {/* Top label */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div>
-              <div style={{ fontSize: 11, color: isDark ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.42)', fontWeight: 500, letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 8 }}>
-                全环境总成本
+              <div style={{ fontSize: 11, color: isDark ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.42)', fontWeight: 500, letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                {heroTitleLabel}
+                <Tooltip
+                  title={
+                    requestTrack === 'finance'
+                      ? '全环境主金额优先为全局 ledger 实付 P（无 ledger 时退化为聚合合计）。下方各环境主金额优先为 ledger 分摊 P（无则聚合实付）；各环境 P 之和通常≈全局 P。环境卡始终为全量账号，与页顶筛选无关；Hero/分解会随筛选变化。'
+                      : '全环境主金额为全局消耗 C（ledger 优先）。各环境主金额为该环境聚合消耗。环境卡为全量；筛选仅影响 Hero/分解。'
+                  }
+                >
+                  <QuestionCircleOutlined style={{ fontSize: 12, opacity: 0.55, cursor: 'help' }} />
+                </Tooltip>
               </div>
               {loadingGlobalMetrics ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, height: 60 }}>
@@ -379,7 +699,7 @@ const CostOverviewPage: React.FC = () => {
                   <div className="kpi-value-appear" style={{ fontSize: 42, fontWeight: 800, letterSpacing: '-0.02em', color: globalCostMetrics ? (isDark ? '#fff' : '#1e3a5f') : txt2, lineHeight: 1.1 }}>
                     {globalCostMetrics ? (
                       <><span style={{ fontSize: 22, fontWeight: 600, marginRight: 3, opacity: 0.7 }}>{CURRENCY_SYMBOL}</span>
-                      {totalCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</>
+                      {heroPrimaryAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</>
                     ) : (
                       <span style={{ fontSize: 24 }}>—</span>
                     )}
@@ -404,7 +724,7 @@ const CostOverviewPage: React.FC = () => {
                 border: `1px solid ${isDark ? 'rgba(59,130,246,0.35)' : 'rgba(59,130,246,0.25)'}`,
                 color: '#3b82f6', borderRadius: 20, fontSize: 11, fontWeight: 600, padding: '2px 10px',
               }}>
-                云账单
+                {heroTagLabel}
               </Tag>
               {/* 数据状态标识 [Ref: 16_云账单动态对账与高可靠处理规范 §三段式] */}
               {globalCostMetrics?.billDataStatus && (
@@ -432,14 +752,13 @@ const CostOverviewPage: React.FC = () => {
           )}
         </div>
 
-        {/* 4 Env cards - click to toggle single/multi env filter; 成本分解与云产品明细随选择展示 [Ref: 用户需求 环境多选] */}
-        {(['POC', 'FAT', 'UAT', 'PROD'] as const).map(env => {
+        {/* 环境卡（与 cost_env_account_config 顺序一致）；点击切换多选；成本分解与云产品明细随选择展示 [Ref: 用户需求 环境多选] */}
+        {envCardEnvironments.map(env => {
           const item = globalCostMetrics?.envBreakdown?.find(e => e.environment === env);
           const isConfigured = item && (item.account_id || item.total_cost > 0 || item.account_display_name !== '未配置');
           const isSelected = selectedEnvs.includes(env);
-          const totalCostEnv = item?.total_cost ?? 0;
           const changePct = item?.change_pct;
-          const color = ENV_COLORS[env];
+          const color = getEnvColor(env);
           return (
             <div
               key={env}
@@ -469,7 +788,7 @@ const CostOverviewPage: React.FC = () => {
                 padding: '16px 18px',
                 borderLeft: `3px solid ${color}`,
                 background: isSelected
-                  ? (ENV_SELECTED_BG[env]?.[isDark ? 0 : 1] ?? (isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)'))
+                  ? (getEnvSelectedBg(env, isDark) || (isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)'))
                   : (isDark ? `rgba(255,255,255,0.04)` : `rgba(255,255,255,0.78)`),
                 outline: isSelected ? `1.5px solid ${color}` : 'none',
                 cursor: 'pointer',
@@ -489,12 +808,44 @@ const CostOverviewPage: React.FC = () => {
                   {loadingGlobalMetrics && <LoadingOutlined style={{ fontSize: 12, color: txt2 }} />}
                 </div>
               </div>
-              <div style={{ fontSize: 11, color: isConfigured ? txt2 : (isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.3)'), marginBottom: 4, height: 16, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <div style={{ fontSize: 11, color: isConfigured ? txt2 : (isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.3)'), marginBottom: 4, minHeight: 16, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {item?.account_display_name ?? '未配置'}
               </div>
-              <div style={{ fontSize: 20, fontWeight: 700, color: isConfigured ? txt1 : (isDark ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.2)') }}>
-                {CURRENCY_SYMBOL}{totalCostEnv.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              <div style={{ fontSize: 11, fontWeight: 600, color: txt2, marginBottom: 4, letterSpacing: '0.04em' }}>
+                {requestTrack === 'finance' ? '主 · 实付 (P)' : '主 · 消耗 (C)'}
               </div>
+              <div style={{ fontSize: 22, fontWeight: 800, color: isConfigured ? txt1 : (isDark ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.2)'), lineHeight: 1.15, letterSpacing: '-0.02em' }}>
+                {item
+                  ? fmtDim(envCardPrimaryAmount(item))
+                  : `${CURRENCY_SYMBOL}0.00`}
+              </div>
+              {item && (
+                <div
+                  style={{
+                    marginTop: 10,
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(5, minmax(0, 1fr))',
+                    gap: 6,
+                    paddingTop: 10,
+                    borderTop: `1px solid ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'}`,
+                  }}
+                >
+                  {([
+                    ['C', envCardDimC(item), '消耗'],
+                    ['G', item.ledger_g ?? 0, '回血'],
+                    ['P', item.ledger_p ?? 0, '实付'],
+                    ['U', item.ledger_u ?? 0, '在途'],
+                    ['B', item.ledger_b ?? 0, '余额'],
+                  ] as const).map(([k, val, hint]) => (
+                    <div key={k} style={{ textAlign: 'center', minWidth: 0 }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: txt2, letterSpacing: '0.06em', marginBottom: 3 }}>{k}</div>
+                      <Tooltip title={`${k} · ${hint}`}>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: txt1, lineHeight: 1.2, wordBreak: 'break-all' }}>{fmtDim(val)}</div>
+                      </Tooltip>
+                    </div>
+                  ))}
+                </div>
+              )}
               {costCompareMode === 'previous' && changePct != null && !Number.isNaN(changePct) ? (
                 <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
                   <ChangeBadge pct={changePct} inverted />
@@ -511,35 +862,70 @@ const CostOverviewPage: React.FC = () => {
           );
         })}
       </div>
+    </>
   );
 
-  /* ─── Render: KPI Cards (placeholder when no data) ─────────────────────────── */
-  const renderKpiCardsPlaceholder = () => {
-    const labels = [
-      { label: '可优化空间', tip: '云账单模式下暂不计算优化空间。', accentColor: '#8b5cf6' },
-      { label: '全局效率分', tip: '云账单模式下暂不计算效率分。', accentColor: '#10b981' },
+  /* ─── 五维快照 [Ref: 03_Phase6/01_FinOps] 不展示恒等式文案，避免强定义 ───────────────────────── */
+  const renderFiveDimSnapshot = () => {
+    const ledger = globalCostMetrics?.ledger;
+    const rec = globalCostMetrics?.reconciliation;
+    const cells: { key: 'C' | 'G' | 'P' | 'U' | 'B'; label: string; color: string }[] = [
+      { key: 'C', label: 'C 消耗', color: '#3b82f6' },
+      { key: 'G', label: 'G 回血', color: '#8b5cf6' },
+      { key: 'P', label: 'P 实付', color: '#10b981' },
+      { key: 'U', label: 'U 应付·在途', color: '#f59e0b' },
+      { key: 'B', label: 'B 余额快照', color: '#06b6d4' },
     ];
+    const fmt = (key: 'C' | 'G' | 'P' | 'U' | 'B', v: number | undefined) => {
+      const n = v == null || Number.isNaN(Number(v)) ? 0 : Number(v);
+      return `${CURRENCY_SYMBOL}${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    };
     return (
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 12, marginBottom: 14, alignItems: 'start' }}>
-        {labels.map((k, i) => (
-          <div key={i} className="bento-card" style={{ ...gc, padding: '20px 22px', borderTop: `3px solid ${k.accentColor}` }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12, fontSize: 12, color: txt2, fontWeight: 500 }}>
-              {k.label}
-              <Tooltip title={k.tip}><QuestionCircleOutlined style={{ fontSize: 11, cursor: 'help' }} /></Tooltip>
-            </div>
-            <div style={{ fontSize: 28, fontWeight: 800, color: txt2, letterSpacing: '-0.02em' }}>—</div>
-          </div>
-        ))}
-        <div className="bento-card" style={{ ...gc, padding: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <EfficiencyChart efficiency={0} size={88} />
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ fontSize: 13, color: txt1, marginBottom: 12, letterSpacing: '0.06em', fontWeight: 700 }}>
+          五维快照
         </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 12 }}>
+          {cells.map(({ key, label, color }) => (
+            <div
+              key={key}
+              className="bento-card"
+              style={{
+                ...gc,
+                padding: '18px 12px',
+                minHeight: 108,
+                borderTop: `3px solid ${color}`,
+                boxShadow: isDark ? `0 4px 20px rgba(0,0,0,0.35)` : `0 4px 18px rgba(0,0,0,0.06)`,
+              }}
+            >
+              <div style={{ fontSize: 11, color: txt2, marginBottom: 10, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+                {label}
+                <Tooltip title={FIVE_DIM_CELL_TIPS[key]}>
+                  <QuestionCircleOutlined style={{ fontSize: 11, opacity: 0.65, cursor: 'help' }} />
+                </Tooltip>
+              </div>
+              <div style={{ fontSize: 19, fontWeight: 800, color: txt1, letterSpacing: '-0.02em', wordBreak: 'break-all', lineHeight: 1.25 }}>
+                {fmt(key, ledger?.[key])}
+              </div>
+            </div>
+          ))}
+        </div>
+        {rec != null && (rec.residual != null || rec.explain) && (
+          <div style={{ marginTop: 8, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <Tag color="warning">对账差异</Tag>
+            {rec.explain ? (
+              <Tooltip title={rec.explain}>
+                <span style={{ fontSize: 11, color: txt2, cursor: 'help' }}>说明</span>
+              </Tooltip>
+            ) : null}
+          </div>
+        )}
       </div>
     );
   };
 
-  /* ─── Render: KPI Cards ──────────────────────────────────────────────────── */
-  // [Ref: 01_实践] 可优化空间/全局效率分框架始终渲染；无数据时展示占位（—），错误时先展示 Alert 再展示占位卡片
-  const renderKpiCards = () => {
+  /* ─── 全域指标加载/致命错误（已移除可优化/效率占位行）[Ref: 03_Phase6/01_FinOps UX] ─── */
+  const renderGlobalFetchStatus = () => {
     if (loadingGlobalMetrics && !globalCostMetrics) {
       return (
         <div style={{ ...gc, padding: 28, marginBottom: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
@@ -548,97 +934,19 @@ const CostOverviewPage: React.FC = () => {
         </div>
       );
     }
-    const showErrorBanner = errorGlobalMetrics && !globalCostMetrics;
-    if (showErrorBanner) {
+    if (errorGlobalMetrics && !globalCostMetrics) {
       return (
-        <>
-          <Alert
-            message="数据暂未就绪"
-            description={errorGlobalMetrics}
-            type="warning"
-            showIcon
-            action={<Button size="small" onClick={() => { resetErrors(); fetchGlobalCostMetrics(); fetchNamespaceCosts(); }}>重试</Button>}
-            style={{ marginBottom: 14 }}
-          />
-          {renderKpiCardsPlaceholder()}
-        </>
+        <Alert
+          message="数据暂未就绪"
+          description={errorGlobalMetrics}
+          type="warning"
+          showIcon
+          action={<Button size="small" onClick={() => { resetErrors(); fetchGlobalCostMetrics(selectedEnvs.length ? selectedEnvs : undefined, requestTrack); fetchNamespaceCosts(); }}>重试</Button>}
+          style={{ marginBottom: 14 }}
+        />
       );
     }
-    if (!globalCostMetrics) return renderKpiCardsPlaceholder();
-
-    const prev = globalCostMetrics.previousPeriod;
-    const isPlaceholder = globalCostMetrics.totalOptimizableSpace === 0 && globalCostMetrics.globalEfficiency === 0;
-    const optimChange = prev && prev.totalOptimizableSpace > 0 ? ((globalCostMetrics.totalOptimizableSpace - prev.totalOptimizableSpace) / prev.totalOptimizableSpace) * 100 : null;
-    const effChange = prev ? globalCostMetrics.globalEfficiency - prev.globalEfficiency : null;
-
-    const kpiData = [
-      {
-        label: '可优化空间',
-        tip: isPlaceholder ? '云账单模式下暂不计算优化空间。' : '账单成本减使用成本，点击下钻查看明细。',
-        value: isPlaceholder ? null : globalCostMetrics.totalOptimizableSpace,
-        prefix: CURRENCY_SYMBOL,
-        change: !isPlaceholder && costCompareMode === 'previous' ? optimChange : null,
-        inverted: true,
-        onClick: !isPlaceholder ? () => navigate(`/DrilldownPage?dimension=${selectedDimension}&focus=optimizable`) : undefined,
-        accentColor: '#8b5cf6',
-      },
-      {
-        label: '全局效率分',
-        tip: isPlaceholder ? '云账单模式下暂不计算效率分。' : '使用成本/账单成本×100%。',
-        value: isPlaceholder ? null : globalCostMetrics.globalEfficiency,
-        suffix: isPlaceholder ? undefined : '%',
-        change: !isPlaceholder && costCompareMode === 'previous' ? effChange : null,
-        inverted: false,
-        onClick: !isPlaceholder ? () => setDetailModal('efficiency') : undefined,
-        accentColor: '#10b981',
-      },
-    ];
-
-    return (
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 12, marginBottom: 14, alignItems: 'start' }}>
-        {kpiData.map((k, i) => (
-          <div
-            key={i}
-            className={`bento-card${k.onClick ? ' bento-card-clickable' : ''}`}
-            onClick={k.onClick}
-            style={{
-              ...gc,
-              padding: '20px 22px',
-              cursor: k.onClick ? 'pointer' : 'default',
-              borderTop: `3px solid ${k.accentColor}`,
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12, fontSize: 12, color: txt2, fontWeight: 500 }}>
-              {k.label}
-              <Tooltip title={k.tip}>
-                <QuestionCircleOutlined style={{ fontSize: 11, cursor: 'help' }} />
-              </Tooltip>
-            </div>
-            <div className="kpi-value-appear" style={{ fontSize: 28, fontWeight: 800, color: txt1, letterSpacing: '-0.02em', lineHeight: 1 }}>
-              {k.value === null ? (
-                <span style={{ fontSize: 20, color: txt2 }}>—</span>
-              ) : (
-                <>
-                  {k.prefix && <span style={{ fontSize: 16, fontWeight: 600, marginRight: 1, opacity: 0.65 }}>{k.prefix}</span>}
-                  {Number(k.value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  {k.suffix && <span style={{ fontSize: 16, marginLeft: 2 }}>{k.suffix}</span>}
-                </>
-              )}
-            </div>
-            {k.change !== null && k.value !== null && (
-              <div style={{ marginTop: 8 }}>
-                <ChangeBadge pct={k.change} inverted={k.inverted} />
-                <span style={{ fontSize: 11, color: txt2, marginLeft: 4 }}>较上期</span>
-              </div>
-            )}
-          </div>
-        ))}
-        {/* Efficiency Donut */}
-        <div className="bento-card" style={{ ...gc, padding: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <EfficiencyChart efficiency={globalCostMetrics.globalEfficiency} size={88} />
-        </div>
-      </div>
-    );
+    return null;
   };
 
   /* ─── Render: Domain Breakdown ───────────────────────────────────────────── */
@@ -717,17 +1025,11 @@ const CostOverviewPage: React.FC = () => {
                   {CURRENCY_SYMBOL}{domain.cost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </div>
                 {/* Proportion bar */}
-                <div style={{ height: 4, background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)', borderRadius: 2, overflow: 'hidden', marginBottom: 10 }}>
+                <div style={{ height: 4, background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)', borderRadius: 2, overflow: 'hidden' }}>
                   <div
                     className="domain-bar-fill"
                     style={{ height: '100%', width: `${pct}%`, background: `linear-gradient(90deg, ${meta.color}, ${meta.color}88)`, borderRadius: 2 }}
                   />
-                </div>
-                {/* Efficiency */}
-                <div style={{ fontSize: 11, color: txt2 }}>
-                  效率: <span style={{ color: domain.efficiency > 60 ? '#10b981' : domain.efficiency > 30 ? '#f59e0b' : txt2, fontWeight: 600 }}>
-                    {domain.efficiency > 0 ? `${domain.efficiency}%` : '—'}
-                  </span>
                 </div>
               </div>
             );
@@ -790,13 +1092,46 @@ const CostOverviewPage: React.FC = () => {
           </>
         )}
         <span style={{ fontSize: 12, color: txt2, fontWeight: 500, marginLeft: 4 }}>环境</span>
-        <Select value={drilldownEnv} style={{ width: 110 }} options={[{ label: '全环境', value: 'all' }, { label: 'POC', value: 'POC' }, { label: 'FAT', value: 'FAT' }, { label: 'UAT', value: 'UAT' }, { label: 'PROD', value: 'PROD' }]}
-          onChange={v => updateParams(n => { n.set('env', v); })}
+        <Select
+          mode="multiple"
+          allowClear
+          placeholder="全环境"
+          style={{ minWidth: 160, maxWidth: 280 }}
+          maxTagCount="responsive"
+          value={selectedEnvs.length > 0 ? selectedEnvs : undefined}
+          options={envFilterOptions}
+          onChange={vals => {
+            updateParams(n => {
+              if (!vals || vals.length === 0) {
+                n.delete('envs');
+                n.set('env', 'all');
+              } else {
+                n.set('envs', vals.join(','));
+                n.delete('env');
+              }
+            });
+          }}
         />
         <span style={{ fontSize: 12, color: txt2, fontWeight: 500 }}>大类</span>
         <Select value={drilldownCategory || 'all'} style={{ width: 120 }} options={[{ label: '全部', value: 'all' }, { label: '计算资源', value: 'compute' }, { label: '存储', value: 'storage' }, { label: '网络', value: 'network' }, { label: '安全', value: 'security' }]}
           onChange={v => updateParams(n => { if (v === 'all') n.delete('category'); else n.set('category', v); })}
         />
+        <span style={{ fontSize: 12, color: txt2, fontWeight: 500, marginLeft: 4 }}>视角</span>
+        <Tooltip title="与页顶一致；明细表与 drilldown/global 随 track 切换口径">
+          <span>
+            <Segmented
+              value={segmentTrackValue}
+              onChange={v => {
+                updateParams(n => { n.set('track', v as string); });
+              }}
+              options={[
+                { label: '技术消耗', value: 'technical' },
+                { label: '资金经营', value: 'finance' },
+              ]}
+              size="small"
+            />
+          </span>
+        </Tooltip>
         <span style={{ fontSize: 12, color: txt2, fontWeight: 500 }}>排序</span>
         <Select value={searchParams.get('sort') || 'cost_desc'} style={{ width: 110 }} options={[{ label: '成本降序', value: 'cost_desc' }, { label: '成本升序', value: 'cost_asc' }]}
           onChange={v => updateParams(n => { n.set('sort', v); })}
@@ -1014,7 +1349,8 @@ const CostOverviewPage: React.FC = () => {
               width: 120,
               align: 'center' as const,
               render: (v: string) => {
-                const label = CATEGORY_TO_LABEL[v] ?? v ?? '计算资源';
+                const catKey = (typeof v === 'string' ? v.toLowerCase() : '') as keyof typeof CATEGORY_TO_LABEL;
+                const label = CATEGORY_TO_LABEL[catKey] ?? v ?? '—';
                 const domainMeta = DOMAIN_META[label];
                 return domainMeta ? (
                   <span style={{
@@ -1146,20 +1482,107 @@ const CostOverviewPage: React.FC = () => {
             {globalCostMetrics && (globalCostMetrics.totalBillableCost ?? 0) > 0 ? '数据来源：云账单' : '数据来源：—'}
           </span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: txt2 }}>
-          <span className="live-dot" />
-          {globalCostMetrics?.lastUpdatedAt
-            ? `数据更新至 ${new Date(globalCostMetrics.lastUpdatedAt).toLocaleString('zh-CN', { dateStyle: 'short', timeStyle: 'short' })}`
-            : errorGlobalMetrics ? '暂未就绪' : '—'}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <Tooltip
+            title={
+              finopsSyncLoading && finopsSyncPoll
+                ? `${finopsSyncPoll.phaseDetail} · ${finopsSyncPoll.pct}%（步骤进度，非耗时）`
+                : FINOPS_SYNC_MANUAL_TOOLTIP
+            }
+          >
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={() => {
+                if (!finopsSyncLoading) void runFinopsSync();
+              }}
+              onKeyDown={e => {
+                if (!finopsSyncLoading && (e.key === 'Enter' || e.key === ' ')) {
+                  e.preventDefault();
+                  void runFinopsSync();
+                }
+              }}
+              style={{
+                position: 'relative',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 6,
+                minWidth: 148,
+                height: 32,
+                padding: '0 12px',
+                borderRadius: 8,
+                border: `1px solid ${isDark ? 'rgba(59,130,246,0.4)' : 'rgba(59,130,246,0.5)'}`,
+                overflow: 'hidden',
+                cursor: finopsSyncLoading ? 'wait' : 'pointer',
+                opacity: finopsSyncLoading ? 0.92 : 1,
+                background: isDark ? 'rgba(59,130,246,0.08)' : 'rgba(59,130,246,0.06)',
+                userSelect: 'none',
+              }}
+            >
+              <div
+                aria-hidden
+                style={{
+                  position: 'absolute',
+                  left: 0,
+                  top: 0,
+                  bottom: 0,
+                  width: `${finopsSyncLoading && finopsSyncPoll ? finopsSyncPoll.pct : 0}%`,
+                  background: 'linear-gradient(90deg, rgba(59,130,246,0.42), rgba(99,102,241,0.32))',
+                  transition: 'width 0.35s ease',
+                }}
+              />
+              <SyncOutlined style={{ position: 'relative', zIndex: 1, fontSize: 14, color: isDark ? '#93c5fd' : '#2563eb' }} />
+              <span style={{
+                position: 'relative',
+                zIndex: 1,
+                fontSize: 13,
+                fontWeight: 600,
+                color: isDark ? 'rgba(255,255,255,0.92)' : '#1e3a5f',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+              }}
+              >
+                {finopsSyncLoading ? (
+                  `同步中 ${finopsSyncPoll ? finopsSyncPoll.pct : 0}%`
+                ) : (
+                  <>
+                    同步数据
+                    <InfoCircleOutlined
+                      role="img"
+                      aria-label="同步数据说明"
+                      style={{ fontSize: 12, opacity: 0.75 }}
+                    />
+                  </>
+                )}
+              </span>
+            </div>
+          </Tooltip>
+          {globalCostMetrics?.billDataStatus && (
+            <BillDataStatusBadge status={globalCostMetrics.billDataStatus} isDark={isDark} />
+          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: txt2 }}>
+            <span className="live-dot" />
+            {globalCostMetrics?.lastUpdatedAt
+              ? `数据更新至 ${new Date(globalCostMetrics.lastUpdatedAt).toLocaleString('zh-CN', { dateStyle: 'short', timeStyle: 'short' })}`
+              : errorGlobalMetrics ? '暂未就绪' : '—'}
+          </div>
         </div>
       </div>
 
       {/* ── Alert: no data ── */}
       {globalCostMetrics && (globalCostMetrics.totalBillableCost ?? 0) === 0 && !errorGlobalMetrics && (
         <Alert
-          message="暂无真实数据"
-          description="请完成：1) 配置阿里云 AK/SK 并执行 ETL，将云账单写入日/月原始表与聚合表（cost_cloud_bill_daily_raw、cost_cloud_bill_aggregate 等）；2) 接入 Prometheus/K8s 获取集群内计算成本。部署后首次可触发全量回填或等待定时 ETL。"
-          type="warning" showIcon style={{ marginBottom: 14, borderRadius: 12 }}
+          message={hasPreviousPeriodData(globalCostMetrics) ? '本期暂无消费数据' : '暂无真实数据'}
+          description={
+            hasPreviousPeriodData(globalCostMetrics)
+              ? '本期（如本月）成本为 0，可能为 T+1 延迟或当月暂无消费；上期有数据说明 ETL 正常。'
+              : '请完成：1) 配置阿里云 AK/SK 并执行 ETL，将云账单写入日/月原始表与聚合表（cost_cloud_bill_daily_raw、cost_cloud_bill_aggregate 等）；2) 接入 Prometheus/K8s 获取集群内计算成本。部署后首次可触发全量回填或等待定时 ETL。'
+          }
+          type="warning"
+          showIcon
+          style={{ marginBottom: 14, borderRadius: 12 }}
         />
       )}
 
@@ -1176,8 +1599,9 @@ const CostOverviewPage: React.FC = () => {
           <Alert message="数据暂未更新" description={errorGlobalMetrics} type="warning" showIcon style={{ marginBottom: 14, borderRadius: 10 }} />
         )}
 
-        {/* KPI 4 cards */}
-        {renderKpiCards()}
+        {renderGlobalFetchStatus()}
+        {/* 五维快照 [Ref: 03_Phase6/01_FinOps] */}
+        {renderFiveDimSnapshot()}
 
         {/* Domain 4 cards */}
         {renderDomainBreakdown()}

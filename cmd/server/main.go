@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	_ "github.com/myxxhui/lighthouse-src/api" // 注册 Swagger docs 供 gin-swagger 使用
@@ -15,6 +16,7 @@ import (
 	"github.com/myxxhui/lighthouse-src/internal/server"
 	"github.com/myxxhui/lighthouse-src/internal/server/service"
 	"github.com/myxxhui/lighthouse-src/internal/worker/etl"
+	"github.com/robfig/cron/v3"
 )
 
 // Version, GitCommit, BuildTime 由构建时 ldflags 注入 [Ref: 04_Phase4/01_成本透视真实数据]
@@ -32,10 +34,12 @@ func main() {
 		cfg = defaultConfig()
 	}
 	// [Ref: 04_Phase4/01_成本透视真实数据] 支持 deploy 侧 POSTGRES_* 与 config 侧 PG_* 一致
-	fillPostgresFromEnv(cfg)
+		fillPostgresFromEnv(cfg)
 	fillCloudBillingFromEnv(cfg)
+	fillFinOpsFromEnv(cfg)
 
-		var repo postgres.Repository
+	var billingWorkers []*etl.BillingWorker
+	var repo postgres.Repository
 	if cfg.Postgres.Host != "" {
 		pgRepo, err := postgres.NewPGRepository(cfg.Postgres)
 		if err != nil {
@@ -45,13 +49,22 @@ func main() {
 			repo = pgRepo
 			// [Ref: 01_多环境 UAT] 启动时对每个有凭证的环境执行云账单 ETL；POC/UAT 等并列存储、聚合、前端展示。
 			if cfg.CloudBilling.Provider == "aliyun" {
-				workers := buildBillingWorkers(repo, cfg)
-				if len(workers) > 0 {
+				billingWorkers = buildBillingWorkers(repo, cfg)
+				if len(billingWorkers) > 0 {
 					log.Printf("billing ETL schedule (config): %s", cfg.CloudBilling.EffectiveETLScheduleCron())
-					for _, w := range workers {
-						runBillingETLCycle(context.Background(), w, 2*time.Hour)
-					}
-					go runNightlyBillingETL(workers, &cfg.CloudBilling)
+					// [Ref: 修复] 启动 ETL 改为后台执行，避免阻塞 HTTP 服务；健康检查通过前 ETL 可能未完成，API 返回空或历史数据
+					go func() {
+						for _, w := range billingWorkers {
+							warns, err := etl.RunFullETLCycle(context.Background(), w, 2*time.Hour)
+							for _, msg := range warns {
+								log.Printf("WARN: billing ETL: %s", msg)
+							}
+							if err != nil {
+								log.Printf("WARN: billing ETL pipeline: %v", err)
+							}
+						}
+					}()
+					go runScheduledBillingETL(billingWorkers, cfg.CloudBilling.EffectiveETLScheduleCron())
 				} else {
 					log.Printf("billing ETL skipped: CLOUD_BILLING_PROVIDER=aliyun but no AK/SK (set ALIBABA_CLOUD_ACCESS_KEY_ID/SECRET or ALIBABA_CLOUD_ACCESS_KEY_ID_POC/SECRET_POC etc.)")
 				}
@@ -72,9 +85,33 @@ func main() {
 			})
 		}
 	}
-	costSvc := service.NewCostService(repo)
+	rawCG := os.Getenv("FINOPS_CG_SOURCE")
+	effCG := config.EffectiveFinOpsCGSource(cfg.FinOpsCGSource)
+	if rawCG != "" {
+		low := strings.ToLower(strings.TrimSpace(rawCG))
+		if low != "oss" && low != "api" {
+			log.Printf("WARN: FINOPS_CG_SOURCE=%q is not oss|api, using oss", rawCG)
+		}
+	}
+	log.Printf("FINOPS_CG_SOURCE default=%s (raw=%q) byEnv=%v", effCG, rawCG, cfg.FinOpsCGSourceByEnv)
 
-	srv := server.NewHTTPServer(cfg, costSvc)
+	costSvc := service.NewCostService(repo, cfg.FinOpsCGSource, cfg.FinOpsCGSourceByEnv)
+	var finOpsAuxSync func(context.Context) error
+	if len(billingWorkers) > 0 {
+		finOpsAuxSync = func(ctx context.Context) error {
+			now := time.Now().UTC()
+			var firstErr error
+			for _, w := range billingWorkers {
+				if e := w.SyncFinOpsAuxiliary(ctx, now); e != nil && firstErr == nil {
+					firstErr = e
+				}
+			}
+			return firstErr
+		}
+		costSvc.SetFinOpsAuxiliarySync(finOpsAuxSync)
+	}
+	finopsSync := service.NewFinOpsSyncRunner(repo, cfg, billingWorkers, finOpsAuxSync)
+	srv := server.NewHTTPServer(cfg, costSvc, finopsSync)
 	if err := srv.StartWithGracefulShutdown(); err != nil {
 		log.Fatal(err)
 	}
@@ -162,7 +199,7 @@ func buildBillingWorkers(repo postgres.Repository, cfg *config.Config) []*etl.Bi
 	})
 	if fetcher != nil {
 		w := etl.NewBillingWorker(fetcher, repo, cycle)
-		w.AccountID = "POC" // 单账号时沿用 POC 展示
+		w.EnvKey = "POC" // 单账号时沿用 POC 展示（与 cost_env_account_config.environment、OSS AK 后缀一致）
 		w.ETLData = etlData
 		w.OnPipelineFailAlert = onFail
 		out = append(out, w)
@@ -176,7 +213,7 @@ func buildBillingWorkers(repo postgres.Repository, cfg *config.Config) []*etl.Bi
 			continue
 		}
 		w := etl.NewBillingWorker(f, repo, cycle)
-		w.AccountID = env
+		w.EnvKey = env
 		w.ETLData = etlData
 		w.OnPipelineFailAlert = onFail
 		out = append(out, w)
@@ -185,61 +222,37 @@ func buildBillingWorkers(repo postgres.Repository, cfg *config.Config) []*etl.Bi
 	return out
 }
 
-// runBillingETLCycle 执行一次账单 ETL 周期：全量检查 → 不满足则全量回填，满足则仅增量；再执行流水线（写昨日→校验→删周期外→写月→聚合）与对账。[Ref: 01_实践 部署与每日凌晨全量检查]
-func runBillingETLCycle(ctx context.Context, worker *etl.BillingWorker, maxDuration time.Duration) {
-	ctx, cancel := context.WithTimeout(ctx, maxDuration)
-	defer cancel()
-	if err := worker.Run(ctx); err != nil {
-		log.Printf("WARN: billing ETL run failed: %v", err)
-		if worker.OnPipelineFailAlert != nil {
-			worker.OnPipelineFailAlert("run", err)
-		}
+// runScheduledBillingETL 使用 ETL_SCHEDULE_CRON（与 config EffectiveETLScheduleCron 一致，默认 0 1 * * * = 每日 UTC 01:00）注册定时任务。[Ref: 04_采集 §七]
+func runScheduledBillingETL(workers []*etl.BillingWorker, cronExpr string) {
+	if len(workers) == 0 {
+		return
 	}
-	needFull, err := worker.NeedsFullBackfill(ctx)
-	if err != nil {
-		log.Printf("WARN: billing full check failed, will run full backfill: %v", err)
-		needFull = true
+	expr := strings.TrimSpace(cronExpr)
+	if expr == "" {
+		expr = "0 1 * * *"
 	}
-	if needFull {
-		log.Printf("billing ETL: full data check failed, running full backfill (10 months daily + 5 years monthly)")
-		if err := worker.RunFullBackfill(ctx); err != nil {
-			log.Printf("WARN: billing full backfill failed: %v", err)
-			if worker.OnPipelineFailAlert != nil {
-				worker.OnPipelineFailAlert("full_backfill", err)
+	c := cron.New(cron.WithLocation(time.UTC))
+	job := func() {
+		for _, w := range workers {
+			warns, err := etl.RunFullETLCycle(context.Background(), w, 2*time.Hour)
+			for _, msg := range warns {
+				log.Printf("WARN: billing ETL: %s", msg)
+			}
+			if err != nil {
+				log.Printf("WARN: billing ETL pipeline: %v", err)
 			}
 		}
 	}
-	if err := worker.RunPipeline(ctx); err != nil {
-		log.Printf("WARN: billing ETL pipeline run failed: %v", err)
-		if worker.OnPipelineFailAlert != nil {
-			worker.OnPipelineFailAlert("pipeline", err)
+	if _, err := c.AddFunc(expr, job); err != nil {
+		log.Printf("WARN: invalid ETL_SCHEDULE_CRON %q, using default 0 1 * * * (UTC): %v", expr, err)
+		expr = "0 1 * * *"
+		if _, err2 := c.AddFunc(expr, job); err2 != nil {
+			log.Printf("FATAL: billing ETL cron register failed: %v", err2)
+			return
 		}
 	}
-	if err := worker.RunReconcile(ctx); err != nil {
-		log.Printf("WARN: billing reconcile failed: %v", err)
-	}
-}
-
-// nextDurationTo1AMUTC 返回当前时间到下一次 01:00 UTC 的时长；若已过今日 01:00 则为明日 01:00。[Ref: 01_实践 每日凌晨 1 点全量检查]
-func nextDurationTo1AMUTC() time.Duration {
-	now := time.Now().UTC()
-	next := time.Date(now.Year(), now.Month(), now.Day(), 1, 0, 0, 0, time.UTC)
-	if !now.Before(next) {
-		next = next.AddDate(0, 0, 1)
-	}
-	return next.Sub(now)
-}
-
-// runNightlyBillingETL 每日凌晨 1 点（UTC）后对每个环境执行全量检查：不符合则全量更新，符合则仅增量更新并按规则删除周期外数据。
-func runNightlyBillingETL(workers []*etl.BillingWorker, _ *config.CloudBillingConfig) {
-	for {
-		d := nextDurationTo1AMUTC()
-		log.Printf("billing ETL nightly: next run in %v (after 01:00 UTC)", d.Round(time.Second))
-		time.Sleep(d)
-		for _, w := range workers {
-			runBillingETLCycle(context.Background(), w, 2*time.Hour)
-		}
-	}
+	log.Printf("billing ETL: cron registered (UTC): %s", expr)
+	c.Start()
 }
 
 // fillCloudBillingFromEnv 从环境变量填充云账单配置（如 CLOUD_BILLING_PROVIDER）。
@@ -277,5 +290,26 @@ func fillCloudBillingFromEnv(cfg *config.Config) {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			cfg.CloudBilling.ETLData.MonthlyRetentionMonths = n
 		}
+	}
+	if v := os.Getenv("ETL_SCHEDULE_CRON"); v != "" {
+		cfg.CloudBilling.ETLScheduleCron = v
+	}
+}
+
+// fillFinOpsFromEnv 五维 C/G：FINOPS_CG_SOURCE 默认 + 任意 FINOPS_CG_SOURCE_<ENV> 按环境覆盖（与 cost_env_account_config.environment 一致）。[Ref: 03_Phase6/01_FinOps]
+func fillFinOpsFromEnv(cfg *config.Config) {
+	if v := os.Getenv("FINOPS_CG_SOURCE"); v != "" {
+		cfg.FinOpsCGSource = v
+	}
+	config.MergeFinOpsCGFromEnviron(cfg)
+	if v := strings.TrimSpace(os.Getenv("FINOPS_SYNC_AUX_TIMEOUT")); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			cfg.FinOpsSyncAuxTimeout = d
+		} else {
+			log.Printf("WARN: FINOPS_SYNC_AUX_TIMEOUT=%q invalid, using default 30m: %v", v, err)
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv("FINOPS_SYNC_JOB_API_KEY")); v != "" {
+		cfg.FinOpsSyncJobAPIKey = v
 	}
 }

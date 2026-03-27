@@ -8,7 +8,9 @@ import {
   CostTimeRange,
   CostCompareMode,
   ResourceDimension,
+  type CostTrack,
 } from '@/types';
+import type { ApiError } from '@/types';
 import {
   adaptGlobalCostToCostMetrics,
   adaptNamespacesToNamespaceCosts,
@@ -26,6 +28,25 @@ export interface EnvDrilldownApiItem {
 }
 
 const COST_API_PREFIX = '/v1/cost';
+const FINOPS_API_PREFIX = '/v1/finops';
+
+/** GET /api/v1/finops/sync-jobs/:id [Ref: 03_Phase6/01_FinOps 主动同步] */
+export interface FinOpsSyncJobStatus {
+  job_id: number;
+  status: string;
+  phase: string;
+  warnings?: string[];
+  error_message?: string;
+  created_at?: string;
+  started_at?: string | null;
+  completed_at?: string | null;
+  data_version?: number;
+  config_snapshot?: string;
+  /** 步骤进度（非耗时）；与 GET 契约一致 [Ref: 03_Phase6/01_FinOps 主动同步] */
+  progress_current?: number;
+  progress_total?: number;
+  phase_detail?: string;
+}
 
 export interface CostQueryParams {
   period?: CostTimeRange;
@@ -35,6 +56,8 @@ export interface CostQueryParams {
   date_to?: string;
   /** 环境多选，逗号分隔，如 POC,FAT；不传或 all 表示全环境 [Ref: 用户需求 环境多选] */
   envs?: string;
+  /** 默认 finance；请求始终带 track [Ref: 03_Phase6/01_FinOps] */
+  track?: CostTrack;
 }
 
 export const costService = {
@@ -49,12 +72,13 @@ export const costService = {
       if (params?.date_from != null) query.date_from = params.date_from;
       if (params?.date_to != null) query.date_to = params.date_to;
       if (params?.envs != null && params.envs !== '') query.envs = params.envs;
+      query.track = params?.track ?? 'finance';
       const config: { params: Record<string, string | undefined>; timeout?: number } = { params: query };
       if (params?.date_from != null && params?.date_to != null) {
         config.timeout = costService.DATE_RANGE_REQUEST_TIMEOUT_MS;
       }
       const response = await apiClient.get<GlobalCostApiResponse>(`${COST_API_PREFIX}/global`, config);
-      return adaptGlobalCostToCostMetrics(response.data);
+      return adaptGlobalCostToCostMetrics(response.data, { requestTrack: params?.track ?? 'finance' });
     } catch (error) {
       console.error('Failed to fetch global cost metrics:', error);
       throw error;
@@ -87,6 +111,8 @@ export const costService = {
     env?: string;
     date_from?: string;
     date_to?: string;
+    /** technical=消耗明细；finance=现金/实付明细 [Ref: 03_Phase6/01_FinOps] */
+    track?: string;
   }): Promise<EnvDrilldownApiItem[]> {
     const query: Record<string, string> = {};
     if (params?.report_type) query.report_type = params.report_type;
@@ -96,6 +122,7 @@ export const costService = {
     if (params?.env) query.env = params.env;
     if (params?.date_from) query.date_from = params.date_from;
     if (params?.date_to) query.date_to = params.date_to;
+    query.track = params?.track ?? 'finance';
     const response = await apiClient.get<EnvDrilldownApiItem[]>(
       `${COST_API_PREFIX}/drilldown/global`,
       { params: query },
@@ -153,19 +180,21 @@ export const costService = {
     }
   },
 
-  /** [Ref: 01_设计 D9-16] 成本结构趋势 GET /api/v1/cost/trend，支持 env 过滤 */
+  /** [Ref: 01_设计 D9-16] 成本结构趋势 GET /api/v1/cost/trend，支持 env 与 track（与全域/钻取双轨一致） */
   async getCostTrend(params?: {
     period?: string;
     date_from?: string;
     date_to?: string;
     /** 按环境过滤趋势数据，'all' 或空值表示全环境 */
     env?: string;
+    track?: CostTrack;
   }): Promise<{ data: Array<{ date: string; total_cost: number; by_domain?: Record<string, number>; by_product?: Record<string, number> }> }> {
     const query: Record<string, string> = {};
     if (params?.period) query.period = params.period;
     if (params?.date_from) query.date_from = params.date_from;
     if (params?.date_to) query.date_to = params.date_to;
     if (params?.env && params.env !== 'all') query.env = params.env;
+    query.track = params?.track ?? 'finance';
     const response = await apiClient.get<{ data: Array<{ date: string; total_cost?: number; by_domain?: Record<string, number>; by_product?: Record<string, number> }> }>(
       `${COST_API_PREFIX}/trend`,
       { params: query, timeout: 15000 },
@@ -181,4 +210,45 @@ export const costService = {
     };
   },
 
+  /** POST /api/v1/finops/sync-jobs — 异步拉取 BSS/OSS 辅助数据 + 账单 ETL 流水线 [Ref: 03_Phase6/01_FinOps 主动同步] */
+  async createFinOpsSyncJob(): Promise<{ job_id: number }> {
+    const headers: Record<string, string> = {};
+    const k =
+      typeof process !== 'undefined' && process.env.FINOPS_SYNC_JOB_KEY
+        ? String(process.env.FINOPS_SYNC_JOB_KEY).trim()
+        : '';
+    if (k) {
+      headers['X-FinOps-Sync-Key'] = k;
+    }
+    const response = await apiClient.post<{ job_id: number }>(
+      `${FINOPS_API_PREFIX}/sync-jobs`,
+      {},
+      { timeout: 120000, headers },
+    );
+    return response.data;
+  },
+
+  /** GET /api/v1/finops/sync-jobs/:id */
+  async getFinOpsSyncJob(jobId: number): Promise<FinOpsSyncJobStatus> {
+    const response = await apiClient.get<FinOpsSyncJobStatus>(`${FINOPS_API_PREFIX}/sync-jobs/${jobId}`, {
+      timeout: 15000,
+    });
+    return response.data;
+  },
+
+  /** GET /api/v1/finops/sync-jobs/active — 无活跃任务时返回 null（刷新页恢复进度） [Ref: 03_Phase6/01_FinOps 主动同步] */
+  async getFinOpsSyncJobActive(): Promise<FinOpsSyncJobStatus | null> {
+    try {
+      const response = await apiClient.get<FinOpsSyncJobStatus>(`${FINOPS_API_PREFIX}/sync-jobs/active`, {
+        timeout: 15000,
+      });
+      return response.data;
+    } catch (e: unknown) {
+      const ae = e as ApiError;
+      if (ae.code === 'FINOPS_SYNC_NO_ACTIVE' || ae.code === '404') {
+        return null;
+      }
+      throw e;
+    }
+  },
 };

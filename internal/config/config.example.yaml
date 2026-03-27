@@ -3,6 +3,12 @@
 # 实际部署时使用 lighthouse-deploy 仓库中的环境特定配置覆盖此模板
 
 env: dev # 实际部署时通过 ENV 环境变量覆盖
+# 五维 C/G：oss | api；部署侧 FINOPS_CG_SOURCE 优先 [Ref: 03_Phase6/01_FinOps]
+finops_cg_source: oss
+# 按环境覆盖（也可用环境变量 FINOPS_CG_SOURCE_POC 等）
+finops_cg_source_by_env:
+  POC: api
+  UAT: oss
 
 server:
   port: 8080
@@ -134,7 +140,7 @@ security:
 cloud_billing:
   # etl_data: 日/月拉取与保留月数，可由环境变量 BILLING_DAILY_PULL_MONTHS 等覆盖
   etl_data:
-    daily_pull_months: 2       # 日表拉取月数（全量回填时）
+    daily_pull_months: 0       # 0=仅当月（1号到昨天）；>0=最近N个月 [Ref: 用户需求 日数据默认当月]
     daily_retention_months: 3   # 日表保留月数，超期删除
     monthly_pull_months: 60      # 月表拉取月数，每次更新全量对比拉取（5 年）
     monthly_retention_months: 60 # 月表保留月数，超期删除（5 年）

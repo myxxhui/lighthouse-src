@@ -23,7 +23,7 @@ func TestNewHTTPServer(t *testing.T) {
 		},
 	}
 
-	server := NewHTTPServer(cfg, nil)
+	server := NewHTTPServer(cfg, nil, nil)
 	assert.NotNil(t, server)
 	assert.NotNil(t, server.engine)
 }
@@ -38,7 +38,7 @@ func TestHealthCheck(t *testing.T) {
 		},
 	}
 
-	server := NewHTTPServer(cfg, nil)
+	server := NewHTTPServer(cfg, nil, nil)
 	engine := server.Engine()
 
 	w := httptest.NewRecorder()
@@ -59,7 +59,7 @@ func TestGlobalCostRoute(t *testing.T) {
 		},
 	}
 
-	server := NewHTTPServer(cfg, nil)
+	server := NewHTTPServer(cfg, nil, nil)
 	engine := server.Engine()
 
 	w := httptest.NewRecorder()
@@ -80,7 +80,7 @@ func TestNamespaceCostRoute(t *testing.T) {
 		},
 	}
 
-	server := NewHTTPServer(cfg, nil)
+	server := NewHTTPServer(cfg, nil, nil)
 	engine := server.Engine()
 
 	w := httptest.NewRecorder()
@@ -101,7 +101,7 @@ func TestDrilldownCostRoute(t *testing.T) {
 		},
 	}
 
-	server := NewHTTPServer(cfg, nil)
+	server := NewHTTPServer(cfg, nil, nil)
 	engine := server.Engine()
 
 	w := httptest.NewRecorder()
@@ -122,7 +122,7 @@ func TestSLOHealthRoute(t *testing.T) {
 		},
 	}
 
-	server := NewHTTPServer(cfg, nil)
+	server := NewHTTPServer(cfg, nil, nil)
 	engine := server.Engine()
 
 	w := httptest.NewRecorder()
@@ -143,7 +143,7 @@ func TestROIDashboardRoute(t *testing.T) {
 		},
 	}
 
-	server := NewHTTPServer(cfg, nil)
+	server := NewHTTPServer(cfg, nil, nil)
 	engine := server.Engine()
 
 	w := httptest.NewRecorder()
@@ -164,7 +164,7 @@ func TestNotFoundRoute(t *testing.T) {
 		},
 	}
 
-	server := NewHTTPServer(cfg, nil)
+	server := NewHTTPServer(cfg, nil, nil)
 	engine := server.Engine()
 
 	w := httptest.NewRecorder()
@@ -185,7 +185,7 @@ func TestSwaggerRoute(t *testing.T) {
 		},
 	}
 
-	server := NewHTTPServer(cfg, nil)
+	server := NewHTTPServer(cfg, nil, nil)
 	engine := server.Engine()
 
 	w := httptest.NewRecorder()
@@ -214,7 +214,7 @@ func TestMiddlewareRequestID(t *testing.T) {
 		},
 	}
 
-	server := NewHTTPServer(cfg, nil)
+	server := NewHTTPServer(cfg, nil, nil)
 	engine := server.Engine()
 
 	w := httptest.NewRecorder()
@@ -227,7 +227,7 @@ func TestMiddlewareRequestID(t *testing.T) {
 // TestGlobalCostL0Performance asserts GET /api/v1/cost/global responds in <10ms (Phase3 L0 requirement).
 func TestGlobalCostL0Performance(t *testing.T) {
 	mockRepo := postgres.NewMockRepository(postgres.DefaultMockConfig())
-	costSvc := service.NewCostService(mockRepo)
+	costSvc := service.NewCostService(mockRepo, "", nil)
 	cfg := &config.Config{
 		Env: config.EnvDevelopment,
 		Server: config.ServerConfig{
@@ -236,7 +236,7 @@ func TestGlobalCostL0Performance(t *testing.T) {
 			WriteTimeout: 30 * time.Second,
 		},
 	}
-	srv := NewHTTPServer(cfg, costSvc)
+	srv := NewHTTPServer(cfg, costSvc, nil)
 	engine := srv.Engine()
 
 	w := httptest.NewRecorder()
@@ -252,7 +252,7 @@ func TestGlobalCostL0Performance(t *testing.T) {
 // TestGlobalCostL0EqualsL1 asserts L0 total_cost 100% equals sum of L1 (namespaces) costs (data consistency).
 func TestGlobalCostL0EqualsL1(t *testing.T) {
 	mockRepo := postgres.NewMockRepository(postgres.DefaultMockConfig())
-	costSvc := service.NewCostService(mockRepo)
+	costSvc := service.NewCostService(mockRepo, "", nil)
 	cfg := &config.Config{
 		Env: config.EnvDevelopment,
 		Server: config.ServerConfig{
@@ -261,7 +261,7 @@ func TestGlobalCostL0EqualsL1(t *testing.T) {
 			WriteTimeout: 30 * time.Second,
 		},
 	}
-	srv := NewHTTPServer(cfg, costSvc)
+	srv := NewHTTPServer(cfg, costSvc, nil)
 	engine := srv.Engine()
 
 	w := httptest.NewRecorder()
@@ -284,4 +284,33 @@ func TestGlobalCostL0EqualsL1(t *testing.T) {
 		sumL1 += ns.Cost
 	}
 	assert.InDelta(t, resp.TotalCost, sumL1, 0.01, "L0 total_cost must equal sum of L1 namespace costs (100%%), L0=%.2f sumL1=%.2f", resp.TotalCost, sumL1)
+}
+
+// TestFinOpsSyncPOSTRequiresAPIKeyWhenConfigured POST /finops/sync-jobs 在配置 FINOPS_SYNC_JOB_API_KEY 时须带头。[Ref: 03_Phase6/01_FinOps 主动同步]
+func TestFinOpsSyncPOSTRequiresAPIKeyWhenConfigured(t *testing.T) {
+	mockRepo := postgres.NewMockRepository(postgres.DefaultMockConfig())
+	costSvc := service.NewCostService(mockRepo, "", nil)
+	cfg := &config.Config{
+		Env: config.EnvDevelopment,
+		Server: config.ServerConfig{
+			Port:         8080,
+			ReadTimeout:  30 * time.Second,
+			WriteTimeout: 30 * time.Second,
+		},
+		FinOpsSyncJobAPIKey: "test-secret-key",
+	}
+	runner := service.NewFinOpsSyncRunner(mockRepo, cfg, nil, nil)
+	srv := NewHTTPServer(cfg, costSvc, runner)
+	engine := srv.Engine()
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/v1/finops/sync-jobs", nil)
+	engine.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+
+	w2 := httptest.NewRecorder()
+	req2, _ := http.NewRequest("POST", "/api/v1/finops/sync-jobs", nil)
+	req2.Header.Set("X-FinOps-Sync-Key", "test-secret-key")
+	engine.ServeHTTP(w2, req2)
+	assert.Equal(t, http.StatusAccepted, w2.Code)
 }

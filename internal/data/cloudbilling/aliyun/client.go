@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -145,6 +146,77 @@ func NewFetcherForEnv(environment string) (*Fetcher, bool) {
 	return &Fetcher{bssClient: c}, true
 }
 
+// ResolveBillingEndpointForEnv 返回与 NewFetcherForEnv 相同的 BSS Endpoint（仅用于本地诊断，不含密钥）。[Ref: 03_Phase6/01_FinOps]
+func ResolveBillingEndpointForEnv(environment string) string {
+	if environment == "" {
+		return defaultBillingEndpoint
+	}
+	endpoint := os.Getenv(envBillingEndpointAlt + "_" + environment)
+	if endpoint == "" {
+		endpoint = os.Getenv(envBillingEndpoint + "_" + environment)
+	}
+	if endpoint == "" {
+		endpoint = os.Getenv(envBillingEndpointAlt)
+	}
+	if endpoint == "" {
+		endpoint = os.Getenv(envBillingEndpoint)
+	}
+	if endpoint == "" {
+		endpoint = defaultBillingEndpoint
+	}
+	return endpoint
+}
+
+// BalanceDiagnostics QueryAccountBalance 原始字段与解析结果，供本地验证（无 AK）。[Ref: 03_Phase6/01_FinOps]
+type BalanceDiagnostics struct {
+	Success              *bool
+	APIMessage           string
+	Currency             string
+	AvailableAmountRaw   string
+	AvailableCashRaw     string
+	CreditAmountRaw      string
+	MybankCreditAmountRaw string
+	ParsedByCode         float64
+}
+
+func strOrNil(p *string) string {
+	if p == nil {
+		return "<nil>"
+	}
+	return *p
+}
+
+// DiagnosticsQueryAccountBalance 同一次 QueryAccountBalance，返回 Body 关键字段（不经过熔断早退，便于对照控制台）。[Ref: 03_Phase6/01_FinOps]
+func (f *Fetcher) DiagnosticsQueryAccountBalance(ctx context.Context) (*BalanceDiagnostics, error) {
+	resp, err := f.bssClient.QueryAccountBalanceWithOptions(&service.RuntimeOptions{})
+	if err != nil {
+		return nil, err
+	}
+	out := &BalanceDiagnostics{}
+	if resp == nil || resp.Body == nil {
+		return out, fmt.Errorf("QueryAccountBalance: empty body")
+	}
+	out.Success = resp.Body.Success
+	if resp.Body.Message != nil {
+		out.APIMessage = *resp.Body.Message
+	}
+	if resp.Body.Data == nil {
+		return out, nil
+	}
+	d := resp.Body.Data
+	if d.Currency != nil && *d.Currency != "" {
+		out.Currency = *d.Currency
+	} else {
+		out.Currency = "CNY"
+	}
+	out.AvailableAmountRaw = strOrNil(d.AvailableAmount)
+	out.AvailableCashRaw = strOrNil(d.AvailableCashAmount)
+	out.CreditAmountRaw = strOrNil(d.CreditAmount)
+	out.MybankCreditAmountRaw = strOrNil(d.MybankCreditAmount)
+	out.ParsedByCode = balanceFromQueryAccountBalanceData(d)
+	return out, nil
+}
+
 // FetchBillOverview 拉取账期总账单与按产品占比。退避重试；熔断时返回错误。
 // FetchBillOverview 拉取账期总账单与按产品占比。当月无数据时自动尝试上月账期（01_ 修复：避免 total_cost/domain_breakdown 始终为空）。
 func (f *Fetcher) FetchBillOverview(ctx context.Context, billingCycle string) (*BillOverviewResult, error) {
@@ -170,7 +242,7 @@ func (f *Fetcher) FetchBillOverview(ctx context.Context, billingCycle string) (*
 			}
 		}
 		start := time.Now()
-		resp, err := f.queryBillOverview(ctx, billingCycle)
+		resp, err := f.queryBillOverviewMerged(ctx, billingCycle)
 		if err == nil {
 			f.mu.Lock()
 			f.consecutiveFailures = 0
@@ -180,7 +252,7 @@ func (f *Fetcher) FetchBillOverview(ctx context.Context, billingCycle string) (*
 			if resp.TotalAmount == 0 && len(resp.ByCategory) == 0 {
 				prevCycle := prevMonthBillingCycle(billingCycle)
 				if prevCycle != billingCycle {
-					prev, err2 := f.queryBillOverview(ctx, prevCycle)
+					prev, err2 := f.queryBillOverviewMerged(ctx, prevCycle)
 					if err2 == nil && (prev.TotalAmount > 0 || len(prev.ByCategory) > 0) {
 						slog.Info("aliyun billing: using previous cycle", "current", billingCycle, "previous", prevCycle, "total", prev.TotalAmount)
 						return prev, nil
@@ -213,9 +285,13 @@ func prevMonthBillingCycle(cycle string) string {
 	return prev.Format("2006-01")
 }
 
-func (f *Fetcher) queryBillOverview(ctx context.Context, billingCycle string) (*BillOverviewResult, error) {
+// queryBillOverviewSingle 拉取指定账期、可选订阅类型的单次 API 调用。[Ref: 阿里云 QueryBillOverview SubscriptionType]
+func (f *Fetcher) queryBillOverviewSingle(ctx context.Context, billingCycle string, subscriptionType string) (*BillOverviewResult, error) {
 	req := &client.QueryBillOverviewRequest{
 		BillingCycle: tea.String(billingCycle),
+	}
+	if subscriptionType != "" {
+		req.SubscriptionType = tea.String(subscriptionType)
 	}
 	resp, err := f.bssClient.QueryBillOverviewWithOptions(req, &service.RuntimeOptions{})
 	if err != nil {
@@ -298,6 +374,43 @@ func (f *Fetcher) queryBillOverview(ctx context.Context, billingCycle string) (*
 		Items:           items,
 		Currency:        "CNY",
 	}, nil
+}
+
+// queryBillOverviewMerged 分别拉取预付费(Subscription)与后付费(PayAsYouGo)并合并，确保控制台「支付明细」与 Lighthouse 数据一致。[Ref: 用户反馈 2025-10/11 控制台有正数、Lighthouse 显示 $0；QueryBillOverview 不传 SubscriptionType 时部分场景 PaymentAmount 未返回]
+func (f *Fetcher) queryBillOverviewMerged(ctx context.Context, billingCycle string) (*BillOverviewResult, error) {
+	sub, err := f.queryBillOverviewSingle(ctx, billingCycle, "Subscription")
+	if err != nil {
+		return nil, err
+	}
+	payg, err := f.queryBillOverviewSingle(ctx, billingCycle, "PayAsYouGo")
+	if err != nil {
+		return nil, err
+	}
+	merged := &BillOverviewResult{
+		BillingCycle:    billingCycle,
+		TotalAmount:     sub.TotalAmount + payg.TotalAmount,
+		CashTotalAmount: sub.CashTotalAmount + payg.CashTotalAmount,
+		ByCategory:     make(map[string]float64),
+		CashByCategory:  make(map[string]float64),
+		Items:           append([]BillItemResult{}, sub.Items...),
+		Currency:        "CNY",
+	}
+	for k, v := range sub.ByCategory {
+		merged.ByCategory[k] += v
+	}
+	for k, v := range payg.ByCategory {
+		merged.ByCategory[k] += v
+	}
+	for k, v := range sub.CashByCategory {
+		merged.CashByCategory[k] += v
+	}
+	for k, v := range payg.CashByCategory {
+		merged.CashByCategory[k] += v
+	}
+	for _, it := range payg.Items {
+		merged.Items = append(merged.Items, it)
+	}
+	return merged, nil
 }
 
 // FetchBillOverviewByDay 按自然日拉取账单汇总（QueryAccountBill Granularity=DAILY，分页拉全）。[Ref: 01_设计 §拉取粒度与落表、15_]
@@ -572,6 +685,349 @@ func (f *Fetcher) FetchLineItemsByDay(ctx context.Context, billingDate string) (
 
 	slog.Info("aliyun billing: FetchLineItemsByDay done", "billing_date", billingDate, "total_items", len(allItems))
 	return allItems, nil
+}
+
+// FetchBSSTransactions 分页拉取 CreateTime 在 [start,end]（含边界，UTC）内的账户流水。[Ref: 03_Phase6/01_FinOps]
+func (f *Fetcher) FetchBSSTransactions(ctx context.Context, start, end time.Time) ([]BSSAccountTransactionItem, error) {
+	f.mu.Lock()
+	if time.Now().Before(f.circuitOpenUntil) {
+		f.mu.Unlock()
+		return nil, ErrCircuitOpen
+	}
+	f.mu.Unlock()
+
+	startS := start.UTC().Format("2006-01-02T15:04:05Z")
+	endS := end.UTC().Format("2006-01-02T15:04:05Z")
+	pageSize := int32(300)
+	pageNum := int32(1)
+	var out []BSSAccountTransactionItem
+	for {
+		req := &client.QueryAccountTransactionsRequest{
+			CreateTimeStart: tea.String(startS),
+			CreateTimeEnd:   tea.String(endS),
+			PageNum:         tea.Int32(pageNum),
+			PageSize:        tea.Int32(pageSize),
+		}
+		resp, err := f.bssClient.QueryAccountTransactionsWithOptions(req, &service.RuntimeOptions{})
+		if err != nil {
+			slog.Warn("aliyun billing: QueryAccountTransactions failed", "page", pageNum, "error", err)
+			return nil, err
+		}
+		if resp == nil || resp.Body == nil {
+			break
+		}
+		if resp.Body.Success != nil && !*resp.Body.Success {
+			msg := ""
+			if resp.Body.Message != nil {
+				msg = *resp.Body.Message
+			}
+			return nil, fmt.Errorf("QueryAccountTransactions: %s", msg)
+		}
+		data := resp.Body.Data
+		if data == nil || data.AccountTransactionsList == nil || len(data.AccountTransactionsList.AccountTransactionsList) == 0 {
+			break
+		}
+		items := data.AccountTransactionsList.AccountTransactionsList
+		for _, it := range items {
+			txNum := derefStr(it.TransactionNumber)
+			if txNum == "" {
+				txNum = fmt.Sprintf("bss_syn_%x", simpleHash(derefStr(it.TransactionTime)+derefStr(it.Amount)+derefStr(it.RecordID)))
+			}
+			tm, err := parseAliyunTransactionTime(derefStr(it.TransactionTime))
+			if err != nil {
+				slog.Warn("aliyun billing: skip transaction with bad time", "tx", txNum, "error", err)
+				continue
+			}
+			out = append(out, BSSAccountTransactionItem{
+				TransactionNumber: txNum,
+				TransactionTime:   tm,
+				Amount:            parseAliyunFloat(derefStr(it.Amount)),
+				TransactionType:   derefStr(it.TransactionType),
+				TransactionFlow:   derefStr(it.TransactionFlow),
+				RecordID:          derefStr(it.RecordID),
+				BillingCycle:      derefStr(it.BillingCycle),
+				Currency:          "CNY",
+			})
+		}
+		total := int32(0)
+		if data.TotalCount != nil {
+			total = *data.TotalCount
+		}
+		if int(pageNum)*int(pageSize) >= int(total) {
+			break
+		}
+		pageNum++
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+	}
+	slog.Info("aliyun billing: FetchBSSTransactions done", "count", len(out), "start", startS, "end", endS)
+	return out, nil
+}
+
+// BSSAccountTransactionItem 与 cloudbilling.BSSTransactionItem 字段对齐，避免 aliyun 依赖 cloudbilling。
+type BSSAccountTransactionItem struct {
+	TransactionNumber string
+	TransactionTime   time.Time
+	Amount            float64
+	TransactionType   string
+	TransactionFlow   string
+	RecordID          string
+	BillingCycle      string
+	Currency          string
+}
+
+func derefStr(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return strings.TrimSpace(*p)
+}
+
+func parseAliyunFloat(s string) float64 {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0
+	}
+	// 国际站 BSS 部分字段带千分位逗号（如 "7,245.65"），ParseFloat 会失败。[Ref: 03_Phase6/01_FinOps 本地验证]
+	s = strings.ReplaceAll(s, ",", "")
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0
+	}
+	return v
+}
+
+func parseAliyunTransactionTime(s string) (time.Time, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return time.Time{}, fmt.Errorf("empty transaction time")
+	}
+	layouts := []string{
+		time.RFC3339,
+		"2006-01-02T15:04:05Z",
+		"2006-01-02T15:04:05",
+		"2006-01-02 15:04:05",
+		"2006-01-02",
+	}
+	for _, l := range layouts {
+		if t, err := time.Parse(l, s); err == nil {
+			return t.UTC(), nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("parse transaction time: %q", s)
+}
+
+// FetchCallingAccountID 通过 QueryAccountBill（MONTHLY、首页）读取 Data.AccountID，与凭证对应主账号一致。[Ref: 03_Phase6/01_FinOps]
+func (f *Fetcher) FetchCallingAccountID(ctx context.Context, billingCycle string) (string, error) {
+	f.mu.Lock()
+	if time.Now().Before(f.circuitOpenUntil) {
+		f.mu.Unlock()
+		return "", ErrCircuitOpen
+	}
+	f.mu.Unlock()
+	if strings.TrimSpace(billingCycle) == "" {
+		billingCycle = time.Now().UTC().Format("2006-01")
+	}
+	req := &client.QueryAccountBillRequest{
+		BillingCycle:     tea.String(billingCycle),
+		Granularity:      tea.String("MONTHLY"),
+		IsGroupByProduct: tea.Bool(true),
+		PageNum:          tea.Int32(1),
+		PageSize:         tea.Int32(1),
+	}
+	resp, err := f.bssClient.QueryAccountBillWithOptions(req, &service.RuntimeOptions{})
+	if err != nil {
+		return "", err
+	}
+	if resp == nil || resp.Body == nil || resp.Body.Data == nil {
+		return "", nil
+	}
+	if resp.Body.Success != nil && !*resp.Body.Success {
+		msg := ""
+		if resp.Body.Message != nil {
+			msg = *resp.Body.Message
+		}
+		return "", fmt.Errorf("QueryAccountBill: %s", msg)
+	}
+	d := resp.Body.Data
+	if d.AccountID != nil {
+		return strings.TrimSpace(*d.AccountID), nil
+	}
+	return "", nil
+}
+
+// FetchAccountBalanceSnapshot 拉取 QueryAccountBalance 可用余额。[Ref: 03_Phase6/01_FinOps]
+func (f *Fetcher) FetchAccountBalanceSnapshot(ctx context.Context) (available float64, currency string, err error) {
+	f.mu.Lock()
+	if time.Now().Before(f.circuitOpenUntil) {
+		f.mu.Unlock()
+		return 0, "", ErrCircuitOpen
+	}
+	f.mu.Unlock()
+
+	resp, err := f.bssClient.QueryAccountBalanceWithOptions(&service.RuntimeOptions{})
+	if err != nil {
+		return 0, "", err
+	}
+	if resp == nil || resp.Body == nil {
+		return 0, "", fmt.Errorf("QueryAccountBalance: empty body")
+	}
+	if resp.Body.Success != nil && !*resp.Body.Success {
+		msg := ""
+		if resp.Body.Message != nil {
+			msg = *resp.Body.Message
+		}
+		return 0, "", fmt.Errorf("QueryAccountBalance: %s", msg)
+	}
+	if resp.Body.Data == nil {
+		return 0, "", nil
+	}
+	d := resp.Body.Data
+	cur := "CNY"
+	if d.Currency != nil && *d.Currency != "" {
+		cur = *d.Currency
+	}
+	avail := balanceFromQueryAccountBalanceData(d)
+	return avail, cur, nil
+}
+
+// balanceFromQueryAccountBalanceData 可用余额：优先 AvailableAmount；若为 0 再叠加现金/信控（国际站等场景常见仅 Credit/现金列有值）。[Ref: 03_Phase6/01_FinOps]
+func balanceFromQueryAccountBalanceData(d *client.QueryAccountBalanceResponseBodyData) float64 {
+	if d == nil {
+		return 0
+	}
+	var avail float64
+	if d.AvailableAmount != nil {
+		avail = parseAliyunFloat(*d.AvailableAmount)
+	}
+	if avail > 1e-9 {
+		return avail
+	}
+	if d.AvailableCashAmount != nil {
+		avail += parseAliyunFloat(*d.AvailableCashAmount)
+	}
+	if d.CreditAmount != nil {
+		avail += parseAliyunFloat(*d.CreditAmount)
+	}
+	if d.MybankCreditAmount != nil {
+		avail += parseAliyunFloat(*d.MybankCreditAmount)
+	}
+	return avail
+}
+
+// sumOutstandingQueryAccountBillMonthly 分页汇总 QueryAccountBill MONTHLY 的 OutstandingAmount。[Ref: 03_Phase6/01_FinOps]
+func (f *Fetcher) sumOutstandingQueryAccountBillMonthly(ctx context.Context, billingCycle string, byProduct bool) (float64, error) {
+	pageNum := int32(1)
+	pageSize := int32(300)
+	var sum float64
+	for {
+		req := &client.QueryAccountBillRequest{
+			BillingCycle:     tea.String(billingCycle),
+			Granularity:      tea.String("MONTHLY"),
+			IsGroupByProduct: tea.Bool(byProduct),
+			PageNum:          tea.Int32(pageNum),
+			PageSize:         tea.Int32(pageSize),
+		}
+		resp, err := f.bssClient.QueryAccountBillWithOptions(req, &service.RuntimeOptions{})
+		if err != nil {
+			return 0, err
+		}
+		if resp == nil || resp.Body == nil || resp.Body.Data == nil {
+			break
+		}
+		data := resp.Body.Data
+		if data.Items == nil || len(data.Items.Item) == 0 {
+			break
+		}
+		for _, it := range data.Items.Item {
+			if it.OutstandingAmount != nil {
+				sum += float64(*it.OutstandingAmount)
+			}
+		}
+		total := int32(0)
+		if data.TotalCount != nil {
+			total = *data.TotalCount
+		}
+		if int(pageNum)*int(pageSize) >= int(total) {
+			break
+		}
+		pageNum++
+		select {
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		default:
+		}
+	}
+	return sum, nil
+}
+
+// sumOutstandingFromBillOverview 从 QueryBillOverview 各订阅类型行汇总 OutstandingAmount（AccountBill 无应付字段时的兜底）。[Ref: 03_Phase6/01_FinOps]
+func (f *Fetcher) sumOutstandingFromBillOverview(ctx context.Context, billingCycle string) (float64, error) {
+	var total float64
+	for _, st := range []string{"Subscription", "PayAsYouGo"} {
+		req := &client.QueryBillOverviewRequest{
+			BillingCycle:     tea.String(billingCycle),
+			SubscriptionType: tea.String(st),
+		}
+		resp, err := f.bssClient.QueryBillOverviewWithOptions(req, &service.RuntimeOptions{})
+		if err != nil {
+			return 0, err
+		}
+		if resp == nil || resp.Body == nil || resp.Body.Data == nil || resp.Body.Data.Items == nil {
+			continue
+		}
+		for _, it := range resp.Body.Data.Items.Item {
+			if it.OutstandingAmount != nil {
+				total += float64(*it.OutstandingAmount)
+			}
+		}
+	}
+	return total, nil
+}
+
+// SumOutstandingMonthly 先按产品汇总 QueryAccountBill；若为 0 再试不按产品分组；仍为 0 则 QueryBillOverview 行级应付兜底。[Ref: 03_Phase6/01_FinOps]
+func (f *Fetcher) SumOutstandingMonthly(ctx context.Context, billingCycle string) (float64, error) {
+	f.mu.Lock()
+	if time.Now().Before(f.circuitOpenUntil) {
+		f.mu.Unlock()
+		return 0, ErrCircuitOpen
+	}
+	f.mu.Unlock()
+
+	if strings.TrimSpace(billingCycle) == "" {
+		return 0, nil
+	}
+	grouped, errG := f.sumOutstandingQueryAccountBillMonthly(ctx, billingCycle, true)
+	if errG == nil && grouped > 1e-9 {
+		return grouped, nil
+	}
+	ungrouped, errU := f.sumOutstandingQueryAccountBillMonthly(ctx, billingCycle, false)
+	if errU == nil && ungrouped > 1e-9 {
+		return ungrouped, nil
+	}
+	ov, errO := f.sumOutstandingFromBillOverview(ctx, billingCycle)
+	if errO == nil && ov > 1e-9 {
+		return ov, nil
+	}
+	if errU == nil {
+		return ungrouped, nil
+	}
+	if errG == nil {
+		return grouped, nil
+	}
+	if errO == nil {
+		return ov, nil
+	}
+	if errG != nil {
+		return 0, errG
+	}
+	if errU != nil {
+		return 0, errU
+	}
+	return 0, errO
 }
 
 // simpleHash 用于合成 RecordID 的简单哈希（非安全，仅用于唯一性辅助）。
