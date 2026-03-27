@@ -812,6 +812,10 @@ components:
         total_cost:
           type: number
           format: float
+        consumption_cost:
+          type: number
+          format: float
+          description: 资金轨下为消耗口径（聚合表 consumption 或月原始 pickMonthlyData），与 total_cost 实付分离
         previous_period_cost:
           type: number
           format: float

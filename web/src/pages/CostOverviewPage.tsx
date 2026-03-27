@@ -502,9 +502,12 @@ const CostOverviewPage: React.FC = () => {
     return item.total_cost ?? 0;
   };
 
-  /** 环境卡 C：技术=聚合消耗；资金=按正额占比分摊全局 ledger.C（无则 0.00）[Ref: 03_Phase6/01_FinOps] */
+  /** 环境卡 C：技术=聚合消耗；资金=后端 consumption_cost（聚合表/月原始消耗），否则回退按实付占比分摊全局 ledger.C [Ref: 03_Phase6/01_FinOps] */
   const envCardDimC = (item: EnvBreakdownItem) => {
     if (requestTrack === 'technical') return item.total_cost ?? 0;
+    if (item.consumption_cost != null && !Number.isNaN(Number(item.consumption_cost))) {
+      return Number(item.consumption_cost);
+    }
     const glC = globalCostMetrics?.ledger?.C;
     if (glC != null && !Number.isNaN(Number(glC)) && envBreakdownPositiveSum > 0) {
       return ((item.total_cost ?? 0) / envBreakdownPositiveSum) * Number(glC);
@@ -624,18 +627,6 @@ const CostOverviewPage: React.FC = () => {
             size="small"
           />
         </div>
-        {/* Data note */}
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'flex-end', paddingBottom: 2, gap: 8 }}>
-          {globalCostMetrics?.billDataStatus && (
-            <BillDataStatusBadge status={globalCostMetrics.billDataStatus} isDark={isDark} />
-          )}
-          <div style={{ fontSize: 11, color: txt2, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span className="live-dot" />
-            {globalCostMetrics?.lastUpdatedAt
-              ? `更新至 ${new Date(globalCostMetrics.lastUpdatedAt).toLocaleString('zh-CN', { dateStyle: 'short', timeStyle: 'short' })}`
-              : '数据来源：云账单'}
-          </div>
-        </div>
       </div>
       {costTimeRange === '1d' && (
         <div style={{ marginTop: 8, fontSize: 11, color: txt2 }}>
@@ -726,10 +717,6 @@ const CostOverviewPage: React.FC = () => {
               }}>
                 {heroTagLabel}
               </Tag>
-              {/* 数据状态标识 [Ref: 16_云账单动态对账与高可靠处理规范 §三段式] */}
-              {globalCostMetrics?.billDataStatus && (
-                <BillDataStatusBadge status={globalCostMetrics.billDataStatus} isDark={isDark} />
-              )}
             </div>
           </div>
           {/* Mini sparkline */}

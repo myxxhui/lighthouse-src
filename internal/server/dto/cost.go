@@ -75,11 +75,13 @@ type FinOpsReconciliation struct {
 }
 
 // EnvBreakdownItem 按环境的总账与对比；ledger_g/ledger_p 可按消耗占比从 hero 分摊；ledger_b/ledger_u 与各环境 canonical account 的 BSS/应付事实一致。[Ref: 01_设计 §按环境展示、12_API GlobalCostResponse]
+// ConsumptionCost 资金轨下为聚合表 consumption 行按账户汇总（与 total_cost 的 payment 口径分离），供环境卡 C 列展示；nil 表示未做双轨拆分。[Ref: 03_Phase6/01_FinOps]
 type EnvBreakdownItem struct {
 	Environment         string   `json:"environment"`
 	AccountID           string   `json:"account_id"`
 	AccountDisplayName  string   `json:"account_display_name"`
 	TotalCost           float64  `json:"total_cost"`
+	ConsumptionCost     *float64 `json:"consumption_cost,omitempty"`
 	PreviousPeriodCost  float64  `json:"previous_period_cost,omitempty"`
 	ChangePct           float64  `json:"change_pct,omitempty"`
 	LedgerG             *float64 `json:"ledger_g,omitempty"`

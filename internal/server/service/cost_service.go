@@ -896,6 +896,9 @@ func (s *CostService) GetGlobalCostByDateRange(ctx context.Context, from, to tim
 	}
 	envBreakdown := s.buildEnvBreakdownFromAccountTotals(ctx, curAccountTotals, prevAccountTotals)
 	scaleEnvBreakdownToTotal(envBreakdown, total)
+	if track == "finance" && len(envBreakdown) > 0 {
+		s.enrichEnvBreakdownConsumptionFromMonthlyRawRange(ctx, envBreakdown, from, to, accountIDs)
+	}
 	// [Ref: 用户需求] 自定义月范围现金合计为负时展示为 0 并注明净退款已抵减
 	displayTotal := total
 	periodKeyDR := fromCycle + ":" + toCycle
@@ -2047,6 +2050,9 @@ func (s *CostService) GetGlobalCost(ctx context.Context, period string, metricTy
 				if len(envs) == 0 {
 					scaleEnvBreakdownToTotal(envBreakdown, displayTotal)
 				}
+				if track == "finance" && len(envBreakdown) > 0 {
+					s.enrichEnvBreakdownConsumptionFromAggregate(ctx, envBreakdown, reportType, periodKey)
+				}
 				meta := &dto.GlobalCostMetadata{DataStatus: "aggregate", ReportType: reportType, PeriodKey: periodKey, DisplayNote: displayNote}
 				if lastSuccessAt != nil {
 					meta.LastUpdatedAt = lastSuccessAt
@@ -2101,6 +2107,64 @@ func (s *CostService) GetGlobalCost(ctx context.Context, period string, metricTy
 	}
 	dto.ApplyFinOpsGlobalMetadata(resp, track)
 	return resp, nil
+}
+
+// enrichEnvBreakdownConsumptionFromAggregate 资金轨下写入各环境聚合表 consumption 口径金额，与 total_cost（payment）分离，避免环境卡 C 与 P 因同一权重分摊全局 ledger 而恒等。[Ref: 03_Phase6/01_FinOps]
+func (s *CostService) enrichEnvBreakdownConsumptionFromAggregate(ctx context.Context, env []dto.EnvBreakdownItem, reportType, periodKey string) {
+	if s == nil || len(env) == 0 {
+		return
+	}
+	consList, err := s.repo.ListCloudBillAggregateForReportPeriod(ctx, reportType, periodKey, "consumption", nil)
+	if err != nil || len(consList) == 0 {
+		return
+	}
+	curByAccount := make(map[string]float64)
+	for i := range consList {
+		acc := consList[i].AccountID
+		curByAccount[acc] += consList[i].TotalAmount
+	}
+	for i := range env {
+		aid := strings.TrimSpace(env[i].AccountID)
+		v := curByAccount[aid]
+		if v == 0 {
+			v = curByAccount[env[i].Environment]
+		}
+		vv := v
+		env[i].ConsumptionCost = &vv
+	}
+}
+
+// enrichEnvBreakdownConsumptionFromMonthlyRawRange 自定义月范围资金轨：从月原始表按消耗口径叠加各 account，写入 consumption_cost。[Ref: 03_Phase6/01_FinOps]
+func (s *CostService) enrichEnvBreakdownConsumptionFromMonthlyRawRange(ctx context.Context, env []dto.EnvBreakdownItem, from, to time.Time, accountIDs map[string]bool) {
+	if s == nil || len(env) == 0 {
+		return
+	}
+	cur := time.Date(from.Year(), from.Month(), 1, 0, 0, 0, 0, time.UTC)
+	end := time.Date(to.Year(), to.Month(), 1, 0, 0, 0, 0, time.UTC)
+	const maxMonths = 60
+	count := 0
+	consTotals := make(map[string]float64)
+	for !cur.After(end) && count < maxMonths {
+		cycle := cur.Format("2006-01")
+		_, _, accTotals := s.mergeMonthlyRawByCycle(ctx, cycle, accountIDs, true)
+		for acc, amt := range accTotals {
+			consTotals[acc] += amt
+		}
+		cur = cur.AddDate(0, 1, 0)
+		count++
+	}
+	if len(consTotals) == 0 {
+		return
+	}
+	for i := range env {
+		aid := strings.TrimSpace(env[i].AccountID)
+		v := consTotals[aid]
+		if v == 0 {
+			v = consTotals[env[i].Environment]
+		}
+		vv := v
+		env[i].ConsumptionCost = &vv
+	}
 }
 
 // buildEnvBreakdownFromList 从聚合表行按 account 构建 env_breakdown。[Ref: 聚合表主路径]

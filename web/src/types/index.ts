@@ -53,6 +53,8 @@ export interface EnvBreakdownItem {
   account_id: string;
   account_display_name: string;
   total_cost: number;
+  /** 资金轨：聚合表/月原始消耗口径，与 total_cost（实付）分离 [Ref: 03_Phase6/01_FinOps] */
+  consumption_cost?: number;
   previous_period_cost?: number;
   change_pct?: number;
   ledger_g?: number;

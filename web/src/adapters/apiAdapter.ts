@@ -45,6 +45,7 @@ export interface EnvBreakdownApiItem {
   account_id: string;
   account_display_name: string;
   total_cost: number;
+  consumption_cost?: number;
   previous_period_cost?: number;
   change_pct?: number;
   ledger_g?: number;
@@ -119,6 +120,7 @@ export function adaptGlobalCostToCostMetrics(
     account_id: e.account_id,
     account_display_name: e.account_display_name,
     total_cost: e.total_cost,
+    consumption_cost: e.consumption_cost,
     previous_period_cost: e.previous_period_cost,
     change_pct: e.change_pct,
     ledger_g: e.ledger_g,
