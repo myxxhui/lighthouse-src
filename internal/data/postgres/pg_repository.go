@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -298,17 +299,32 @@ func (p *PGRepository) SaveCloudBillMonthlyRaw(ctx context.Context, r CloudBillM
 	if r.AccountID != "" {
 		accIDVal = r.AccountID
 	}
+	var dc, dcc interface{}
+	var cs interface{}
+	if r.DeductedByCoupons != nil {
+		dc = *r.DeductedByCoupons
+	}
+	if r.DeductedByCashCoupons != nil {
+		dcc = *r.DeductedByCashCoupons
+	}
+	if r.CouponSyncedAt != nil {
+		cs = *r.CouponSyncedAt
+	}
 	_, err = p.db.ExecContext(ctx,
 		`INSERT INTO cost_cloud_bill_monthly_raw
-		   (billing_cycle, total_amount, product_breakdown, cash_total_amount, cash_product_breakdown, snapshot_at, created_at, account_id)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		   (billing_cycle, total_amount, product_breakdown, cash_total_amount, cash_product_breakdown, snapshot_at, created_at, account_id,
+		    deducted_by_coupons, deducted_by_cash_coupons, coupon_synced_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		 ON CONFLICT (billing_cycle, account_id) DO UPDATE SET
 		   total_amount            = EXCLUDED.total_amount,
 		   product_breakdown       = EXCLUDED.product_breakdown,
 		   cash_total_amount       = EXCLUDED.cash_total_amount,
 		   cash_product_breakdown  = EXCLUDED.cash_product_breakdown,
-		   snapshot_at             = EXCLUDED.snapshot_at`,
-		r.BillingCycle, r.TotalAmount, js, r.CashTotalAmount, cashJS, r.SnapshotAt, r.CreatedAt, accIDVal)
+		   snapshot_at             = EXCLUDED.snapshot_at,
+		   deducted_by_coupons     = COALESCE(EXCLUDED.deducted_by_coupons, cost_cloud_bill_monthly_raw.deducted_by_coupons),
+		   deducted_by_cash_coupons = COALESCE(EXCLUDED.deducted_by_cash_coupons, cost_cloud_bill_monthly_raw.deducted_by_cash_coupons),
+		   coupon_synced_at        = COALESCE(EXCLUDED.coupon_synced_at, cost_cloud_bill_monthly_raw.coupon_synced_at)`,
+		r.BillingCycle, r.TotalAmount, js, r.CashTotalAmount, cashJS, r.SnapshotAt, r.CreatedAt, accIDVal, dc, dcc, cs)
 	return err
 }
 
@@ -320,10 +336,13 @@ func (p *PGRepository) GetCloudBillMonthlyRaw(ctx context.Context, billingCycle,
 	var totalAmount, cashTotalAmount float64
 	var breakdown, cashBreakdown []byte
 	var snapshotAt, createdAt time.Time
+	var dc, dcc sql.NullFloat64
+	var couponAt sql.NullTime
 	err := p.db.QueryRowContext(ctx,
-		`SELECT total_amount, product_breakdown, COALESCE(cash_total_amount,0), COALESCE(cash_product_breakdown,'{}'), snapshot_at, created_at
+		`SELECT total_amount, product_breakdown, COALESCE(cash_total_amount,0), COALESCE(cash_product_breakdown,'{}'), snapshot_at, created_at,
+		        deducted_by_coupons, deducted_by_cash_coupons, coupon_synced_at
 		 FROM cost_cloud_bill_monthly_raw WHERE billing_cycle = $1 AND COALESCE(account_id,'') = $2`, billingCycle, acc).
-		Scan(&totalAmount, &breakdown, &cashTotalAmount, &cashBreakdown, &snapshotAt, &createdAt)
+		Scan(&totalAmount, &breakdown, &cashTotalAmount, &cashBreakdown, &snapshotAt, &createdAt, &dc, &dcc, &couponAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
@@ -332,17 +351,31 @@ func (p *PGRepository) GetCloudBillMonthlyRaw(ctx context.Context, billingCycle,
 	}
 	m := unmarshalBreakdown(breakdown)
 	cashM := unmarshalBreakdown(cashBreakdown)
-	return &CloudBillMonthlyRaw{
+	row := &CloudBillMonthlyRaw{
 		BillingCycle: billingCycle, TotalAmount: totalAmount, ProductBreakdown: m,
 		CashTotalAmount: cashTotalAmount, CashProductBreakdown: cashM,
 		SnapshotAt: snapshotAt, CreatedAt: createdAt, AccountID: accountID,
-	}, nil
+	}
+	if dc.Valid {
+		v := dc.Float64
+		row.DeductedByCoupons = &v
+	}
+	if dcc.Valid {
+		v := dcc.Float64
+		row.DeductedByCashCoupons = &v
+	}
+	if couponAt.Valid {
+		t := couponAt.Time
+		row.CouponSyncedAt = &t
+	}
+	return row, nil
 }
 
 // ListCloudBillMonthlyRawByCycle 返回指定账期下所有 account 的月原始行。[Ref: 01_多环境 UAT]
 func (p *PGRepository) ListCloudBillMonthlyRawByCycle(ctx context.Context, billingCycle string) ([]CloudBillMonthlyRaw, error) {
 	rows, err := p.db.QueryContext(ctx,
-		`SELECT account_id, total_amount, product_breakdown, COALESCE(cash_total_amount,0), COALESCE(cash_product_breakdown,'{}'), snapshot_at, created_at
+		`SELECT account_id, total_amount, product_breakdown, COALESCE(cash_total_amount,0), COALESCE(cash_product_breakdown,'{}'), snapshot_at, created_at,
+		        deducted_by_coupons, deducted_by_cash_coupons, coupon_synced_at
 		 FROM cost_cloud_bill_monthly_raw WHERE billing_cycle = $1`, billingCycle)
 	if err != nil {
 		return nil, err
@@ -354,16 +387,31 @@ func (p *PGRepository) ListCloudBillMonthlyRawByCycle(ctx context.Context, billi
 		var totalAmount, cashTotalAmount float64
 		var breakdown, cashBreakdown []byte
 		var snapshotAt, createdAt time.Time
-		if err := rows.Scan(&accID, &totalAmount, &breakdown, &cashTotalAmount, &cashBreakdown, &snapshotAt, &createdAt); err != nil {
+		var dc, dcc sql.NullFloat64
+		var couponAt sql.NullTime
+		if err := rows.Scan(&accID, &totalAmount, &breakdown, &cashTotalAmount, &cashBreakdown, &snapshotAt, &createdAt, &dc, &dcc, &couponAt); err != nil {
 			return nil, err
 		}
 		m := unmarshalBreakdown(breakdown)
 		cashM := unmarshalBreakdown(cashBreakdown)
-		out = append(out, CloudBillMonthlyRaw{
+		row := CloudBillMonthlyRaw{
 			BillingCycle: billingCycle, AccountID: accID, TotalAmount: totalAmount, ProductBreakdown: m,
 			CashTotalAmount: cashTotalAmount, CashProductBreakdown: cashM,
 			SnapshotAt: snapshotAt, CreatedAt: createdAt,
-		})
+		}
+		if dc.Valid {
+			v := dc.Float64
+			row.DeductedByCoupons = &v
+		}
+		if dcc.Valid {
+			v := dcc.Float64
+			row.DeductedByCashCoupons = &v
+		}
+		if couponAt.Valid {
+			t := couponAt.Time
+			row.CouponSyncedAt = &t
+		}
+		out = append(out, row)
 	}
 	return out, rows.Err()
 }
@@ -472,6 +520,75 @@ func (p *PGRepository) ListEnvAccountConfig(ctx context.Context) ([]EnvAccountCo
 			return nil, err
 		}
 		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// ListCostProjects 返回全部成本项目及成员环境。[Ref: 03_Phase6/03_前端全域成本透视/01_设计]
+func (p *PGRepository) ListCostProjects(ctx context.Context) ([]CostProject, error) {
+	rows, err := p.db.QueryContext(ctx, `
+		SELECT p.id, p.code, p.name, p.sort_order, e.environment
+		FROM cost_project p
+		LEFT JOIN cost_project_environment e ON e.project_id = p.id
+		ORDER BY p.sort_order ASC, e.environment ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []CostProject
+	var cur *CostProject
+	flush := func() {
+		if cur != nil {
+			out = append(out, *cur)
+			cur = nil
+		}
+	}
+	for rows.Next() {
+		var id, sort int
+		var code, name string
+		var env sql.NullString
+		if err := rows.Scan(&id, &code, &name, &sort, &env); err != nil {
+			return nil, err
+		}
+		if cur == nil || cur.ID != id {
+			flush()
+			cur = &CostProject{ID: id, Code: code, Name: name, SortOrder: sort}
+		}
+		if env.Valid && strings.TrimSpace(env.String) != "" {
+			cur.Environments = append(cur.Environments, env.String)
+		}
+	}
+	flush()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// EnvironmentsByProjectIDs 返回所选项目下的环境名并集。[Ref: 03_Phase6/03_前端全域成本透视/01_设计]
+func (p *PGRepository) EnvironmentsByProjectIDs(ctx context.Context, projectIDs []int) ([]string, error) {
+	if len(projectIDs) == 0 {
+		return nil, nil
+	}
+	ph := make([]string, len(projectIDs))
+	args := make([]interface{}, len(projectIDs))
+	for i, id := range projectIDs {
+		ph[i] = "$" + strconv.Itoa(i+1)
+		args[i] = id
+	}
+	q := fmt.Sprintf(`SELECT DISTINCT environment FROM cost_project_environment WHERE project_id IN (%s) ORDER BY environment`, strings.Join(ph, ","))
+	rows, err := p.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var env string
+		if err := rows.Scan(&env); err != nil {
+			return nil, err
+		}
+		out = append(out, env)
 	}
 	return out, rows.Err()
 }
@@ -821,6 +938,12 @@ func (r *pgTxRepository) UpdateEnvAccountConfigAccountID(ctx context.Context, en
 func (r *pgTxRepository) ListEnvAccountConfig(ctx context.Context) ([]EnvAccountConfig, error) {
 	return r.parent.ListEnvAccountConfig(ctx)
 }
+func (r *pgTxRepository) ListCostProjects(ctx context.Context) ([]CostProject, error) {
+	return r.parent.ListCostProjects(ctx)
+}
+func (r *pgTxRepository) EnvironmentsByProjectIDs(ctx context.Context, projectIDs []int) ([]string, error) {
+	return r.parent.EnvironmentsByProjectIDs(ctx, projectIDs)
+}
 func (r *pgTxRepository) GetProductCategory(ctx context.Context, productCode string) (string, bool) {
 	return r.parent.GetProductCategory(ctx, productCode)
 }
@@ -1141,13 +1264,16 @@ func (p *PGRepository) UpsertBSSTransaction(ctx context.Context, tx BSSTransacti
 		cur = "CNY"
 	}
 	_, err := p.db.ExecContext(ctx, `
-		INSERT INTO cost_bss_transactions (transaction_number, account_id, transaction_time, amount, transaction_type, transaction_flow, record_id, billing_cycle, currency, synced_at)
-		VALUES ($1,$2,$3::timestamp,$4,$5,$6,$7,$8,$9,NOW())
+		INSERT INTO cost_bss_transactions (transaction_number, account_id, transaction_time, amount, transaction_type, transaction_flow, record_id, billing_cycle, currency, transaction_channel, fund_type, remarks, synced_at)
+		VALUES ($1,$2,$3::timestamp,$4,$5,$6,$7,$8,$9,$10,$11,$12,NOW())
 		ON CONFLICT (transaction_number) DO UPDATE SET
 		  amount=EXCLUDED.amount, transaction_type=EXCLUDED.transaction_type, transaction_flow=EXCLUDED.transaction_flow,
-		  record_id=EXCLUDED.record_id, billing_cycle=EXCLUDED.billing_cycle, synced_at=NOW()`,
+		  record_id=EXCLUDED.record_id, billing_cycle=EXCLUDED.billing_cycle,
+		  transaction_channel=EXCLUDED.transaction_channel, fund_type=EXCLUDED.fund_type, remarks=EXCLUDED.remarks,
+		  synced_at=NOW()`,
 		tx.TransactionNumber, nullStr(tx.AccountID, ""), tm, tx.Amount, nullStr(tx.TransactionType, ""), nullStr(tx.TransactionFlow, ""),
-		nullStr(tx.RecordID, ""), nullStr(tx.BillingCycle, ""), cur)
+		nullStr(tx.RecordID, ""), nullStr(tx.BillingCycle, ""), cur,
+		nullStr(tx.TransactionChannel, ""), nullStr(tx.FundType, ""), nullStr(tx.Remarks, ""))
 	return err
 }
 
@@ -1173,6 +1299,32 @@ func (p *PGRepository) UpsertBillOutstandingMonthly(ctx context.Context, o BillO
 		VALUES ($1,$2,$3,NOW())
 		ON CONFLICT (billing_cycle, account_id) DO UPDATE SET outstanding_amount=EXCLUDED.outstanding_amount, synced_at=NOW()`,
 		o.BillingCycle, nullStr(o.AccountID, ""), o.OutstandingAmount)
+	return err
+}
+
+// RefreshBSSRechargeMonthlyForAccount 从 cost_bss_transactions 重算该账号各自然月充值（transaction_flow=Income 且 amount>0）并 upsert cost_bss_recharge_monthly。[Ref: 03_Phase6/01_FinOps QueryAccountTransactions]
+func (p *PGRepository) RefreshBSSRechargeMonthlyForAccount(ctx context.Context, accountID string) error {
+	aid := strings.TrimSpace(accountID)
+	if aid == "" {
+		return nil
+	}
+	_, err := p.db.ExecContext(ctx, `
+		INSERT INTO cost_bss_recharge_monthly (billing_cycle, account_id, recharge_amount, currency, synced_at)
+		SELECT to_char(date_trunc('month', transaction_time AT TIME ZONE 'UTC'), 'YYYY-MM'),
+		       account_id,
+		       COALESCE(SUM(amount), 0)::numeric,
+		       COALESCE(MAX(NULLIF(TRIM(currency), '')), 'CNY'),
+		       NOW()
+		FROM cost_bss_transactions
+		WHERE COALESCE(account_id, '') = $1
+		  AND LOWER(COALESCE(transaction_flow, '')) = 'income'
+		  AND amount > 0
+		GROUP BY to_char(date_trunc('month', transaction_time AT TIME ZONE 'UTC'), 'YYYY-MM'), account_id
+		ON CONFLICT (billing_cycle, account_id) DO UPDATE SET
+		  recharge_amount = EXCLUDED.recharge_amount,
+		  currency = EXCLUDED.currency,
+		  synced_at = NOW()`,
+		aid)
 	return err
 }
 
@@ -1554,6 +1706,9 @@ func (r *pgTxRepository) UpsertBSSBalanceSnapshot(ctx context.Context, s BSSBala
 }
 func (r *pgTxRepository) UpsertBillOutstandingMonthly(ctx context.Context, o BillOutstandingMonthlyRow) error {
 	return r.parent.UpsertBillOutstandingMonthly(ctx, o)
+}
+func (r *pgTxRepository) RefreshBSSRechargeMonthlyForAccount(ctx context.Context, accountID string) error {
+	return r.parent.RefreshBSSRechargeMonthlyForAccount(ctx, accountID)
 }
 func (r *pgTxRepository) SumBSSPaymentExpenseByDateRange(ctx context.Context, from, to time.Time, accountIDs []string) (float64, error) {
 	return r.parent.SumBSSPaymentExpenseByDateRange(ctx, from, to, accountIDs)

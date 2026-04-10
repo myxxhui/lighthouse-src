@@ -9,6 +9,7 @@ import { ArrowLeftOutlined } from '@ant-design/icons';
 import { costService, type EnvDrilldownApiItem } from '@/services/costService';
 import { CURRENCY_SYMBOL } from '@/constants';
 import type { CostTimeRange } from '@/types';
+import { billingCalendarPartsFromNow } from '@/utils/billingCalendar';
 
 const CATEGORY_OPTIONS = [
   { label: '全部', value: '' },
@@ -18,25 +19,20 @@ const CATEGORY_OPTIONS = [
   { label: '安全', value: 'security' },
 ];
 
-/** 与后端 reportTypeAndPeriodKey 口径一致：7d/30d/90d 结束日为昨日 [Ref: 01_设计 D9-7] */
+/** 与后端 reportTypeAndPeriodKey 口径一致：业务月 YYYY-MM 用 Asia/Shanghai [Ref: 01_设计 D9-7] */
 function periodToReportTypeAndKey(period: string | null): { reportType: string; periodKey: string } {
-  const now = new Date();
-  const yyyy = now.getFullYear();
-  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const { monthStr, prevMonthStr, quarterKey, prevQuarterKey, yearStr, prevYearStr } = billingCalendarPartsFromNow();
   if (!period || period === 'custom') {
-    return { reportType: 'month', periodKey: `${yyyy}-${mm}` };
+    return { reportType: 'month', periodKey: monthStr };
   }
   const p = period as CostTimeRange;
-  if (p === 'month') return { reportType: 'month', periodKey: `${yyyy}-${mm}` };
-  if (p === 'last_month') {
-    const prevMonth = now.getMonth() === 0 ? 12 : now.getMonth();
-    const prevYear = now.getMonth() === 0 ? yyyy - 1 : yyyy;
-    return { reportType: 'last_month', periodKey: `${prevYear}-${String(prevMonth).padStart(2, '0')}` };
-  }
-  if (p === 'quarter' || p === 'last_quarter') return { reportType: p, periodKey: `${yyyy}-Q${Math.ceil((now.getMonth() + 1) / 3)}` };
-  if (p === 'this_year') return { reportType: 'this_year', periodKey: String(yyyy) };
-  if (p === 'last_year') return { reportType: 'last_year', periodKey: String(yyyy - 1) };
-  return { reportType: 'month', periodKey: `${yyyy}-${mm}` };
+  if (p === 'month') return { reportType: 'month', periodKey: monthStr };
+  if (p === 'last_month') return { reportType: 'last_month', periodKey: prevMonthStr };
+  if (p === 'quarter') return { reportType: 'quarter', periodKey: quarterKey };
+  if (p === 'last_quarter') return { reportType: 'last_quarter', periodKey: prevQuarterKey };
+  if (p === 'this_year') return { reportType: 'this_year', periodKey: yearStr };
+  if (p === 'last_year') return { reportType: 'last_year', periodKey: prevYearStr };
+  return { reportType: 'month', periodKey: monthStr };
 }
 
 const CostDrilldownEnvPage: React.FC = () => {

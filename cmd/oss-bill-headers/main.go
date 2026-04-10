@@ -1,4 +1,4 @@
-// 一次性工具：连接 OSS，列出 billing-data/ 下 CSV 并打印每个文件首行表头（不写库）。[Ref: Phase6 CSV 表头对齐]
+// 一次性工具：连接 OSS，列出 prefix 下账单对象（含无后缀 BillingItemDetail）并打印每个文件首行表头（不写库）。[Ref: Phase6 CSV 表头对齐、04_采集 §七 R9]
 package main
 
 import (
@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/aliyun/aliyun-oss-go-sdk/oss"
+	"github.com/myxxhui/lighthouse-src/internal/data/ossfinops"
 )
 
 func main() {
@@ -44,20 +45,13 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	lsRes, err := bucket.ListObjects(oss.Prefix(prefix), oss.MaxKeys(500))
+	objs, err := ossfinops.ListOSSBillingObjects(bucket, prefix)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	for _, obj := range lsRes.Objects {
+	for _, obj := range objs {
 		key := obj.Key
-		if !strings.HasSuffix(strings.ToLower(key), ".csv") {
-			continue
-		}
-		if obj.Size == 0 {
-			fmt.Printf("=== %s === (skip size=0)\n\n", key)
-			continue
-		}
 		rc, err := bucket.GetObject(key)
 		if err != nil {
 			fmt.Printf("ERR %s: %v\n", key, err)

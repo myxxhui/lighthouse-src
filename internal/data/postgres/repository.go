@@ -92,6 +92,8 @@ type Repository interface {
 	UpsertBillOutstandingMonthly(ctx context.Context, o BillOutstandingMonthlyRow) error
 	// SumBSSPaymentExpenseByDateRange 汇总区间内 Payment+Expense 类流水金额（实付 P，取绝对值之和）。[Ref: 03_Phase6/01_FinOps]
 	SumBSSPaymentExpenseByDateRange(ctx context.Context, from, to time.Time, accountIDs []string) (p float64, err error)
+	// RefreshBSSRechargeMonthlyForAccount 从 cost_bss_transactions 重算各自然月「充值」并写入 cost_bss_recharge_monthly（Income 且 amount>0）。[Ref: 03_Phase6/01_FinOps]
+	RefreshBSSRechargeMonthlyForAccount(ctx context.Context, accountID string) error
 	// LatestBSSBalanceSum 各 account 在 asOf 日前最近一条快照的 available 之和（B）。[Ref: 03_Phase6/01_FinOps]
 	LatestBSSBalanceSum(ctx context.Context, accountIDs []string, asOf time.Time) (b float64, err error)
 	// LatestBSSBalanceMap 各 account 在 asOf 日前最近一条快照的 available，供按环境去重汇总 B（与 Hero 同键）。[Ref: 03_Phase6/01_FinOps]
@@ -122,6 +124,10 @@ type Repository interface {
 
 	// [Ref: 01_设计 §环境与云账号配置 D9-3] 环境与产品配置
 	ListEnvAccountConfig(ctx context.Context) ([]EnvAccountConfig, error)
+	// ListCostProjects 返回全部项目及成员环境；按 sort_order。[Ref: 03_Phase6/03_前端全域成本透视/01_设计]
+	ListCostProjects(ctx context.Context) ([]CostProject, error)
+	// EnvironmentsByProjectIDs 返回所选项目下的环境名并集（去重）。[Ref: 03_Phase6/03_前端全域成本透视/01_设计]
+	EnvironmentsByProjectIDs(ctx context.Context, projectIDs []int) ([]string, error)
 	// UpdateEnvAccountConfigAccountID 将 BSS 解析的阿里云主账号 ID 写回 cost_env_account_config，与 ETL account_id 主键对齐。[Ref: 03_Phase6/01_FinOps]
 	UpdateEnvAccountConfigAccountID(ctx context.Context, environment, aliyunAccountID string) error
 	GetProductCategory(ctx context.Context, productCode string) (category string, ok bool)
@@ -324,6 +330,10 @@ type CloudBillMonthlyRaw struct {
 	SnapshotAt             time.Time         `json:"snapshot_at"`
 	CreatedAt              time.Time         `json:"created_at"`
 	AccountID              string            `json:"account_id,omitempty"`
+	// DeductedByCoupons / DeductedByCashCoupons：QueryAccountBill 月汇总（API），与控制台「优惠券抵扣」对齐；ETL 写入后供对账。[Ref: 04_采集 §5.4]
+	DeductedByCoupons     *float64   `json:"deducted_by_coupons,omitempty"`
+	DeductedByCashCoupons *float64   `json:"deducted_by_cash_coupons,omitempty"`
+	CouponSyncedAt        *time.Time `json:"coupon_synced_at,omitempty"`
 }
 
 // [Ref: 06_ 成本云账单三表] 聚合表行（dual-metric v3）
@@ -378,6 +388,10 @@ type BSSTransactionRow struct {
 	RecordID          string
 	BillingCycle      string
 	Currency          string
+	// TransactionChannel 如 CreditCard、AccountBalance（与阿里云 TransactionChannel 一致）
+	TransactionChannel string
+	FundType           string
+	Remarks            string
 }
 
 // BSSBalanceSnapshotRow [Ref: 03_Phase6/01_FinOps] QueryAccountBalance 快照
@@ -453,6 +467,15 @@ type EnvAccountConfig struct {
 	DisplayName  string    `json:"display_name"`
 	SortOrder    int       `json:"sort_order"`
 	CreatedAt    time.Time `json:"created_at"`
+}
+
+// CostProject 成本项目（cost_project + cost_project_environment）。[Ref: 03_Phase6/03_前端全域成本透视/01_设计]
+type CostProject struct {
+	ID            int      `json:"id"`
+	Code          string   `json:"code"`
+	Name          string   `json:"name"`
+	SortOrder     int      `json:"sort_order"`
+	Environments  []string `json:"environments"`
 }
 
 // ProductCategoryMapping 云产品与成本分类（product_category_mapping）。[Ref: 01_设计 §产品分类与按环境钻取]

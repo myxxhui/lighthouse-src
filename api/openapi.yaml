@@ -81,7 +81,7 @@ paths:
         Returns global cost overview (Phase4 cloud bill aggregate path).
         Optional **track** selects FinOps rail (`technical` | `finance`); when set, response includes `metadata.effective_track`.
         **ledger** / **reconciliation** are populated when OSS/BSS ETL is ready; otherwise omitted or null.
-        [Ref: 03_Phase6/01_FinOps双轨语义与全域成本契约_设计 §API、track 与 UX]
+        [Ref: 03_Phase6/01_FinOps双轨与全域成本重构/01_设计 §API、track 与 UX]
       operationId: getGlobalCost
       parameters:
         - name: period
@@ -637,6 +637,9 @@ components:
         sync_job_auth_required:
           type: boolean
           description: True when FINOPS_SYNC_JOB_API_KEY is configured; POST must send matching header
+        bss_transactions_lookback_days:
+          type: integer
+          description: Daily BSS QueryAccountTransactions window for SyncFinOpsAuxiliary (FINOPS_BSS_TRANSACTIONS_LOOKBACK_DAYS; default 14)
     FinOpsSyncConflictResponse:
       type: object
       properties:

@@ -11,7 +11,7 @@ export type CostTimeRange =
 /** 成本对比模式 */
 export type CostCompareMode = 'none' | 'previous';
 
-/** FinOps 双轨视角 [Ref: 03_Phase6/01_FinOps双轨语义与全域成本契约_设计 §前端展示规划] */
+/** FinOps 双轨视角 [Ref: 03_Phase6/01_FinOps双轨与全域成本重构/01_设计 §前端展示规划] */
 export type CostTrack = 'technical' | 'finance';
 
 /** 五维账本 C/G/P/U/B */
@@ -47,7 +47,7 @@ export interface DrilldownCostBreakdown {
   network: number;
 }
 
-/** 按环境总账与对比；ledger_* 为五维按环境分摊（与 hero 五维一致） [Ref: 01_设计 D9-4、03_Phase6/01_FinOps] */
+/** 按环境总账与对比；consumption_cost/ledger_g/ledger_p 为按账号事实（与临时程序 Y/H/已还款 同源）；ledger_b/u 见 API [Ref: 01_设计 D9-4、03_Phase6/01_FinOps] */
 export interface EnvBreakdownItem {
   environment: string;
   account_id: string;
@@ -61,6 +61,24 @@ export interface EnvBreakdownItem {
   ledger_p?: number;
   ledger_u?: number;
   ledger_b?: number;
+  /** 后端 YAML 云环境账户标题，如 C66-Aliyun-Uat [Ref: 03_Phase6/03_前端全域成本透视/01_设计] */
+  cloud_account_label?: string;
+  /** 国内站 / 国际站 [Ref: 03_Phase6/03_前端全域成本透视/01_设计] */
+  cloud_account_site_note?: string;
+}
+
+/** 成本项目汇总（与 GET /api/v1/cost/global 的 project_breakdown 一致）；ledger_* 与成员环境 env_breakdown 加总一致 [Ref: 03_Phase6/03_前端全域成本透视/01_设计] */
+export interface ProjectBreakdownItem {
+  project_id: number;
+  code: string;
+  name: string;
+  sort_order: number;
+  total_cost: number;
+  consumption_cost?: number;
+  ledger_g?: number;
+  ledger_p?: number;
+  ledger_u?: number;
+  ledger_b?: number;
 }
 
 export interface CostMetrics {
@@ -68,6 +86,8 @@ export interface CostMetrics {
   totalOptimizableSpace: number;
   globalEfficiency: number;
   domainBreakdown: DomainBreakdown[];
+  /** 成本项目卡片 [Ref: 03_Phase6/03_前端全域成本透视/01_设计] */
+  projectBreakdown?: ProjectBreakdownItem[];
   /** 四环境卡片数据 [Ref: 01_设计 §按环境展示] */
   envBreakdown?: EnvBreakdownItem[];
   billDetail?: BillDetail;
@@ -89,12 +109,12 @@ export interface CostMetrics {
   billDataStatus?: string;
   /** 展示说明：月粒度周期净退款已抵减时后端返回，前端可展示「该周期净退款已抵减」 */
   displayNote?: string;
-  /** 请求携带的 track（仅 URL 含 track= 时）；用于 Hero Tag 与口径说明 [Ref: 03_Phase6/01_FinOps双轨语义与全域成本契约_设计] */
+  /** 请求携带的 track（仅 URL 含 track= 时）；用于 Hero Tag 与口径说明 [Ref: 03_Phase6/01_FinOps双轨与全域成本重构/01_设计] */
   effectiveRequestTrack?: CostTrack;
   /** 五维快照 */
   ledger?: FinOpsLedger;
   reconciliation?: FinOpsReconciliation;
-  /** 与后端 metadata.ledger_snapshot_note 一致；五维并列与守恒式说明 [Ref: 03_Phase6/01_FinOps双轨语义与全域成本契约_设计] */
+  /** 与后端 metadata.ledger_snapshot_note 一致；五维并列与守恒式说明 [Ref: 03_Phase6/01_FinOps双轨与全域成本重构/01_设计] */
   ledgerSnapshotNote?: string;
 }
 

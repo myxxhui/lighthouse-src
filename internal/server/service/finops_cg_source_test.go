@@ -47,15 +47,15 @@ func (c *cgLedgerStub) SumLineItemsPretaxCGByDateRangeWithChannel(ctx context.Co
 	}
 }
 
-func TestFillTechnicalLedgerCG_APISourceUsesAPIChannel(t *testing.T) {
+func TestFillTechnicalLedgerCG_FactsUseFinOpsFactPath(t *testing.T) {
 	t.Parallel()
 	st := &cgLedgerStub{
 		MockRepository: postgres.NewMockRepository(postgres.DefaultMockConfig()),
 		nFact:          100,
-		apiC:           100,
-		apiG:           -10,
+		factC:          100,
+		factG:          -10,
 	}
-	svc := NewCostService(st, "api", nil)
+	svc := NewCostService(st, "oss", nil)
 	resp := &dto.GlobalCostResponse{}
 	now := time.Date(2025, 3, 15, 0, 0, 0, 0, time.UTC)
 	svc.fillTechnicalLedgerCG(context.Background(), resp, "month", "2025-01", now, []string{"acc1"}, nil)
@@ -64,9 +64,6 @@ func TestFillTechnicalLedgerCG_APISourceUsesAPIChannel(t *testing.T) {
 	}
 	if *resp.Ledger.C != 100 || *resp.Ledger.G != -10 {
 		t.Fatalf("ledger C/G=%v,%v want 100,-10", *resp.Ledger.C, *resp.Ledger.G)
-	}
-	if st.lastChannelForCG != "api_query_account_bill" {
-		t.Fatalf("channel=%q want api_query_account_bill", st.lastChannelForCG)
 	}
 }
 
@@ -113,15 +110,15 @@ func TestFillTechnicalLedgerCG_OSSSourceNoFactsUsesOSSDetailOnly(t *testing.T) {
 	}
 }
 
-func TestFillTechnicalLedgerCG_POCPApiUATOssByEnv(t *testing.T) {
+func TestFillTechnicalLedgerCG_MultiEnvOSSOnly(t *testing.T) {
 	t.Parallel()
 	st := &cgLedgerStub{
 		MockRepository: postgres.NewMockRepository(postgres.DefaultMockConfig()),
 		nFact:          0,
-		apiC:           10,
-		apiG:           -1,
 		ossC:           20,
 		ossG:           -2,
+		apiC:           20,
+		apiG:           -2,
 		envConfigs: []postgres.EnvAccountConfig{
 			{Environment: "POC", AccountID: "POC"},
 			{Environment: "UAT", AccountID: "UAT"},
@@ -134,7 +131,34 @@ func TestFillTechnicalLedgerCG_POCPApiUATOssByEnv(t *testing.T) {
 	if resp.Ledger == nil || resp.Ledger.C == nil || resp.Ledger.G == nil {
 		t.Fatal("expected ledger C/G")
 	}
-	if *resp.Ledger.C != 30 || *resp.Ledger.G != -3 {
-		t.Fatalf("ledger C/G=%v,%v want 30,-3 (POC api + UAT oss)", *resp.Ledger.C, *resp.Ledger.G)
+	// POC→api 走 api_query_account_bill，UAT→oss 走 oss_detail；桩同值 → 20+20, -2+-2 [Ref: 03_Phase6/01_FinOps]
+	if *resp.Ledger.C != 40 || *resp.Ledger.G != -4 {
+		t.Fatalf("ledger C/G=%v,%v want 40,-4", *resp.Ledger.C, *resp.Ledger.G)
+	}
+	if st.lastChannelForCG != "oss_detail" {
+		t.Fatalf("last channel=%q want oss_detail (UAT second)", st.lastChannelForCG)
+	}
+}
+
+func TestFillTechnicalLedgerCG_APISourceUsesAPIChannel(t *testing.T) {
+	t.Parallel()
+	st := &cgLedgerStub{
+		MockRepository: postgres.NewMockRepository(postgres.DefaultMockConfig()),
+		nFact:          0,
+		apiC:           7,
+		apiG:           -3,
+	}
+	svc := NewCostService(st, "api", nil)
+	resp := &dto.GlobalCostResponse{}
+	now := time.Date(2025, 3, 15, 0, 0, 0, 0, time.UTC)
+	svc.fillTechnicalLedgerCG(context.Background(), resp, "month", "2025-01", now, []string{"acc1"}, nil)
+	if resp.Ledger == nil || resp.Ledger.C == nil || resp.Ledger.G == nil {
+		t.Fatal("expected ledger C/G")
+	}
+	if *resp.Ledger.C != 7 || *resp.Ledger.G != -3 {
+		t.Fatalf("ledger C/G=%v,%v want 7,-3", *resp.Ledger.C, *resp.Ledger.G)
+	}
+	if st.lastChannelForCG != "api_query_account_bill" {
+		t.Fatalf("channel=%q want api_query_account_bill", st.lastChannelForCG)
 	}
 }

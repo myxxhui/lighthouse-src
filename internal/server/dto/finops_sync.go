@@ -17,6 +17,8 @@ type FinOpsEffectiveConfigResponse struct {
 	SyncAuxTimeoutSeconds int `json:"sync_aux_timeout_seconds"`
 	// SyncJobAuthRequired 为 true 时 POST /finops/sync-jobs 须带 X-FinOps-Sync-Key（进程已配置 FINOPS_SYNC_JOB_API_KEY）。[Ref: 03_Phase6/01_FinOps 主动同步]
 	SyncJobAuthRequired bool `json:"sync_job_auth_required"`
+	// BssTransactionsLookbackDays 日常辅助同步拉 QueryAccountTransactions 的回溯整天数（FINOPS_BSS_TRANSACTIONS_LOOKBACK_DAYS，默认 14）。[Ref: 04_采集 §七 R15]
+	BssTransactionsLookbackDays int `json:"bss_transactions_lookback_days"`
 }
 
 // FinOpsSyncJobCreateResponse POST /finops/sync-jobs 202 响应。[Ref: 03_Phase6/01_FinOps 主动同步]

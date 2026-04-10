@@ -149,6 +149,15 @@ CREATE TABLE IF NOT EXISTS cost_bill_outstanding_monthly (
     synced_at            TIMESTAMP NOT NULL DEFAULT NOW(),
     PRIMARY KEY (billing_cycle, account_id)
 );
+CREATE TABLE IF NOT EXISTS cost_bss_recharge_monthly (
+    billing_cycle   VARCHAR(7) NOT NULL,
+    account_id      VARCHAR(64) NOT NULL DEFAULT '',
+    recharge_amount NUMERIC(14, 6) NOT NULL DEFAULT 0,
+    currency        VARCHAR(8) DEFAULT 'CNY',
+    synced_at       TIMESTAMP NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (billing_cycle, account_id)
+);
+CREATE INDEX IF NOT EXISTS idx_bss_recharge_monthly_account ON cost_bss_recharge_monthly(account_id);
 -- [Ref: Phase6 OLAP] OSS 账单明细事实表；bulk UPSERT ON CONFLICT (account_id, dedup_key)。[Ref: 04_采集 §5.6]
 CREATE TABLE IF NOT EXISTS finops_billing_fact (
     id              BIGSERIAL PRIMARY KEY,
@@ -193,6 +202,9 @@ CREATE TABLE IF NOT EXISTS cost_cloud_bill_monthly_raw (
     created_at      TIMESTAMP DEFAULT NOW(),
     account_id      VARCHAR(64) NOT NULL DEFAULT '',
     region          VARCHAR(32),
+    deducted_by_coupons NUMERIC(18, 6),
+    deducted_by_cash_coupons NUMERIC(18, 6),
+    coupon_synced_at TIMESTAMPTZ,
     PRIMARY KEY (billing_cycle, account_id)
 );
 CREATE TABLE IF NOT EXISTS cost_cloud_bill_daily_raw (
@@ -236,6 +248,32 @@ INSERT INTO cost_env_account_config (environment, account_id, display_name, sort
 INSERT INTO cost_env_account_config (environment, account_id, display_name, sort_order) VALUES ('UAT', 'UAT', 'UAT 中国站', 2) ON CONFLICT (environment) DO NOTHING;
 INSERT INTO cost_env_account_config (environment, account_id, display_name, sort_order) VALUES ('FAT', 'FAT', 'FAT 测试', 3) ON CONFLICT (environment) DO NOTHING;
 INSERT INTO cost_env_account_config (environment, account_id, display_name, sort_order) VALUES ('PROD', 'PROD', 'PROD 生产', 4) ON CONFLICT (environment) DO NOTHING;
+
+-- [Ref: 03_Phase6/03_前端全域成本透视/01_设计] 成本项目（一项目可多环境；一环境仅属一项目）
+CREATE TABLE IF NOT EXISTS cost_project (
+    id          SERIAL PRIMARY KEY,
+    code        VARCHAR(64) NOT NULL UNIQUE,
+    name        VARCHAR(256) NOT NULL,
+    sort_order  INT NOT NULL DEFAULT 0,
+    created_at  TIMESTAMP DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS cost_project_environment (
+    project_id   INT NOT NULL REFERENCES cost_project(id) ON DELETE CASCADE,
+    environment  VARCHAR(64) NOT NULL,
+    PRIMARY KEY (project_id, environment)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_cost_project_environment_env ON cost_project_environment(environment);
+INSERT INTO cost_project (code, name, sort_order) VALUES
+    ('c66', 'C66', 1),
+    ('laroplus', 'Laroplus', 2),
+    ('k8s', 'K8s', 3),
+    ('unknown', '未知', 4)
+ON CONFLICT (code) DO NOTHING;
+-- POC→K8s、UAT→C66、FAT→Laroplus、PROD→未知 [Ref: 03_Phase6/03_前端全域成本透视/01_设计]
+INSERT INTO cost_project_environment (project_id, environment)
+SELECT p.id, v.env FROM cost_project p
+JOIN (VALUES ('k8s','POC'),('c66','UAT'),('laroplus','FAT'),('unknown','PROD')) AS v(code, env) ON p.code = v.code
+ON CONFLICT (environment) DO NOTHING;
 
 -- [Ref: 01_设计 §产品分类与按环境钻取、06_ §2.1] 云产品与成本分类映射
 CREATE TABLE IF NOT EXISTS product_category_mapping (

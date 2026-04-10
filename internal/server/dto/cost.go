@@ -42,17 +42,17 @@ type GlobalCostMetadata struct {
 	PeriodKey      string     `json:"period_key,omitempty"`       // 对应聚合表 period_key，用于校验当前时间范围
 	// DisplayNote 展示说明：月粒度周期内净退款导致现金合计为负时，后端将金额展示为 0 并设置本字段，前端可展示「该周期净退款已抵减」
 	DisplayNote string `json:"display_note,omitempty"`
-	// EffectiveTrack 仅当请求含合法 track（technical|finance）时设置，与请求一致。[Ref: 03_Phase6/01_FinOps双轨语义与全域成本契约_设计 §API、track 与 UX]
+	// EffectiveTrack 仅当请求含合法 track（technical|finance）时设置，与请求一致。[Ref: 03_Phase6/01_FinOps双轨与全域成本重构/01_设计 §API、track 与 UX]
 	EffectiveTrack string `json:"effective_track,omitempty"`
 	// FinOpsCGSource 与默认 FINOPS_CG_SOURCE 或 uniform 时一致；多环境混用为 "mixed"。[Ref: 03_Phase6/01_FinOps]
 	FinOpsCGSource string `json:"finops_cg_source,omitempty"`
 	// FinOpsCGSourceByEnv 当前筛选下各环境实际 C/G 源（oss|api）。[Ref: 03_Phase6/01_FinOps]
 	FinOpsCGSourceByEnv map[string]string `json:"finops_cg_source_by_env,omitempty"`
-	// LedgerSnapshotNote 五维并列快照与守恒式说明（固定文案）；与 ledger 同传。[Ref: 03_Phase6/01_FinOps双轨语义与全域成本契约_设计 §五维并列快照与 UX]
+	// LedgerSnapshotNote 五维并列快照与守恒式说明（固定文案）；与 ledger 同传。[Ref: 03_Phase6/01_FinOps双轨与全域成本重构/01_设计 §五维并列快照与 UX]
 	LedgerSnapshotNote string `json:"ledger_snapshot_note,omitempty"`
 }
 
-// FinOpsLedger 五维并列快照；整块未就绪时省略或 null。单维：查询成功则含数值（可为 0）；查询失败则 omit。[Ref: 03_Phase6/01_FinOps双轨语义与全域成本契约_设计 §ledger 单维语义]
+// FinOpsLedger 五维并列快照；整块未就绪时省略或 null。单维：查询成功则含数值（可为 0）；查询失败则 omit。[Ref: 03_Phase6/01_FinOps双轨与全域成本重构/01_设计 §ledger 单维语义]
 type FinOpsLedger struct {
 	C        *float64              `json:"C,omitempty"`
 	G        *float64              `json:"G,omitempty"`
@@ -74,8 +74,32 @@ type FinOpsReconciliation struct {
 	Explain  string   `json:"explain,omitempty"`
 }
 
-// EnvBreakdownItem 按环境的总账与对比；ledger_g/ledger_p 可按消耗占比从 hero 分摊；ledger_b/ledger_u 与各环境 canonical account 的 BSS/应付事实一致。[Ref: 01_设计 §按环境展示、12_API GlobalCostResponse]
-// ConsumptionCost 资金轨下为聚合表 consumption 行按账户汇总（与 total_cost 的 payment 口径分离），供环境卡 C 列展示；nil 表示未做双轨拆分。[Ref: 03_Phase6/01_FinOps]
+// ProjectBreakdownItem 按成本项目汇总（成员环境对应账户金额之和）；ledger_* / consumption_cost 由成员环境 env_breakdown 行加总，与项目卡五维展示一致。[Ref: 03_Phase6/03_前端全域成本透视/01_设计]
+type ProjectBreakdownItem struct {
+	ProjectID int     `json:"project_id"`
+	Code      string  `json:"code"`
+	Name      string  `json:"name"`
+	SortOrder int     `json:"sort_order"`
+	TotalCost float64 `json:"total_cost"`
+	// ConsumptionCost 资金轨下为成员环境 consumption 之和；与 EnvBreakdownItem 语义一致。
+	ConsumptionCost *float64 `json:"consumption_cost,omitempty"`
+	LedgerG           *float64 `json:"ledger_g,omitempty"`
+	LedgerP           *float64 `json:"ledger_p,omitempty"`
+	LedgerU           *float64 `json:"ledger_u,omitempty"`
+	LedgerB           *float64 `json:"ledger_b,omitempty"`
+}
+
+// CostProjectItem GET /api/v1/projects 列表项。[Ref: 03_Phase6/03_前端全域成本透视/01_设计]
+type CostProjectItem struct {
+	ID           int      `json:"id"`
+	Code         string   `json:"code"`
+	Name         string   `json:"name"`
+	SortOrder    int      `json:"sort_order"`
+	Environments []string `json:"environments"`
+}
+
+// EnvBreakdownItem 按环境的总账与对比；ledger_g/ledger_p 与各账号 FinOps 事实一致（正额/负额汇总与 BSS 已还款）；ledger_b/ledger_u 与各环境 canonical account 的 BSS/应付事实一致。[Ref: 01_设计 §按环境展示、12_API GlobalCostResponse]
+// ConsumptionCost 环境卡「应付消耗」：优先为 finops/line_items 正额之和（与 ledger.C 同源拆分）；资金轨聚合路径可先写入再由 FinOps 覆盖。[Ref: 03_Phase6/01_FinOps]
 type EnvBreakdownItem struct {
 	Environment         string   `json:"environment"`
 	AccountID           string   `json:"account_id"`
@@ -88,6 +112,10 @@ type EnvBreakdownItem struct {
 	LedgerP             *float64 `json:"ledger_p,omitempty"`
 	LedgerU             *float64 `json:"ledger_u,omitempty"`
 	LedgerB             *float64 `json:"ledger_b,omitempty"`
+	// CloudAccountLabel 云环境账户卡主标题，如 C66-Aliyun-Uat；来自 CLOUD_ACCOUNT_DISPLAY_YAML。[Ref: 03_Phase6/03_前端全域成本透视/01_设计]
+	CloudAccountLabel string `json:"cloud_account_label,omitempty"`
+	// CloudAccountSiteNote 站点说明（国内站/国际站），与 YAML site 对应。[Ref: 03_Phase6/03_前端全域成本透视/01_设计]
+	CloudAccountSiteNote string `json:"cloud_account_site_note,omitempty"`
 }
 
 // GlobalCostResponse represents the response for global cost overview.
@@ -97,6 +125,7 @@ type GlobalCostResponse struct {
 	GlobalEfficiency float64                 `json:"global_efficiency"`
 	DomainBreakdown  []DomainBreakdownItem   `json:"domain_breakdown"`
 	EnvBreakdown     []EnvBreakdownItem       `json:"env_breakdown,omitempty"` // [Ref: 01_设计 D9-4]
+	ProjectBreakdown []ProjectBreakdownItem   `json:"project_breakdown,omitempty"` // [Ref: 03_Phase6/03_前端全域成本透视/01_设计]
 	Namespaces       []NamespaceCostSummary  `json:"namespaces"`
 	Timestamp        time.Time               `json:"timestamp"`
 	Metadata         *GlobalCostMetadata     `json:"metadata,omitempty"`
@@ -243,7 +272,7 @@ type ErrorResponse struct {
 // Helper Functions
 // =============================================
 
-// ApplyFinOpsGlobalMetadata 在请求含合法 track 时写入 metadata.effective_track。[Ref: 03_Phase6/01_FinOps双轨语义与全域成本契约_设计 §API、track 与 UX]
+// ApplyFinOpsGlobalMetadata 在请求含合法 track 时写入 metadata.effective_track。[Ref: 03_Phase6/01_FinOps双轨与全域成本重构/01_设计 §API、track 与 UX]
 func ApplyFinOpsGlobalMetadata(resp *GlobalCostResponse, track string) {
 	if track != "technical" && track != "finance" {
 		return

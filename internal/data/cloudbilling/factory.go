@@ -69,6 +69,9 @@ func (a *aliCloudFetcher) FetchBSSTransactions(ctx context.Context, start, end t
 			RecordID:          it.RecordID,
 			BillingCycle:      it.BillingCycle,
 			Currency:          it.Currency,
+			TransactionChannel: it.TransactionChannel,
+			FundType:           it.FundType,
+			Remarks:            it.Remarks,
 		})
 	}
 	return out, nil
@@ -84,6 +87,10 @@ func (a *aliCloudFetcher) FetchOutstandingMonthly(ctx context.Context, billingCy
 
 func (a *aliCloudFetcher) FetchCallingAccountID(ctx context.Context, billingCycle string) (string, error) {
 	return a.inner.FetchCallingAccountID(ctx, billingCycle)
+}
+
+func (a *aliCloudFetcher) FetchCouponDeductionMonthly(ctx context.Context, billingCycle string) (float64, float64, error) {
+	return a.inner.SumCouponDeductionPartsForBillingCycle(ctx, billingCycle)
 }
 
 func (a *aliCloudFetcher) FetchAccountSummary(ctx context.Context, req FetchAccountSummaryRequest) (*FetchAccountSummaryResponse, error) {
@@ -132,12 +139,21 @@ func NewFetcher(cfg CloudBillingConfig) CloudBillingFetcher {
 	}
 }
 
-// NewFetcherForEnv 按环境名（POC/FAT/UAT/PROD）从环境变量 ALIBABA_CLOUD_ACCESS_KEY_ID_<env>/SECRET_<env> 创建 Fetcher。[Ref: 01_实践 §3.3(3a) 多账号]
+// NewFetcherForEnv 按后缀从环境变量 ALIBABA_CLOUD_ACCESS_KEY_ID_<suffix>/SECRET_<suffix> 创建 Fetcher；suffix 可为 POC/UAT 或与项目 YAML 一致的 environment_key（如 C66_UAT）。[Ref: 01_实践 §3.3(3a) 多账号]
 func NewFetcherForEnv(environment string) CloudBillingFetcher {
 	if environment == "" {
 		return nil
 	}
 	f, ok := aliyun.NewFetcherForEnv(environment)
+	if !ok {
+		return nil
+	}
+	return &aliCloudFetcher{inner: f}
+}
+
+// NewAliyunFetcherFromCredentials 显式凭证 + BSS Endpoint（YAML 项目环境）；endpoint 空则中国站默认。[Ref: 03_Phase6 项目云账号]
+func NewAliyunFetcherFromCredentials(accessKeyID, secretAccessKey, bssEndpoint string) CloudBillingFetcher {
+	f, ok := aliyun.NewFetcherWithCredentials(accessKeyID, secretAccessKey, bssEndpoint)
 	if !ok {
 		return nil
 	}

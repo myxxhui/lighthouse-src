@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -24,7 +25,9 @@ const (
 	envBillingEndpoint     = "ALIBABA_CLOUD_BILLING_ENDPOINT" // 可选；国际站填 business.ap-southeast-1.aliyuncs.com
 	envBillingEndpointAlt  = "CLOUD_BILLING_ENDPOINT"         // 与设计/实践文档一致
 	defaultBillingEndpoint = "business.aliyuncs.com"          // 中国站
-	maxRetries             = 3
+	// DefaultIntlBillingEndpoint 国际站 BSS OpenAPI 常用域名（与阿里云文档「国际站费用」一致；临时 CLI 可在未配 env 时选用）。[Ref: 03_Phase6/01_FinOps]
+	DefaultIntlBillingEndpoint = "business.ap-southeast-1.aliyuncs.com"
+	maxRetries                 = 3
 	baseBackoff            = time.Second
 	circuitFailThreshold   = 5
 	circuitOpenDuration    = 60 * time.Second
@@ -109,8 +112,32 @@ func NewFetcher(endpoint string) (*Fetcher, bool) {
 	return &Fetcher{bssClient: c}, true
 }
 
-// NewFetcherForEnv 按环境名（POC/FAT/UAT/PROD）从环境变量读取 AK/SK 创建 Fetcher。[Ref: 01_实践 §3.3(3a) 变量后缀使用环境名]
-// 变量名：ALIBABA_CLOUD_ACCESS_KEY_ID_<env>、ALIBABA_CLOUD_ACCESS_KEY_SECRET_<env>；可选 CLOUD_BILLING_ENDPOINT_<env>。
+// NewFetcherWithCredentials 显式 AK/SK 与 BSS Endpoint，供 YAML 项目级配置注入（不经环境变量）。[Ref: 03_Phase6 项目云账号]
+func NewFetcherWithCredentials(ak, sk, endpoint string) (*Fetcher, bool) {
+	ak = strings.TrimSpace(ak)
+	sk = strings.TrimSpace(sk)
+	if ak == "" || sk == "" {
+		return nil, false
+	}
+	if endpoint == "" {
+		endpoint = defaultBillingEndpoint
+	}
+	cfg := &openapi.Config{
+		AccessKeyId:     tea.String(ak),
+		AccessKeySecret: tea.String(sk),
+		Endpoint:        tea.String(endpoint),
+	}
+	c, err := client.NewClient(cfg)
+	if err != nil {
+		slog.Warn("aliyun billing: NewFetcherWithCredentials failed", "error", err)
+		return nil, false
+	}
+	return &Fetcher{bssClient: c}, true
+}
+
+// NewFetcherForEnv 按后缀从环境变量读取 AK/SK 创建 Fetcher。[Ref: 01_实践 §3.3(3a)]
+// 后缀可为 POC/FAT/UAT/PROD，或与项目 YAML 一致的 environment_key（如 C66_UAT），避免多项目共用短名冲突。
+// 变量名：ALIBABA_CLOUD_ACCESS_KEY_ID_<suffix>、ALIBABA_CLOUD_ACCESS_KEY_SECRET_<suffix>；可选 CLOUD_BILLING_ENDPOINT_<suffix>。
 func NewFetcherForEnv(environment string) (*Fetcher, bool) {
 	if environment == "" {
 		return nil, false
@@ -144,6 +171,23 @@ func NewFetcherForEnv(environment string) (*Fetcher, bool) {
 		return nil, false
 	}
 	return &Fetcher{bssClient: c}, true
+}
+
+// NewFetcherForEnvWithEndpoint 若 endpointOverride 非空则固定使用该 BSS 域名；否则与 NewFetcherForEnv 相同（读 CLOUD_BILLING_ENDPOINT_<suffix> 与中国站默认）。[Ref: 03_Phase6/01_FinOps 国际站 QueryAccountTransactions]
+func NewFetcherForEnvWithEndpoint(environment string, endpointOverride string) (*Fetcher, bool) {
+	environment = strings.TrimSpace(environment)
+	if environment == "" {
+		return nil, false
+	}
+	if strings.TrimSpace(endpointOverride) != "" {
+		ak := os.Getenv(envAccessKeyID + "_" + environment)
+		sk := os.Getenv(envAccessKeySecret + "_" + environment)
+		if ak == "" || sk == "" {
+			return nil, false
+		}
+		return NewFetcherWithCredentials(ak, sk, strings.TrimSpace(endpointOverride))
+	}
+	return NewFetcherForEnv(environment)
 }
 
 // ResolveBillingEndpointForEnv 返回与 NewFetcherForEnv 相同的 BSS Endpoint（仅用于本地诊断，不含密钥）。[Ref: 03_Phase6/01_FinOps]
@@ -533,6 +577,45 @@ func (f *Fetcher) FetchBillOverviewByDay(ctx context.Context, billingDate string
 	}, nil
 }
 
+// effectivePretaxPayableFromItem 对齐控制台「应付」：QueryAccountBill / QueryBillOverview 的 Data.Items.Item 中
+//   目录总价 PretaxGrossAmount；优惠 InvoiceDiscount；优惠券抵扣 DeductedByCoupons（接口多为正数，须从目录链路中减去；另见 DeductedByCashCoupons）；
+//   应付(税前) PretaxAmount 常与 PretaxGrossAmount − InvoiceDiscount − DeductedByCoupons − 抹零调账 一致。
+// 本函数在能拆分时用 Gross−Discount−Coupons；与 PretaxAmount 近似相等则采用 PretaxAmount（避免与控制台单行重复）。[Ref: 04_采集 §5.4]
+func effectivePretaxPayableFromItem(it *client.QueryAccountBillResponseBodyDataItemsItem) float64 {
+	if it == nil {
+		return 0
+	}
+	var pretax float64
+	if it.PretaxAmount != nil {
+		pretax = float64(*it.PretaxAmount)
+	}
+	if it.PretaxGrossAmount == nil || *it.PretaxGrossAmount == 0 {
+		return pretax
+	}
+	hasDiscount := it.InvoiceDiscount != nil && *it.InvoiceDiscount != 0
+	hasCoupon := (it.DeductedByCoupons != nil && *it.DeductedByCoupons != 0) ||
+		(it.DeductedByCashCoupons != nil && *it.DeductedByCashCoupons != 0)
+	if !hasDiscount && !hasCoupon {
+		return pretax
+	}
+	gross := float64(*it.PretaxGrossAmount)
+	deduct := 0.0
+	if it.InvoiceDiscount != nil {
+		deduct += float64(*it.InvoiceDiscount)
+	}
+	if it.DeductedByCoupons != nil {
+		deduct += float64(*it.DeductedByCoupons)
+	}
+	if it.DeductedByCashCoupons != nil {
+		deduct += float64(*it.DeductedByCashCoupons)
+	}
+	derived := gross - deduct
+	if math.Abs(derived-pretax) <= 1e-4 {
+		return pretax
+	}
+	return derived
+}
+
 // BillLineItemResult 行级流水条目（QueryAccountBill IsGroupByProduct=false）。
 // [Ref: 16_云账单动态对账与高可靠处理规范 §四]
 type BillLineItemResult struct {
@@ -614,10 +697,7 @@ func (f *Fetcher) FetchLineItemsByDay(ctx context.Context, billingDate string) (
 			if cashAmount == 0 && it.CashAmount != nil {
 				cashAmount = float64(*it.CashAmount)
 			}
-			pretaxAmount := 0.0
-			if it.PretaxAmount != nil {
-				pretaxAmount = float64(*it.PretaxAmount)
-			}
+			pretaxAmount := effectivePretaxPayableFromItem(it)
 			pretaxGrossAmount := 0.0
 			if it.PretaxGrossAmount != nil {
 				pretaxGrossAmount = float64(*it.PretaxGrossAmount)
@@ -747,6 +827,9 @@ func (f *Fetcher) FetchBSSTransactions(ctx context.Context, start, end time.Time
 				RecordID:          derefStr(it.RecordID),
 				BillingCycle:      derefStr(it.BillingCycle),
 				Currency:          "CNY",
+				TransactionChannel: derefStr(it.TransactionChannel),
+				FundType:           derefStr(it.FundType),
+				Remarks:            derefStr(it.Remarks),
 			})
 		}
 		total := int32(0)
@@ -777,6 +860,9 @@ type BSSAccountTransactionItem struct {
 	RecordID          string
 	BillingCycle      string
 	Currency          string
+	TransactionChannel string
+	FundType           string
+	Remarks            string
 }
 
 func derefStr(p *string) string {
@@ -1028,6 +1114,205 @@ func (f *Fetcher) SumOutstandingMonthly(ctx context.Context, billingCycle string
 		return 0, errU
 	}
 	return 0, errO
+}
+
+// FetchQueryAccountBillMonthlyItems 分页拉取 QueryAccountBill **MONTHLY** 全部明细行，供抹零/调账与控制台核对。[Ref: QueryAccountBill 临时验证]
+func (f *Fetcher) FetchQueryAccountBillMonthlyItems(ctx context.Context, billingCycle string, byProduct bool) ([]*client.QueryAccountBillResponseBodyDataItemsItem, error) {
+	f.mu.Lock()
+	if time.Now().Before(f.circuitOpenUntil) {
+		f.mu.Unlock()
+		return nil, ErrCircuitOpen
+	}
+	f.mu.Unlock()
+	if strings.TrimSpace(billingCycle) == "" {
+		return nil, fmt.Errorf("billingCycle required")
+	}
+	var out []*client.QueryAccountBillResponseBodyDataItemsItem
+	pageNum := int32(1)
+	pageSize := int32(300)
+	for {
+		req := &client.QueryAccountBillRequest{
+			BillingCycle:     tea.String(billingCycle),
+			Granularity:      tea.String("MONTHLY"),
+			IsGroupByProduct: tea.Bool(byProduct),
+			PageNum:          tea.Int32(pageNum),
+			PageSize:         tea.Int32(pageSize),
+		}
+		resp, err := f.bssClient.QueryAccountBillWithOptions(req, &service.RuntimeOptions{})
+		if err != nil {
+			return nil, err
+		}
+		if resp == nil || resp.Body == nil {
+			break
+		}
+		if resp.Body.Success != nil && !*resp.Body.Success {
+			msg := ""
+			if resp.Body.Message != nil {
+				msg = *resp.Body.Message
+			}
+			return nil, fmt.Errorf("QueryAccountBill: %s", msg)
+		}
+		if resp.Body.Data == nil {
+			break
+		}
+		data := resp.Body.Data
+		if data.Items == nil || len(data.Items.Item) == 0 {
+			break
+		}
+		out = append(out, data.Items.Item...)
+		total := int32(0)
+		if data.TotalCount != nil {
+			total = *data.TotalCount
+		}
+		if int(pageNum)*int(pageSize) >= int(total) {
+			break
+		}
+		pageNum++
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+	}
+	return out, nil
+}
+
+// SumCouponDeductionForBillingCycle 汇总账期内「优惠券抵扣」合计（DeductedByCoupons+DeductedByCashCoupons）。[Ref: 04_采集 §5.4 优惠券]
+func (f *Fetcher) SumCouponDeductionForBillingCycle(ctx context.Context, billingCycle string) (float64, error) {
+	c, cc, err := f.SumCouponDeductionPartsForBillingCycle(ctx, billingCycle)
+	if err != nil {
+		return 0, err
+	}
+	return c + cc, nil
+}
+
+// SumCouponDeductionPartsForBillingCycle 分项汇总：先 MONTHLY；合计近似 0 时再按日 DAILY 累加。[Ref: 04_采集 §5.4 优惠券]
+func (f *Fetcher) SumCouponDeductionPartsForBillingCycle(ctx context.Context, billingCycle string) (coupon float64, cashCoupon float64, err error) {
+	f.mu.Lock()
+	if time.Now().Before(f.circuitOpenUntil) {
+		f.mu.Unlock()
+		return 0, 0, ErrCircuitOpen
+	}
+	f.mu.Unlock()
+	items, err := f.FetchQueryAccountBillMonthlyItems(ctx, billingCycle, false)
+	if err != nil {
+		return 0, 0, err
+	}
+	c, cc := sumCouponFieldsOnAccountBillItemsSplit(items)
+	if c+cc > 1e-6 {
+		slog.Info("aliyun billing: coupon deduction from MONTHLY QueryAccountBill", "billing_cycle", billingCycle, "deducted_by_coupons", c, "deducted_by_cash_coupons", cc)
+		return c, cc, nil
+	}
+	dc, dcc, err := f.sumCouponDeductionDailyWalkSplit(ctx, billingCycle)
+	if err != nil {
+		return 0, 0, err
+	}
+	slog.Info("aliyun billing: coupon deduction from DAILY QueryAccountBill (fallback)", "billing_cycle", billingCycle, "deducted_by_coupons", dc, "deducted_by_cash_coupons", dcc)
+	return dc, dcc, nil
+}
+
+func sumCouponFieldsOnAccountBillItemsSplit(items []*client.QueryAccountBillResponseBodyDataItemsItem) (c float64, cc float64) {
+	for _, it := range items {
+		if it == nil {
+			continue
+		}
+		if it.DeductedByCoupons != nil {
+			c += float64(*it.DeductedByCoupons)
+		}
+		if it.DeductedByCashCoupons != nil {
+			cc += float64(*it.DeductedByCashCoupons)
+		}
+	}
+	return c, cc
+}
+
+func sumCouponFieldsOnAccountBillItems(items []*client.QueryAccountBillResponseBodyDataItemsItem) float64 {
+	c, cc := sumCouponFieldsOnAccountBillItemsSplit(items)
+	return c + cc
+}
+
+func (f *Fetcher) sumCouponDeductionDailyWalkSplit(ctx context.Context, billingCycle string) (float64, float64, error) {
+	billingCycle = strings.TrimSpace(billingCycle)
+	start, err := time.ParseInLocation("2006-01", billingCycle, time.UTC)
+	if err != nil {
+		return 0, 0, fmt.Errorf("billingCycle: %w", err)
+	}
+	end := start.AddDate(0, 1, -1)
+	var totC, totCC float64
+	for d := start; !d.After(end); d = d.AddDate(0, 0, 1) {
+		ds := d.Format("2006-01-02")
+		partC, partCC, err := f.sumCouponDeductionDailyOneDateSplit(ctx, ds, billingCycle)
+		if err != nil {
+			return 0, 0, err
+		}
+		totC += partC
+		totCC += partCC
+		select {
+		case <-ctx.Done():
+			return 0, 0, ctx.Err()
+		default:
+		}
+	}
+	return totC, totCC, nil
+}
+
+func (f *Fetcher) sumCouponDeductionDailyOneDateSplit(ctx context.Context, billingDate, billingCycle string) (float64, float64, error) {
+	pageNum := int32(1)
+	pageSize := int32(300)
+	var sumC, sumCC float64
+	for {
+		req := &client.QueryAccountBillRequest{
+			BillingCycle:     tea.String(billingCycle),
+			BillingDate:      tea.String(billingDate),
+			Granularity:      tea.String("DAILY"),
+			IsGroupByProduct: tea.Bool(false),
+			PageNum:          tea.Int32(pageNum),
+			PageSize:         tea.Int32(pageSize),
+		}
+		resp, err := f.bssClient.QueryAccountBillWithOptions(req, &service.RuntimeOptions{})
+		if err != nil {
+			return 0, 0, err
+		}
+		if resp == nil || resp.Body == nil {
+			break
+		}
+		if resp.Body.Success != nil && !*resp.Body.Success {
+			msg := ""
+			if resp.Body.Message != nil {
+				msg = *resp.Body.Message
+			}
+			return 0, 0, fmt.Errorf("QueryAccountBill DAILY: %s", msg)
+		}
+		if resp.Body.Data == nil {
+			break
+		}
+		data := resp.Body.Data
+		if data.Items == nil || len(data.Items.Item) == 0 {
+			break
+		}
+		for _, it := range data.Items.Item {
+			if it.DeductedByCoupons != nil {
+				sumC += float64(*it.DeductedByCoupons)
+			}
+			if it.DeductedByCashCoupons != nil {
+				sumCC += float64(*it.DeductedByCashCoupons)
+			}
+		}
+		total := int32(0)
+		if data.TotalCount != nil {
+			total = *data.TotalCount
+		}
+		if int(pageNum)*int(pageSize) >= int(total) {
+			break
+		}
+		pageNum++
+		select {
+		case <-ctx.Done():
+			return 0, 0, ctx.Err()
+		default:
+		}
+	}
+	return sumC, sumCC, nil
 }
 
 // simpleHash 用于合成 RecordID 的简单哈希（非安全，仅用于唯一性辅助）。

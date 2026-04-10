@@ -66,6 +66,7 @@ func BuildFinOpsEffectiveConfigDTO(cfg *config.Config) dto.FinOpsEffectiveConfig
 		ETLMonthlyRetentionMonths: cfg.CloudBilling.ETLData.MonthlyRetentionMonths,
 		SyncAuxTimeoutSeconds:     int(auxTO.Seconds()),
 		SyncJobAuthRequired:       authReq,
+		BssTransactionsLookbackDays: etl.BssTransactionsLookbackDays(),
 	}
 }
 
@@ -199,6 +200,9 @@ func (r *FinOpsSyncRunner) runJob(jobID int64) {
 		warnings = append(warnings, "sync_auxiliary skipped (no auxiliary sync registered)")
 	}
 
+	// 各配置账号充值月表与 BSS 流水对齐（券抵/信用卡等渠道已写入 transactions 后统一重算）。[Ref: 03_Phase6/01_FinOps 主动同步]
+	r.refreshBSSRechargeMonthlyAllAccounts(ctx)
+
 	j, _ = r.repo.GetFinOpsSyncJob(ctx, jobID)
 	j.Phase = "pipeline"
 	j.ProgressCurrent = 1
@@ -272,4 +276,23 @@ func encodeWarningsJSON(warnings []string) string {
 	}
 	b, _ := json.Marshal(warnings)
 	return string(b)
+}
+
+// refreshBSSRechargeMonthlyAllAccounts 按 cost_env_account_config 去重账号，刷新充值月表；补全仅部分 Worker 覆盖时的账户。[Ref: 03_Phase6/01_FinOps]
+func (r *FinOpsSyncRunner) refreshBSSRechargeMonthlyAllAccounts(ctx context.Context) {
+	cfg, err := r.repo.ListEnvAccountConfig(ctx)
+	if err != nil || len(cfg) == 0 {
+		return
+	}
+	seen := make(map[string]bool)
+	for i := range cfg {
+		aid := strings.TrimSpace(cfg[i].AccountID)
+		if aid == "" || seen[aid] {
+			continue
+		}
+		seen[aid] = true
+		if err := r.repo.RefreshBSSRechargeMonthlyForAccount(ctx, aid); err != nil {
+			slog.Warn("finops_sync_job: refresh recharge monthly", "account_id", aid, "error", err.Error())
+		}
+	}
 }

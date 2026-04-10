@@ -81,6 +81,9 @@ type BSSTransactionItem struct {
 	RecordID          string
 	BillingCycle      string
 	Currency          string
+	TransactionChannel string
+	FundType           string
+	Remarks            string
 }
 
 // CloudBillingFetcher 云账单拉取接口。业务/ETL 仅依赖此接口与工厂获取实现。
@@ -98,4 +101,6 @@ type CloudBillingFetcher interface {
 	FetchOutstandingMonthly(ctx context.Context, billingCycle string) (float64, error)
 	// FetchCallingAccountID QueryAccountBill 返回 Data.AccountID（阿里云主账号 ID），与流水/BSS 落库主键对齐。[Ref: 03_Phase6/01_FinOps]
 	FetchCallingAccountID(ctx context.Context, billingCycle string) (string, error)
+	// FetchCouponDeductionMonthly QueryAccountBill 汇总当账期优惠券抵扣分项（DeductedByCoupons、DeductedByCashCoupons）；非阿里云实现返回 0,0,nil。[Ref: 04_采集 §5.4]
+	FetchCouponDeductionMonthly(ctx context.Context, billingCycle string) (deductedByCoupons, deductedByCashCoupons float64, err error)
 }

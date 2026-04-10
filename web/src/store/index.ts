@@ -14,6 +14,7 @@ import {
 } from '@/types';
 import { costService } from '@/services/costService';
 import { mockApi } from '@/services/mockApi';
+import { billingCalendarPartsFromNow } from '@/utils/billingCalendar';
 
 interface AppState {
   // 全局成本指标
@@ -70,8 +71,8 @@ interface AppState {
 
   // Actions
   setTheme: (theme: 'light' | 'dark') => void;
-  /** envs 非空时仅请求所选环境的成本（与成本分解、云产品明细一致）[Ref: 用户需求 环境多选]；track 仅 URL 含 track= 时传入 [Ref: 03_Phase6/01_FinOps双轨语义与全域成本契约_设计] */
-  fetchGlobalCostMetrics: (envs?: string[], track?: CostTrack) => Promise<void>;
+  /** envs 非空时仅请求所选环境的成本；projectIds 非空时传 project_ids，后端筛选 Hero/ledger；环境卡与项目卡 ledger 由后端对全量 env 行填充（R15）。[Ref: 03_Phase6/03_前端全域成本透视/01_设计] */
+  fetchGlobalCostMetrics: (envs?: string[], track?: CostTrack, projectIds?: number[]) => Promise<void>;
   fetchNamespaceCosts: () => Promise<void>;
   /** [Ref: 01_设计 §云产品成本明细索引 索引区时间范围] override 为索引区独立时间范围；withCompare 为 true 时再拉上期明细填 drilldownGlobalProductsPrev；track 与顶部视角一致 [Ref: 03_Phase6/01_FinOps] */
   fetchDrilldownGlobal: (env?: string, category?: string, sort?: string, override?: { period: CostTimeRange; dateRange: [string, string] | null }, withCompare?: boolean, track?: CostTrack) => Promise<void>;
@@ -141,10 +142,12 @@ export const useAppStore = create<AppState>()(
       // Actions
       setTheme: (theme: 'light' | 'dark') => set({ theme }),
 
-      fetchGlobalCostMetrics: async (envs?: string[], track?: CostTrack) => {
+      fetchGlobalCostMetrics: async (envs?: string[], track?: CostTrack, projectIds?: number[]) => {
         const { useMockData, costTimeRange, costCompareMode, costCustomDateRange } = get();
-        set({ loadingGlobalMetrics: true, errorGlobalMetrics: null });
+        // 避免 project_ids/时间切换时用上一帧 global 与新区间混显（项目卡数字短暂不一致）[Ref: 03_Phase6/03_前端全域成本透视]
+        set({ loadingGlobalMetrics: true, errorGlobalMetrics: null, globalCostMetrics: undefined });
         const envsParam = envs?.length ? envs.join(',') : undefined;
+        const projectIdsParam = projectIds?.length ? projectIds.join(',') : undefined;
         const trackParam = track;
         try {
           let data: CostMetrics;
@@ -154,21 +157,23 @@ export const useAppStore = create<AppState>()(
             data = await mockApi.getGlobalCostMetrics({
               period: effectivePeriod,
               compareMode: costCompareMode,
-              track: trackParam ?? 'finance',
+              track: trackParam ?? 'technical',
             });
           } else if (costTimeRange === 'custom' && costCustomDateRange != null && costCustomDateRange[0] && costCustomDateRange[1]) {
             data = await costService.getGlobalCostMetrics({
               date_from: costCustomDateRange[0],
               date_to: costCustomDateRange[1],
               envs: envsParam,
-              track: trackParam ?? 'finance',
+              project_ids: projectIdsParam,
+              track: trackParam ?? 'technical',
             });
           } else {
             data = await costService.getGlobalCostMetrics({
               period: effectivePeriod,
               compareMode: costCompareMode,
               envs: envsParam,
-              track: trackParam ?? 'finance',
+              project_ids: projectIdsParam,
+              track: trackParam ?? 'technical',
             });
           }
           set({ globalCostMetrics: data, loadingGlobalMetrics: false });
@@ -211,7 +216,7 @@ export const useAppStore = create<AppState>()(
 
       fetchDrilldownGlobal: async (env?: string, category?: string, sort?: string, override?: { period: CostTimeRange; dateRange: [string, string] | null }, withCompare?: boolean, track?: CostTrack) => {
         const { useMockData, costTimeRange, costCustomDateRange } = get();
-        const trackParam = track ?? 'finance';
+        const trackParam = track ?? 'technical';
         const period = override?.period ?? costTimeRange;
         const dateRange = override?.dateRange ?? costCustomDateRange;
         const envFilter = env ?? 'all';
@@ -222,22 +227,7 @@ export const useAppStore = create<AppState>()(
             set({ drilldownGlobalProducts: [], loadingDrilldownGlobal: false });
             return;
           }
-          // 与后端 ETL (time.Now().UTC()) 对齐，统一用 UTC 计算 period_key
-          const nowUTC = new Date();
-          const utcYear = nowUTC.getUTCFullYear();
-          const utcMonth = nowUTC.getUTCMonth(); // 0-based
-          const utcDate = nowUTC.getUTCDate();
-          const now = new Date(Date.UTC(utcYear, utcMonth, utcDate));
-          const yesterday = new Date(Date.UTC(utcYear, utcMonth, utcDate - 1));
-          const yesterdayStr = yesterday.toISOString().slice(0, 10);
-          const monthStr = `${utcYear}-${String(utcMonth + 1).padStart(2, '0')}`;
-          const prevMonth = new Date(Date.UTC(utcYear, utcMonth - 1, 1));
-          const prevMonthStr = `${prevMonth.getUTCFullYear()}-${String(prevMonth.getUTCMonth() + 1).padStart(2, '0')}`;
-          const q = Math.floor(utcMonth / 3) + 1;
-          const quarterKey = `${utcYear}-Q${q}`;
-          const prevQ = q <= 1 ? 4 : q - 1;
-          const prevY = q <= 1 ? utcYear - 1 : utcYear;
-          const prevQuarterKey = `${prevY}-Q${prevQ}`;
+          const { monthStr, prevMonthStr, quarterKey, prevQuarterKey, yearStr, prevYearStr } = billingCalendarPartsFromNow();
           const reportTypeMap: Record<string, string> = {
             month: 'month', last_month: 'last_month',
             quarter: 'quarter', last_quarter: 'last_quarter',
@@ -246,7 +236,7 @@ export const useAppStore = create<AppState>()(
           const periodKeyMap: Record<string, string> = {
             month: monthStr, last_month: prevMonthStr,
             quarter: quarterKey, last_quarter: prevQuarterKey,
-            this_year: String(now.getFullYear()), last_year: String(now.getFullYear() - 1),
+            this_year: yearStr, last_year: prevYearStr,
           };
           if (period === 'custom' && dateRange?.[0] && dateRange?.[1]) {
             const data = await costService.getDrilldownGlobal({
@@ -284,8 +274,8 @@ export const useAppStore = create<AppState>()(
             if (period === 'month') {
               prevPeriodKey = prevMonthStr;
             } else if (period === 'last_month') {
-              const prevPrevMonth = new Date(prevMonth.getFullYear(), prevMonth.getMonth() - 1, 1);
-              prevPeriodKey = `${prevPrevMonth.getFullYear()}-${String(prevPrevMonth.getMonth() + 1).padStart(2, '0')}`;
+              const [py, pm] = prevMonthStr.split('-').map(Number);
+              prevPeriodKey = pm === 1 ? `${py - 1}-12` : `${py}-${String(pm - 1).padStart(2, '0')}`;
             } else if (period === 'quarter') {
               // 上季度在 ETL 中以 report_type='last_quarter' 存储，不保留历史 'quarter' 记录
               prevReportType = 'last_quarter';
@@ -297,9 +287,9 @@ export const useAppStore = create<AppState>()(
               prevPeriodKey = `${prevPrevY}-Q${prevPrevQ}`;
             } else if (period === 'this_year') {
               prevReportType = 'last_year';
-              prevPeriodKey = String(now.getFullYear() - 1);
+              prevPeriodKey = prevYearStr;
             } else if (period === 'last_year') {
-              prevPeriodKey = String(now.getFullYear() - 2);
+              prevPeriodKey = String(Number(yearStr) - 2);
             } else {
               prevPeriodKey = prevMonthStr;
             }
@@ -378,7 +368,7 @@ export const useAppStore = create<AppState>()(
 
       fetchCostTrend: async (params?: { period?: string; date_from?: string; date_to?: string; env?: string; track?: CostTrack }, withCompare?: boolean) => {
         set({ loadingCostTrend: true, errorCostTrend: null, costTrendDataPrev: null });
-        const trackParam = params?.track ?? 'finance';
+        const trackParam = params?.track ?? 'technical';
         try {
           const res = await costService.getCostTrend({ ...params, track: trackParam });
           const list = (res?.data ?? []).map(d => ({ date: d.date, total_cost: d.total_cost, by_product: d.by_product }));

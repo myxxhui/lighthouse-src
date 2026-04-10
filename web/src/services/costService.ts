@@ -56,13 +56,29 @@ export interface CostQueryParams {
   date_to?: string;
   /** 环境多选，逗号分隔，如 POC,FAT；不传或 all 表示全环境 [Ref: 用户需求 环境多选] */
   envs?: string;
-  /** 默认 finance；请求始终带 track [Ref: 03_Phase6/01_FinOps] */
+  /** 默认 technical（消耗/应付口径）；请求始终带 track [Ref: 03_Phase6/01_FinOps] */
   track?: CostTrack;
+  /** 成本项目多选 id，逗号分隔由调用方拼接 [Ref: 03_Phase6/03_前端全域成本透视/01_设计] */
+  project_ids?: string;
+}
+
+/** GET /api/v1/projects 成本项目及成员环境 [Ref: 03_Phase6/03_前端全域成本透视/01_设计] */
+export interface CostProjectApiItem {
+  id: number;
+  code: string;
+  name: string;
+  sort_order: number;
+  environments: string[];
 }
 
 export const costService = {
   /** D8-8：日期选择请求超时 25s，常规 period 请求用默认超时 */
   DATE_RANGE_REQUEST_TIMEOUT_MS: 25000,
+
+  async listCostProjects(): Promise<CostProjectApiItem[]> {
+    const response = await apiClient.get<{ projects?: CostProjectApiItem[] }>('/v1/projects');
+    return Array.isArray(response.data?.projects) ? response.data.projects : [];
+  },
 
   async getGlobalCostMetrics(params?: CostQueryParams): Promise<CostMetrics> {
     try {
@@ -72,13 +88,14 @@ export const costService = {
       if (params?.date_from != null) query.date_from = params.date_from;
       if (params?.date_to != null) query.date_to = params.date_to;
       if (params?.envs != null && params.envs !== '') query.envs = params.envs;
-      query.track = params?.track ?? 'finance';
+      if (params?.project_ids != null && params.project_ids !== '') query.project_ids = params.project_ids;
+      query.track = params?.track ?? 'technical';
       const config: { params: Record<string, string | undefined>; timeout?: number } = { params: query };
       if (params?.date_from != null && params?.date_to != null) {
         config.timeout = costService.DATE_RANGE_REQUEST_TIMEOUT_MS;
       }
       const response = await apiClient.get<GlobalCostApiResponse>(`${COST_API_PREFIX}/global`, config);
-      return adaptGlobalCostToCostMetrics(response.data, { requestTrack: params?.track ?? 'finance' });
+      return adaptGlobalCostToCostMetrics(response.data, { requestTrack: params?.track ?? 'technical' });
     } catch (error) {
       console.error('Failed to fetch global cost metrics:', error);
       throw error;
@@ -122,7 +139,7 @@ export const costService = {
     if (params?.env) query.env = params.env;
     if (params?.date_from) query.date_from = params.date_from;
     if (params?.date_to) query.date_to = params.date_to;
-    query.track = params?.track ?? 'finance';
+    query.track = params?.track ?? 'technical';
     const response = await apiClient.get<EnvDrilldownApiItem[]>(
       `${COST_API_PREFIX}/drilldown/global`,
       { params: query },
@@ -194,7 +211,7 @@ export const costService = {
     if (params?.date_from) query.date_from = params.date_from;
     if (params?.date_to) query.date_to = params.date_to;
     if (params?.env && params.env !== 'all') query.env = params.env;
-    query.track = params?.track ?? 'finance';
+    query.track = params?.track ?? 'technical';
     const response = await apiClient.get<{ data: Array<{ date: string; total_cost?: number; by_domain?: Record<string, number>; by_product?: Record<string, number> }> }>(
       `${COST_API_PREFIX}/trend`,
       { params: query, timeout: 15000 },
@@ -234,6 +251,14 @@ export const costService = {
       timeout: 15000,
     });
     return response.data;
+  },
+
+  /** GET /api/v1/finops/effective-config — 生效 ETL cron 等（无密钥）[Ref: 03_Phase6/01_FinOps 主动同步] */
+  async getFinOpsEffectiveConfig(): Promise<{ etl_schedule_cron?: string }> {
+    const response = await apiClient.get<{ etl_schedule_cron?: string }>(`${FINOPS_API_PREFIX}/effective-config`, {
+      timeout: 10000,
+    });
+    return response.data ?? {};
   },
 
   /** GET /api/v1/finops/sync-jobs/active — 无活跃任务时返回 null（刷新页恢复进度） [Ref: 03_Phase6/01_FinOps 主动同步] */

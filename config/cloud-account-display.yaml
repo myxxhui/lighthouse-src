@@ -1,0 +1,29 @@
+# [Ref: 03_Phase6/03_前端全域成本透视/01_设计] 云环境账户卡标题：{项目名}-{cloud}-{环境片段}
+# 与 DB cost_project.name、cost_env_account_config.environment 对齐（匹配不区分大小写）。
+# 凭证：仅用环境变量 ALIBABA_CLOUD_ACCESS_KEY_ID_<credential_env_suffix> / SECRET_<suffix>，禁止在本文件填写 AK/SK。
+version: 1
+projects:
+  - name: K8s
+    accounts:
+      - environment: POC
+        cloud: Aliyun
+        site: international
+        credential_env_suffix: POC
+  - name: C66
+    accounts:
+      - environment: UAT
+        cloud: Aliyun
+        site: domestic
+        credential_env_suffix: UAT
+  - name: Laroplus
+    accounts:
+      - environment: FAT
+        cloud: Aliyun
+        site: domestic
+        credential_env_suffix: FAT
+  - name: 未知
+    accounts:
+      - environment: PROD
+        cloud: Aliyun
+        site: domestic
+        credential_env_suffix: PROD

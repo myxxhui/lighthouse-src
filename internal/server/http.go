@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -69,6 +70,7 @@ func (s *HTTPServer) setupRoutes() {
 	// API v1 routes
 	apiV1 := s.engine.Group("/api/v1")
 	{
+		apiV1.GET("/projects", s.listCostProjects)
 		// Cost routes - will be implemented by routes package
 		costGroup := apiV1.Group("/cost")
 		s.registerCostRoutes(costGroup)
@@ -160,7 +162,7 @@ func parseMonthOrDay(s string) (time.Time, error) {
 	return time.Parse("2006-01-02", s)
 }
 
-// parseCostTrackQuery 返回 technical|finance；非法或空返回 ""（旧客户端语义）。[Ref: 03_Phase6/01_FinOps双轨语义与全域成本契约_设计 §API、track 与 UX]
+// parseCostTrackQuery 返回 technical|finance；非法或空返回 ""（旧客户端语义）。[Ref: 03_Phase6/01_FinOps双轨与全域成本重构/01_设计 §API、track 与 UX]
 func parseCostTrackQuery(q string) string {
 	q = strings.ToLower(strings.TrimSpace(q))
 	switch q {
@@ -171,6 +173,27 @@ func parseCostTrackQuery(q string) string {
 	}
 }
 
+// parseProjectIDsQuery 解析 project_ids=1,2,3；非法片段跳过。[Ref: 03_Phase6/03_前端全域成本透视/01_设计]
+func parseProjectIDsQuery(q string) []int {
+	q = strings.TrimSpace(q)
+	if q == "" {
+		return nil
+	}
+	var out []int
+	for _, p := range strings.Split(q, ",") {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		id, err := strconv.Atoi(p)
+		if err != nil {
+			continue
+		}
+		out = append(out, id)
+	}
+	return out
+}
+
 // globalCost handles GET /api/v1/cost/global?period=month|quarter|... 或 date_from=YYYY-MM&date_to=YYYY-MM（自定义月份范围，从月原始表叠加 [Ref: 04_01_成本透视真实数据]）
 // ledger_refresh=1|true：在读库前对各环境执行 BSS 余额/应付等 FinOps 辅助同步（拉取云 API 写入 PG）。[Ref: 03_Phase6/01_FinOps]
 func (s *HTTPServer) globalCost(c *gin.Context) {
@@ -179,13 +202,22 @@ func (s *HTTPServer) globalCost(c *gin.Context) {
 		ctx = service.WithLedgerRefresh(ctx)
 	}
 	track := parseCostTrackQuery(c.Query("track"))
+	projectIDs := parseProjectIDsQuery(c.Query("project_ids"))
+	var globalEnvQuery []string
+	if envsStr := c.Query("envs"); envsStr != "" {
+		for _, e := range strings.Split(envsStr, ",") {
+			if e = strings.TrimSpace(e); e != "" {
+				globalEnvQuery = append(globalEnvQuery, e)
+			}
+		}
+	}
 	dateFrom := c.Query("date_from")
 	dateTo := c.Query("date_to")
 	if dateFrom != "" && dateTo != "" && s.costService != nil {
 		from, err1 := parseMonthOrDay(dateFrom)
 		to, err2 := parseMonthOrDay(dateTo)
 		if err1 == nil && err2 == nil {
-			resp, err := s.costService.GetGlobalCostByDateRange(ctx, from, to, track)
+			resp, err := s.costService.GetGlobalCostByDateRange(ctx, from, to, track, projectIDs, globalEnvQuery)
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return
@@ -215,16 +247,8 @@ func (s *HTTPServer) globalCost(c *gin.Context) {
 	// 统计口径已移除，固定使用实际付款（payment）[Ref: 16_ §三]
 	_ = c.Query("metric_type") // 兼容旧前端，忽略
 	metricType := "payment"
-	var envs []string
-	if envsStr := c.Query("envs"); envsStr != "" {
-		for _, e := range strings.Split(envsStr, ",") {
-			if e = strings.TrimSpace(e); e != "" {
-				envs = append(envs, e)
-			}
-		}
-	}
 	if s.costService != nil {
-		resp, err := s.costService.GetGlobalCost(ctx, period, metricType, envs, track)
+		resp, err := s.costService.GetGlobalCost(ctx, period, metricType, globalEnvQuery, projectIDs, track)
 		if err != nil {
 			// D1-4：降级查询超时返回 503
 			if errors.Is(err, service.ErrFallbackTimeout) {
@@ -246,6 +270,20 @@ func (s *HTTPServer) globalCost(c *gin.Context) {
 		},
 		"timestamp": time.Now().UTC(),
 	})
+}
+
+// listCostProjects handles GET /api/v1/projects [Ref: 03_Phase6/03_前端全域成本透视/01_设计]
+func (s *HTTPServer) listCostProjects(c *gin.Context) {
+	if s.costService == nil {
+		c.JSON(http.StatusOK, gin.H{"projects": []dto.CostProjectItem{}})
+		return
+	}
+	list, err := s.costService.ListCostProjects(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"projects": list})
 }
 
 // listNamespaces handles GET /api/v1/cost/namespaces?period=1d|7d|30d|month|quarter

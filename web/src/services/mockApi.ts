@@ -35,7 +35,7 @@ const PREVIOUS_EFF_DELTA = -2;       // 上期效率 = 本期 - 2 个百分点
 const generateMockCostMetrics = (opts?: {
   period?: CostTimeRange;
   compareMode?: CostCompareMode;
-  /** [Ref: 03_Phase6/01_FinOps双轨语义与全域成本契约_设计] 仅 URL 含 track 时传入 */
+  /** [Ref: 03_Phase6/01_FinOps双轨与全域成本重构/01_设计] 仅 URL 含 track 时传入 */
   track?: CostTrack;
 }): CostMetrics => {
   const period = opts?.period ?? '30d';
@@ -83,6 +83,10 @@ const generateMockCostMetrics = (opts?: {
       { environment: 'FAT', account_id: '', account_display_name: '未配置', total_cost: 0 },
       { environment: 'UAT', account_id: '', account_display_name: '未配置', total_cost: 0 },
       { environment: 'PROD', account_id: '', account_display_name: '未配置', total_cost: 0 },
+    ],
+    projectBreakdown: [
+      { project_id: 1, code: 'demo-a', name: '演示项目 A', sort_order: 0, total_cost: Math.round(baseCost * 0.4) },
+      { project_id: 2, code: 'demo-b', name: '演示项目 B', sort_order: 1, total_cost: Math.round(baseCost * 0.6) },
     ],
   };
 

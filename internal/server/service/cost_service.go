@@ -15,6 +15,7 @@ import (
 	"github.com/myxxhui/lighthouse-src/internal/config"
 	"github.com/myxxhui/lighthouse-src/internal/data/postgres"
 	"github.com/myxxhui/lighthouse-src/internal/server/dto"
+	"github.com/myxxhui/lighthouse-src/pkg/billingcalendar"
 	"github.com/myxxhui/lighthouse-src/pkg/costmodel"
 )
 
@@ -36,6 +37,9 @@ type CostService struct {
 
 	// finOpsAuxiliarySync 可选：ledger_refresh=1 时对各环境执行 BSS/应付拉取（由 main 注入 BillingWorker.SyncFinOpsAuxiliary）。[Ref: 03_Phase6/01_FinOps]
 	finOpsAuxiliarySync func(context.Context) error
+
+	// cloudDisplay 可选：YAML 云环境账户卡标题（项目-云-环境）；nil 时前端用旧格式。[Ref: 03_Phase6/03_前端全域成本透视/01_设计]
+	cloudDisplay *config.CloudAccountDisplay
 }
 
 type dateRangeCacheEntry struct {
@@ -58,6 +62,123 @@ func NewCostService(repo postgres.Repository, finOpsCGSource string, finOpsCGSou
 // SetFinOpsAuxiliarySync 注册在读库前触发的多环境 FinOps 辅助同步（可为 nil）。[Ref: 03_Phase6/01_FinOps]
 func (s *CostService) SetFinOpsAuxiliarySync(fn func(context.Context) error) {
 	s.finOpsAuxiliarySync = fn
+}
+
+// SetCloudAccountDisplay 注册云环境账户 YAML 展示（可为 nil）。[Ref: 03_Phase6/03_前端全域成本透视/01_设计]
+func (s *CostService) SetCloudAccountDisplay(c *config.CloudAccountDisplay) {
+	if s == nil {
+		return
+	}
+	s.cloudDisplay = c
+}
+
+// finalizeGlobalCostResponse 写 cloud_account_label 等展示字段。[Ref: 03_Phase6/03_前端全域成本透视/01_设计]
+func (s *CostService) finalizeGlobalCostResponse(ctx context.Context, resp *dto.GlobalCostResponse) {
+	if s == nil || resp == nil {
+		return
+	}
+	s.applyCloudAccountLabels(ctx, resp)
+}
+
+// applyCloudAccountLabels 按 cost_project + YAML 为 env_breakdown 填 cloud_account_label。[Ref: 03_Phase6/03_前端全域成本透视/01_设计]
+func (s *CostService) applyCloudAccountLabels(ctx context.Context, resp *dto.GlobalCostResponse) {
+	if s == nil || resp == nil || s.cloudDisplay == nil || len(resp.EnvBreakdown) == 0 {
+		return
+	}
+	projects, err := s.repo.ListCostProjects(ctx)
+	if err != nil || len(projects) == 0 {
+		return
+	}
+	for i := range resp.EnvBreakdown {
+		env := strings.TrimSpace(resp.EnvBreakdown[i].Environment)
+		if env == "" {
+			continue
+		}
+		pname := primaryProjectNameForEnvFromList(projects, env)
+		if pname == "" {
+			continue
+		}
+		label, site := lookupCloudDisplayLabel(s.cloudDisplay, pname, env)
+		if label != "" {
+			resp.EnvBreakdown[i].CloudAccountLabel = label
+		}
+		if site != "" {
+			resp.EnvBreakdown[i].CloudAccountSiteNote = site
+		}
+	}
+}
+
+func primaryProjectNameForEnvFromList(projects []postgres.CostProject, env string) string {
+	var hits []postgres.CostProject
+	for _, p := range projects {
+		for _, e := range p.Environments {
+			if strings.EqualFold(strings.TrimSpace(e), env) {
+				hits = append(hits, p)
+				break
+			}
+		}
+	}
+	if len(hits) == 0 {
+		return ""
+	}
+	sort.Slice(hits, func(i, j int) bool {
+		if hits[i].SortOrder != hits[j].SortOrder {
+			return hits[i].SortOrder < hits[j].SortOrder
+		}
+		return hits[i].ID < hits[j].ID
+	})
+	return hits[0].Name
+}
+
+func lookupCloudDisplayLabel(d *config.CloudAccountDisplay, projectName, env string) (label, siteNote string) {
+	if d == nil {
+		return "", ""
+	}
+	pn := strings.TrimSpace(projectName)
+	en := strings.TrimSpace(env)
+	for _, pr := range d.Projects {
+		if !strings.EqualFold(strings.TrimSpace(pr.Name), pn) {
+			continue
+		}
+		for _, acc := range pr.Accounts {
+			if !strings.EqualFold(strings.TrimSpace(acc.Environment), en) {
+				continue
+			}
+			third := strings.TrimSpace(acc.DisplayEnv)
+			if third == "" {
+				third = formatEnvTitleSegment(en)
+			}
+			cloud := strings.TrimSpace(acc.Cloud)
+			if cloud == "" {
+				cloud = "Aliyun"
+			}
+			label = fmt.Sprintf("%s-%s-%s", pn, cloud, third)
+			return label, cloudAccountSiteNoteZH(acc.Site)
+		}
+	}
+	return "", ""
+}
+
+func formatEnvTitleSegment(env string) string {
+	e := strings.TrimSpace(env)
+	if e == "" {
+		return e
+	}
+	if len(e) == 1 {
+		return strings.ToUpper(e)
+	}
+	return strings.ToUpper(e[:1]) + strings.ToLower(e[1:])
+}
+
+func cloudAccountSiteNoteZH(site string) string {
+	switch strings.ToLower(strings.TrimSpace(site)) {
+	case "domestic", "cn", "china":
+		return "国内站"
+	case "international", "intl", "overseas", "global":
+		return "国际站"
+	default:
+		return ""
+	}
 }
 
 func (s *CostService) runFinOpsAuxiliarySyncIfRequested(ctx context.Context) {
@@ -476,8 +597,13 @@ func filterDailyRowsByAccountIDs(rows []postgres.CloudBillDailyRaw, accountIDs m
 
 // avgDailyConsumptionLastMonth 上月天粒度消耗汇总平均数，用于回调日替代；accountIDs 非空时仅统计该集合内行。[Ref: 用户需求、20260323_POC_UAT_账期锚点]
 func (s *CostService) avgDailyConsumptionLastMonth(ctx context.Context, now time.Time, accountIDs map[string]bool) float64 {
-	lastMonth := now.AddDate(0, -1, 0)
-	first := time.Date(lastMonth.Year(), lastMonth.Month(), 1, 0, 0, 0, 0, time.UTC)
+	ref := billingCalendarRef(now)
+	prevKey := billingcalendar.PreviousMonthYYYYMM(ref)
+	t, err := time.Parse("2006-01", prevKey)
+	if err != nil {
+		return 0
+	}
+	first := time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC)
 	lastDay := first.AddDate(0, 1, -1)
 	rows, err := s.repo.ListCloudBillDailyRawFromTo(ctx, first, lastDay, "")
 	if err != nil || len(rows) == 0 {
@@ -508,8 +634,10 @@ func (s *CostService) aggregateCloudBillByPeriodWithAccountTotals(ctx context.Co
 	}
 	switch period {
 	case "last_month":
-		prevCycle := now.AddDate(0, -1, 0).Format("2006-01")
-		prevPrevCycle := now.AddDate(0, -2, 0).Format("2006-01")
+		ref := billingCalendarRef(now)
+		firstOfCur := time.Date(ref.Year(), ref.Month(), 1, 0, 0, 0, 0, ref.Location())
+		prevCycle := firstOfCur.AddDate(0, -1, 0).Format("2006-01")
+		prevPrevCycle := firstOfCur.AddDate(0, -2, 0).Format("2006-01")
 		t, pb, accT := s.mergeMonthlyRawByCycle(ctx, prevCycle, accountIDs, false)
 		_, _, prevT := s.mergeMonthlyRawByCycle(ctx, prevPrevCycle, accountIDs, false)
 		if t == 0 && len(pb) == 0 {
@@ -723,7 +851,7 @@ func (s *CostService) aggregateCloudBillByPeriod(ctx context.Context, period str
 		return false, 0, nil
 	case "last_month":
 		// [Ref: 用户需求] 上月=整月，只用月粒度现金/已付；多账户汇总 [Ref: 01_多环境 UAT]
-		prevCycle := now.AddDate(0, -1, 0).Format("2006-01")
+		prevCycle := billingcalendar.PreviousMonthYYYYMM(billingCalendarRef(now))
 		t, pb, _ := s.mergeMonthlyRawByCycle(ctx, prevCycle, accountIDs, false)
 		if t == 0 && len(pb) == 0 {
 			return false, 0, nil
@@ -829,16 +957,22 @@ func (s *CostService) aggregateCloudBillByPeriod(ctx context.Context, period str
 
 // GetGlobalCostByDateRange 按月份范围从月原始表叠加，支持最多 5 年（60 个月）。[Ref: 01_实践 月源数据保留近5年]
 // [Ref: D8-7] 相同日期范围结果短时缓存 1h，重复请求直接命中。
-// track：FinOps 双轨，与 global 一致。[Ref: 03_Phase6/01_FinOps双轨语义与全域成本契约_设计 §API、track 与 UX]
-func (s *CostService) GetGlobalCostByDateRange(ctx context.Context, from, to time.Time, track string) (*dto.GlobalCostResponse, error) {
+// track：FinOps 双轨，与 global 一致。[Ref: 03_Phase6/01_FinOps双轨与全域成本重构/01_设计 §API、track 与 UX]
+// project_ids 非空时展开为项目成员环境并忽略 URL envs（与 GetGlobalCost 一致）。[Ref: 03_Phase6/03_前端全域成本透视/01_设计]
+// envs 非空时 Hero/域分解/ledger 与聚合表路径一致按环境过滤；环境卡与环比分母为全量账户（与 GetGlobalCost 聚合分支一致）。[Ref: 03_Phase6/03_前端全域成本透视/01_设计]
+func (s *CostService) GetGlobalCostByDateRange(ctx context.Context, from, to time.Time, track string, projectIDs []int, envs []string) (*dto.GlobalCostResponse, error) {
 	s.runFinOpsAuxiliarySyncIfRequested(ctx)
 	const maxMonths = 60
 	if to.Before(from) {
 		from, to = to, from
 	}
+	envsEff, err := s.effectiveEnvsForGlobalCost(ctx, envs, projectIDs)
+	if err != nil {
+		return nil, err
+	}
 	fromCycle := from.Format("2006-01")
 	toCycle := to.Format("2006-01")
-	key := fromCycle + ":" + toCycle + ":" + track
+	key := fromCycle + ":" + toCycle + ":" + track + ":" + projectIDsCacheKey(projectIDs) + ":" + envsCacheKey(envsEff)
 	now := time.Now().UTC()
 	s.dateRangeCacheMu.RLock()
 	if e, ok := s.dateRangeCache[key]; ok && e.exp.After(now) {
@@ -847,32 +981,46 @@ func (s *CostService) GetGlobalCostByDateRange(ctx context.Context, from, to tim
 	}
 	s.dateRangeCacheMu.RUnlock()
 
+	accountIDsAll := s.accountIDsFromAllConfig(ctx)
+	var accountIDsHero map[string]bool
+	if len(envsEff) > 0 {
+		// 宽松 map 会把同一环境的 account_id 行与 environment 占位行同时纳入 Hero，与 env 卡「每环境一行」不一致。[Ref: accountIDsForEnvsStrict]
+		accountIDsHero = s.accountIDsForEnvsStrict(ctx, envsEff)
+	}
+
 	var total float64
 	merged := make(map[string]float64)
 	curAccountTotals := make(map[string]float64)
-	// [Ref: 01_多环境] 排除 account_id='' 避免与 POC 等重复计入（月表含 legacy 空 account 行）
-	accountIDs := s.accountIDsFromAllConfig(ctx)
-	if len(accountIDs) == 0 {
-		accountIDs = nil
-	}
+	var hasAnyMonthlyRow bool
+
 	cur := time.Date(from.Year(), from.Month(), 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(to.Year(), to.Month(), 1, 0, 0, 0, 0, time.UTC)
 	count := 0
 	useConsumption := track == "technical"
 	for !cur.After(end) && count < maxMonths {
 		cycle := cur.Format("2006-01")
-		t, pb, accTotals := s.mergeMonthlyRawByCycle(ctx, cycle, accountIDs, useConsumption)
-		total += t
-		for k, v := range pb {
-			merged[k] += v
+		tFull, _, accFull := s.mergeMonthlyRawByCycle(ctx, cycle, accountIDsAll, useConsumption)
+		if tFull != 0 || len(accFull) > 0 {
+			hasAnyMonthlyRow = true
 		}
-		for acc, amt := range accTotals {
+		for acc, amt := range accFull {
 			curAccountTotals[acc] += amt
+		}
+		var tHero float64
+		var pbHero map[string]float64
+		if len(envsEff) > 0 {
+			tHero, pbHero, _ = s.mergeMonthlyRawByCycle(ctx, cycle, accountIDsHero, useConsumption)
+		} else {
+			tHero, pbHero, _ = s.mergeMonthlyRawByCycle(ctx, cycle, accountIDsAll, useConsumption)
+		}
+		total += tHero
+		for k, v := range pbHero {
+			merged[k] += v
 		}
 		cur = cur.AddDate(0, 1, 0)
 		count++
 	}
-	if total == 0 && len(merged) == 0 {
+	if !hasAnyMonthlyRow {
 		return nil, nil
 	}
 	scaleMergedToTotal(merged, total)
@@ -887,7 +1035,7 @@ func (s *CostService) GetGlobalCostByDateRange(ctx context.Context, from, to tim
 	pcnt := 0
 	for !pcur.After(pend) && pcnt < maxMonths {
 		cycle := pcur.Format("2006-01")
-		_, _, accTotals := s.mergeMonthlyRawByCycle(ctx, cycle, accountIDs, useConsumption)
+		_, _, accTotals := s.mergeMonthlyRawByCycle(ctx, cycle, accountIDsAll, useConsumption)
 		for acc, amt := range accTotals {
 			prevAccountTotals[acc] += amt
 		}
@@ -895,9 +1043,12 @@ func (s *CostService) GetGlobalCostByDateRange(ctx context.Context, from, to tim
 		pcnt++
 	}
 	envBreakdown := s.buildEnvBreakdownFromAccountTotals(ctx, curAccountTotals, prevAccountTotals)
-	scaleEnvBreakdownToTotal(envBreakdown, total)
+	// 有环境/项目筛选时环境卡保持全量、仅 Hero 为筛选后合计（与聚合表路径一致）。[Ref: 用户需求 环境卡片与筛选解耦]
+	if len(envsEff) == 0 {
+		scaleEnvBreakdownToTotal(envBreakdown, total)
+	}
 	if track == "finance" && len(envBreakdown) > 0 {
-		s.enrichEnvBreakdownConsumptionFromMonthlyRawRange(ctx, envBreakdown, from, to, accountIDs)
+		s.enrichEnvBreakdownConsumptionFromMonthlyRawRange(ctx, envBreakdown, from, to, accountIDsAll)
 	}
 	// [Ref: 用户需求] 自定义月范围现金合计为负时展示为 0 并注明净退款已抵减
 	displayTotal := total
@@ -928,8 +1079,21 @@ func (s *CostService) GetGlobalCostByDateRange(ctx context.Context, from, to tim
 		Metadata:         meta,
 	}
 	dto.ApplyFinOpsGlobalMetadata(resp, track)
-	idsLedger := accountIDsToSlice(false, nil, accountIDs)
-	s.enrichFinOpsLedger(ctx, resp, track, "date_range", periodKeyDR, now, idsLedger, nil)
+	projects, _ := s.repo.ListCostProjects(ctx)
+	configsPB, _ := s.repo.ListEnvAccountConfig(ctx)
+	if len(projects) > 0 && len(configsPB) > 0 {
+		resp.ProjectBreakdown = buildProjectBreakdownFromAccountTotalsMap(projects, configsPB, curAccountTotals)
+	}
+	idsLedger := accountIDsToSlice(len(envsEff) > 0, s.accountIDsForEnvsStrict(ctx, envsEff), s.accountIDsFromAllConfig(ctx))
+	s.enrichFinOpsLedger(ctx, resp, track, "date_range", periodKeyDR, now, idsLedger, envsEff)
+	// 资金轨 + 环境筛选：Hero 合计已为 displayTotal，但 enrichFinOpsLedger 后 ledger.P 可能仍为 0；前端 finance 以 ledger.P 为主数字须与 total_cost 一致。[Ref: 03_Phase6/01_FinOps]
+	if track == "finance" && len(envsEff) > 0 && resp.Ledger != nil && math.Abs(displayTotal) > 1e-9 {
+		p := displayTotal
+		if resp.Ledger.P == nil || (resp.Ledger.P != nil && math.Abs(*resp.Ledger.P) < 1e-9) {
+			resp.Ledger.P = &p
+		}
+	}
+	s.finalizeGlobalCostResponse(ctx, resp)
 	s.dateRangeCacheMu.Lock()
 	s.dateRangeCache[key] = dateRangeCacheEntry{resp: resp, exp: now.Add(s.dateRangeCacheTTL)}
 	s.dateRangeCacheMu.Unlock()
@@ -941,7 +1105,7 @@ func (s *CostService) GetGlobalCostByDateRange(ctx context.Context, from, to tim
 //   - 历史月（periodKey 为上月或更早的 YYYY-MM）→ 从 month_status 表读真实状态
 //   - 当前月 / 1d / this_week → "PRELIMINARY"（前端展示「动态同步」）
 func (s *CostService) resolveBillDataStatus(ctx context.Context, reportType, periodKey string, now time.Time) string {
-	currentMonth := now.Format("2006-01")
+	currentMonth := billingCalendarRef(now).Format("2006-01")
 	switch reportType {
 	case "month":
 		if periodKey == currentMonth {
@@ -1096,14 +1260,42 @@ var ErrFallbackTimeout = errors.New("cost fallback query timeout")
 // FallbackQueryTimeout D1-4：降级路径下从日原始表聚合的查询超时时间。
 const FallbackQueryTimeout = 5 * time.Second
 
+// billingLocation 账单「自然月」锚点：与 pkg/billingcalendar.Location 一致（无 zoneinfo 时 UTC+8）。[Ref: 用户需求]
+func billingLocation() *time.Location {
+	return billingcalendar.Location()
+}
+
+// billingCalendarRef 将任意时刻映射为业务日历下的本地时间，用于本月/上月/本季等 YYYY-MM。[Ref: 用户需求 北京时间]
+func billingCalendarRef(now time.Time) time.Time {
+	return now.In(billingLocation())
+}
+
+// tryGetGlobalCostByMonth 单月 GetGlobalCostByDateRange，供 last_month 月原始回退。[Ref: 03_Phase6/01_FinOps]
+func (s *CostService) tryGetGlobalCostByMonth(ctx context.Context, yyyyMM string, track string, projectIDs []int, envs []string) (*dto.GlobalCostResponse, error) {
+	t, err := time.Parse("2006-01", yyyyMM)
+	if err != nil {
+		return nil, nil
+	}
+	from := time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC)
+	return s.GetGlobalCostByDateRange(ctx, from, from, track, projectIDs, envs)
+}
+
+// resolveLastMonthFromMonthlyRaw period=last_month 时走月原始表 Cash；「上月」账期为 **北京时间** 自然月上一月，与 reportTypeAndPeriodKey 一致。[Ref: 用户需求]
+func (s *CostService) resolveLastMonthFromMonthlyRaw(ctx context.Context, now time.Time, track string, projectIDs []int, envs []string) (*dto.GlobalCostResponse, error) {
+	prev := billingcalendar.PreviousMonthYYYYMM(billingCalendarRef(now))
+	return s.tryGetGlobalCostByMonth(ctx, prev, track, projectIDs, envs)
+}
+
 // reportTypeAndPeriodKey 返回常规 period 对应的聚合表 (report_type, period_key)。[Ref: 04_01_成本透视真实数据 展示与延迟说明、01_设计 report_type 与 period_key]
+// 自然月/季/年 YYYY-MM 锚点统一为 **Asia/Shanghai（北京时间）**；now 可为 UTC 瞬时，先经 billingCalendarRef 再算日历。[Ref: 用户需求]
 func reportTypeAndPeriodKey(period string, now time.Time) (reportType, periodKey string) {
-	month := now.Format("2006-01")
-	prevMonth := now.AddDate(0, -1, 0).Format("2006-01")
-	q := (int(now.Month())-1)/3 + 1
-	quarter := fmt.Sprintf("%s-Q%d", now.Format("2006"), q)
+	ref := billingCalendarRef(now)
+	month := ref.Format("2006-01")
+	prevMonth := billingcalendar.PreviousMonthYYYYMM(ref)
+	q := (int(ref.Month())-1)/3 + 1
+	quarter := fmt.Sprintf("%s-Q%d", ref.Format("2006"), q)
 	prevQ := q - 1
-	prevY := now.Year()
+	prevY := ref.Year()
 	if prevQ <= 0 {
 		prevQ = 4
 		prevY--
@@ -1120,9 +1312,9 @@ func reportTypeAndPeriodKey(period string, now time.Time) (reportType, periodKey
 		return "last_quarter", prevQuarter
 	case "this_year":
 		// 今年：当年1月1日至昨日（按日累加，T+1 精度）
-		return "this_year", now.Format("2006")
+		return "this_year", ref.Format("2006")
 	case "last_year":
-		return "last_year", now.AddDate(-1, 0, 0).Format("2006")
+		return "last_year", ref.AddDate(-1, 0, 0).Format("2006")
 	default:
 		return "", ""
 	}
@@ -1267,9 +1459,12 @@ func (s *CostService) finOpsCGSourceForAccount(accountID string, accountToEnv ma
 	return s.finOpsCGSource
 }
 
-// finOpsCGPretaxForAccount 单账户 C/G，与 FINOPS_CG_SOURCE[_ENV] 一致。[Ref: 03_Phase6/01_FinOps]
+// finOpsCGPretaxForAccount 单账户 C/G。FINOPS_CG_SOURCE=api 时仅汇总 api_query_account_bill（行级 Pretax 已按 QueryAccountBill 目录−优惠−券口径）；否则 finops_billing_fact 优先，无则 oss_detail。[Ref: 03_Phase6/01_FinOps、04_采集 §5.4]
 func (s *CostService) finOpsCGPretaxForAccount(ctx context.Context, from, to time.Time, accountID string, accountToEnv map[string]string) (c, g float64, err error) {
-	src := s.finOpsCGSourceForAccount(accountID, accountToEnv)
+	src := strings.ToLower(strings.TrimSpace(s.finOpsCGSourceForAccount(accountID, accountToEnv)))
+	if src == "" {
+		src = "oss"
+	}
 	if src == "api" {
 		return s.repo.SumLineItemsPretaxCGByDateRangeWithChannel(ctx, from, to, []string{accountID}, "api_query_account_bill")
 	}
@@ -1281,23 +1476,6 @@ func (s *CostService) finOpsCGPretaxForAccount(ctx context.Context, from, to tim
 		return s.repo.SumFinOpsFactPretaxCGByDateRange(ctx, from, to, []string{accountID})
 	}
 	return s.repo.SumLineItemsPretaxCGByDateRangeWithChannel(ctx, from, to, []string{accountID}, "oss_detail")
-}
-
-// sumGTechnicalFallback 与 fillTechnicalLedgerCG 同源，用于 aggregate 对齐时补 G。[Ref: 03_Phase6/01_FinOps]
-func (s *CostService) sumGTechnicalFallback(ctx context.Context, from, to time.Time, accountIDs []string) (float64, error) {
-	if len(accountIDs) == 0 {
-		return 0, nil
-	}
-	accountToEnv := s.buildAccountToEnvMap(ctx)
-	var sum float64
-	for _, id := range accountIDs {
-		_, g, err := s.finOpsCGPretaxForAccount(ctx, from, to, id, accountToEnv)
-		if err != nil {
-			return 0, err
-		}
-		sum += g
-	}
-	return sum, nil
 }
 
 // billingMonthsInRange 将 [from,to] 覆盖的公历月份（YYYY-MM）列出，供 U（账期 outstanding）汇总。[Ref: 03_Phase6/01_FinOps]
@@ -1387,51 +1565,95 @@ func applyLedgerOmitPCurrentMonth(resp *dto.GlobalCostResponse, reportType, peri
 		return
 	}
 	resp.Ledger.P = nil
+	for i := range resp.EnvBreakdown {
+		resp.EnvBreakdown[i].LedgerP = nil
+	}
 }
 
-// enrichEnvBreakdownLedgerDims 将 G/P 按环境卡片消耗占比分摊；B/U 由 enrichEnvBreakdownLedgerPerEnvBUP 按账号事实直填（不得按消耗分摊）。[Ref: 03_Phase6/01_FinOps 环境卡五维]
-func enrichEnvBreakdownLedgerDims(resp *dto.GlobalCostResponse, track string) {
+// envAccountIsPlaceholder account_id 与 environment 同名或为空时视为占位，不按真实主账号查 FinOps/BSS。[Ref: 03_Phase6/01_FinOps]
+func envAccountIsPlaceholder(cfg *postgres.EnvAccountConfig) bool {
+	if cfg == nil {
+		return true
+	}
+	aid := strings.TrimSpace(cfg.AccountID)
+	if aid == "" {
+		return true
+	}
+	return strings.EqualFold(aid, strings.TrimSpace(cfg.Environment))
+}
+
+// paidPForAccount 单账号实付：BSS Payment+Expense 区间和，不足则月表现金列（与 mergeFinanceLedgerPUB 同键）。[Ref: 03_Phase6/01_FinOps]
+func (s *CostService) paidPForAccount(ctx context.Context, from, to time.Time, cycles []string, accountID string) float64 {
+	aid := strings.TrimSpace(accountID)
+	if aid == "" {
+		return 0
+	}
+	ids := []string{aid}
+	p, errP := s.repo.SumBSSPaymentExpenseByDateRange(ctx, from, to, ids)
+	pCash, errCash := s.repo.SumMonthlyCashTotalForBillingCycles(ctx, cycles, ids)
+	if errP != nil && errCash == nil {
+		return pCash
+	}
+	if errP == nil && math.Abs(p) < 1e-9 && errCash == nil && math.Abs(pCash) > 1e-9 {
+		return pCash
+	}
+	if errP != nil {
+		return 0
+	}
+	return p
+}
+
+// enrichEnvBreakdownLedgerCGPPerAccount 环境卡：按每条 env_breakdown 对应 account 填 consumption_cost、ledger_g、ledger_p。
+// envs 仅用于 filterEnvAccountConfigs：须传 nil/空切片，使 **响应内全部环境行** 均参与匹配；若传非空（如 project_ids 展开后的 envsEff），未列入的环境行将缺 ledger，进而 enrichProjectBreakdownFromEnvBreakdown 把未选项目卡 G/P 置零或误分摊。[Ref: 03_Phase6/01_FinOps、03_Phase6/03_前端全域成本透视 R15]
+func (s *CostService) enrichEnvBreakdownLedgerCGPPerAccount(ctx context.Context, resp *dto.GlobalCostResponse, track, reportType, periodKey string, now time.Time, envs []string) {
 	if track != "technical" && track != "finance" {
 		return
 	}
-	if resp == nil || len(resp.EnvBreakdown) == 0 || resp.Ledger == nil {
+	if resp == nil || len(resp.EnvBreakdown) == 0 {
 		return
 	}
-	L := resp.Ledger
-	var posSum float64
-	for _, e := range resp.EnvBreakdown {
-		if e.TotalCost > 0 {
-			posSum += e.TotalCost
-		}
-	}
-	n := len(resp.EnvBreakdown)
-	if n == 0 {
+	cfgAll, err := s.repo.ListEnvAccountConfig(ctx)
+	if err != nil || len(cfgAll) == 0 {
 		return
 	}
-	applyW := func(w float64, i int) {
-		if L.G != nil {
-			v := *L.G * w
-			resp.EnvBreakdown[i].LedgerG = &v
-		}
-		if L.P != nil {
-			v := *L.P * w
-			resp.EnvBreakdown[i].LedgerP = &v
-		}
-	}
-	if posSum <= 0 {
-		w := 1.0 / float64(n)
-		for i := range resp.EnvBreakdown {
-			applyW(w, i)
-		}
+	cfgF := filterEnvAccountConfigs(cfgAll, envs)
+	if len(cfgF) == 0 {
 		return
 	}
+	from, to := periodKeyToDateRange(reportType, periodKey, now)
+	if from.IsZero() {
+		return
+	}
+	cycles := billingMonthsInRange(from, to)
+	accountToEnv := s.buildAccountToEnvMap(ctx)
 	for i := range resp.EnvBreakdown {
-		tc := resp.EnvBreakdown[i].TotalCost
-		if tc <= 0 {
-			applyW(0, i)
+		cfg := matchEnvAccountConfig(cfgF, resp.EnvBreakdown[i])
+		if cfg == nil || envAccountIsPlaceholder(cfg) {
 			continue
 		}
-		applyW(tc/posSum, i)
+		aid := strings.TrimSpace(cfg.AccountID)
+		pp := s.paidPForAccount(ctx, from, to, cycles, aid)
+		if c, g, err := s.finOpsCGPretaxForAccount(ctx, from, to, aid, accountToEnv); err == nil {
+			cc, gg := c, g
+			// OSS/fact 主路径 C≈0 时，用 api_query_account_bill 补全应付/回血（国内站等常见：BSS 已付但 OSS 正额未入账）[Ref: 03_Phase6/01_FinOps]
+			srcCG := strings.ToLower(strings.TrimSpace(s.finOpsCGSourceForAccount(aid, accountToEnv)))
+			if srcCG != "api" && math.Abs(cc) < 1e-6 {
+				if c2, g2, err2 := s.repo.SumLineItemsPretaxCGByDateRangeWithChannel(ctx, from, to, []string{aid}, "api_query_account_bill"); err2 == nil {
+					if math.Abs(c2) > 1e-6 {
+						cc, gg = c2, g2
+					} else if math.Abs(g2) > 1e-6 {
+						gg = g2
+					}
+				}
+			}
+			// OLAP/API 仍无正额应付但 BSS 已有实付：用实付作应付展示代理（与 cash 口径对齐）[Ref: 03_Phase6/01_FinOps]
+			if math.Abs(cc) < 1e-6 && pp > 1e-6 {
+				cc = pp
+			}
+			resp.EnvBreakdown[i].ConsumptionCost = &cc
+			resp.EnvBreakdown[i].LedgerG = &gg
+		}
+		resp.EnvBreakdown[i].LedgerP = &pp
 	}
 }
 
@@ -1467,7 +1689,8 @@ func matchEnvAccountConfig(cfgF []postgres.EnvAccountConfig, ei dto.EnvBreakdown
 	return sameEnv[0]
 }
 
-// enrichEnvBreakdownLedgerPerEnvBUP 将各环境卡片的 B、U 与各账号 BSS 余额快照 / 应付事实对齐（与 mergeFinanceLedgerPUB 同键），替代按 TotalCost 占比的错误分摊。[Ref: 03_Phase6/01_FinOps 环境卡五维]
+// enrichEnvBreakdownLedgerPerEnvBUP 将各环境卡片的 B、U 与各账号 BSS 余额快照 / 应付事实对齐（与 mergeFinanceLedgerPUB 同键），替代按 TotalCost 占比的错误分摊。
+// envs 须 nil/空，理由同 enrichEnvBreakdownLedgerCGPPerAccount。[Ref: 03_Phase6/01_FinOps 环境卡五维、03_Phase6/03_前端全域成本透视 R15]
 func (s *CostService) enrichEnvBreakdownLedgerPerEnvBUP(ctx context.Context, resp *dto.GlobalCostResponse, reportType, periodKey string, now time.Time, envs []string) {
 	if resp == nil || len(resp.EnvBreakdown) == 0 || resp.Ledger == nil {
 		return
@@ -1525,69 +1748,6 @@ func (s *CostService) enrichEnvBreakdownLedgerPerEnvBUP(ctx context.Context, res
 	}
 }
 
-// alignTechnicalLedgerWithAggregateConsumption 当 OLAP/line_items 未覆盖某账户但聚合表已有 consumption 时，将 C 与聚合净额对齐（保留 G 为 finops 回血合计）。[Ref: 03_Phase6/01_FinOps]
-func (s *CostService) alignTechnicalLedgerWithAggregateConsumption(ctx context.Context, resp *dto.GlobalCostResponse, reportType, periodKey string, accountIDs []string, envs []string, from, to time.Time) {
-	if reportType == "date_range" {
-		return
-	}
-	if resp == nil || resp.Metadata == nil {
-		return
-	}
-	ids := accountIDs
-	if len(ids) == 0 {
-		ids = s.ledgerCanonicalAccountIDs(ctx, envs)
-	}
-	if len(ids) == 0 {
-		return
-	}
-	list, err := s.repo.ListCloudBillAggregateForReportPeriod(ctx, reportType, periodKey, "consumption", ids)
-	if err != nil || len(list) == 0 {
-		return
-	}
-	cfgAll, _ := s.repo.ListEnvAccountConfig(ctx)
-	cfgF := filterEnvAccountConfigs(cfgAll, envs)
-	var aggNet float64
-	if len(cfgF) > 0 {
-		aggNet, _, _ = aggregateHeroTotalsFromDedupedList(list, cfgF)
-	} else {
-		for _, a := range list {
-			aggNet += a.TotalAmount
-		}
-	}
-	if aggNet <= 0 {
-		return
-	}
-	var cVal, gVal float64
-	if resp.Ledger != nil {
-		if resp.Ledger.C != nil {
-			cVal = *resp.Ledger.C
-		}
-		if resp.Ledger.G != nil {
-			gVal = *resp.Ledger.G
-		}
-	}
-	if resp.Ledger == nil || resp.Ledger.G == nil {
-		gFin, errG := s.sumGTechnicalFallback(ctx, from, to, ids)
-		if errG == nil {
-			gVal = gFin
-		}
-	}
-	hybridNet := cVal + gVal
-	if math.Abs(hybridNet-aggNet) <= math.Max(0.5, aggNet*0.005) {
-		return
-	}
-	cAdj := aggNet - gVal
-	if cAdj < 0 {
-		cAdj = aggNet
-		gVal = 0
-	}
-	if resp.Ledger == nil {
-		resp.Ledger = &dto.FinOpsLedger{}
-	}
-	resp.Ledger.C = &cAdj
-	resp.Ledger.G = &gVal
-}
-
 // fillTechnicalLedgerCG 填充 C/G；默认 FINOPS_CG_SOURCE + 按环境 FINOPS_CG_SOURCE_<ENV> 覆盖（metadata.finops_cg_source_by_env）。[Ref: 03_Phase6/01_FinOps]
 func (s *CostService) fillTechnicalLedgerCG(ctx context.Context, resp *dto.GlobalCostResponse, reportType, periodKey string, now time.Time, accountIDs []string, envs []string) {
 	from, to := periodKeyToDateRange(reportType, periodKey, now)
@@ -1620,7 +1780,6 @@ func (s *CostService) fillTechnicalLedgerCG(ctx context.Context, resp *dto.Globa
 		resp.Ledger.C = &cSum
 		resp.Ledger.G = &gSum
 	}
-	s.alignTechnicalLedgerWithAggregateConsumption(ctx, resp, reportType, periodKey, accountIDs, envs, from, to)
 }
 
 // mergeFinanceLedgerPUB 合并 P/U/B（不覆盖已有 C/G）；双轨下五维尽可能同时有值。[Ref: 03_Phase6/01_FinOps]
@@ -1680,9 +1839,17 @@ func (s *CostService) mergeFinanceLedgerPUB(ctx context.Context, resp *dto.Globa
 	if resp.Ledger == nil {
 		resp.Ledger = &dto.FinOpsLedger{}
 	}
-	// 查询成功则写入数值（含 0），与「缺源未算」区分；前端显示 $0.00 与「—」。[Ref: 03_Phase6/01_FinOps双轨语义与全域成本契约_设计 §ledger 零值语义]
+	// 实付 P：与控制台「已还款」一致，优先 BSS Payment+Expense，不足则月表现金；不因 C+G 用 max(0,C+G) 覆盖。[Ref: 03_Phase6/01_FinOps]
+	var pp float64
+	hasP := false
 	if errP == nil {
-		pp := p
+		pp = p
+		hasP = true
+	} else if errCash == nil && math.Abs(pCash) > 1e-9 {
+		pp = pCash
+		hasP = true
+	}
+	if hasP {
 		resp.Ledger.P = &pp
 	}
 	if errB == nil {
@@ -1695,7 +1862,150 @@ func (s *CostService) mergeFinanceLedgerPUB(ctx context.Context, resp *dto.Globa
 	}
 }
 
-// enrichFinOpsLedger 填充 ledger / reconciliation（track=technical|finance）；C/G 与 P/U/B 合并填充以利五维快照。[Ref: 03_Phase6/01_FinOps]
+// alignLedgerPWithAggregatePaymentFallback 当 BSS/月表现金未给出有效 P 时，用聚合表 payment 回填全局 P（与钻取 payment 口径对齐）。[Ref: 03_Phase6/01_FinOps]
+func (s *CostService) alignLedgerPWithAggregatePaymentFallback(ctx context.Context, resp *dto.GlobalCostResponse, reportType, periodKey string, accountIDs []string) {
+	if resp == nil {
+		return
+	}
+	var cur float64
+	hasP := false
+	if resp.Ledger != nil && resp.Ledger.P != nil {
+		cur = *resp.Ledger.P
+		hasP = true
+	}
+	if hasP && math.Abs(cur) > 1e-6 {
+		return
+	}
+	list, err := s.repo.ListCloudBillAggregateForReportPeriod(ctx, reportType, periodKey, "payment", accountIDs)
+	if err != nil || len(list) == 0 {
+		return
+	}
+	var sum float64
+	for i := range list {
+		sum += list[i].TotalAmount
+	}
+	if math.Abs(sum) < 1e-9 {
+		return
+	}
+	if resp.Ledger == nil {
+		resp.Ledger = &dto.FinOpsLedger{}
+	}
+	pp := sum
+	resp.Ledger.P = &pp
+}
+
+// enrichProjectBreakdownFromEnvBreakdown U/B/consumption 按成员环境加总；G/P 优先取成员环境 env 行加总（与全量分摊后的 env 卡一致）。
+// 不再用「已筛选的 Hero ledger × 权重」分摊，避免 project_ids/envs 筛选时项目卡与未筛选不一致。[Ref: 03_Phase6/03_前端全域成本透视/01_设计]
+func enrichProjectBreakdownFromEnvBreakdown(resp *dto.GlobalCostResponse, projects []postgres.CostProject, track string) {
+	if resp == nil || len(resp.ProjectBreakdown) == 0 || len(resp.EnvBreakdown) == 0 {
+		return
+	}
+	envByName := make(map[string]dto.EnvBreakdownItem, len(resp.EnvBreakdown))
+	for i := range resp.EnvBreakdown {
+		e := resp.EnvBreakdown[i]
+		envByName[e.Environment] = e
+	}
+	pidToEnvs := make(map[int][]string, len(projects))
+	for i := range projects {
+		pidToEnvs[projects[i].ID] = projects[i].Environments
+	}
+	envWeight := func(e dto.EnvBreakdownItem) float64 {
+		if e.TotalCost > 0 {
+			return e.TotalCost
+		}
+		if e.ConsumptionCost != nil && *e.ConsumptionCost > 0 {
+			return *e.ConsumptionCost
+		}
+		if e.LedgerP != nil && *e.LedgerP > 0 {
+			return *e.LedgerP
+		}
+		return 0
+	}
+	projWeight := make(map[int]float64, len(resp.ProjectBreakdown))
+	var totalPos float64
+	for i := range resp.ProjectBreakdown {
+		pid := resp.ProjectBreakdown[i].ProjectID
+		envs := pidToEnvs[pid]
+		var w float64
+		for _, env := range envs {
+			if e, ok := envByName[env]; ok {
+				w += envWeight(e)
+			}
+		}
+		projWeight[pid] = w
+		totalPos += w
+	}
+	for i := range resp.ProjectBreakdown {
+		p := &resp.ProjectBreakdown[i]
+		envs := pidToEnvs[p.ProjectID]
+		if len(envs) == 0 {
+			continue
+		}
+		w := projWeight[p.ProjectID]
+		var gSum, pSum, uSum, bSum, consSum float64
+		var hasCons bool
+		for _, env := range envs {
+			e, ok := envByName[env]
+			if !ok {
+				continue
+			}
+			if e.LedgerG != nil {
+				gSum += *e.LedgerG
+			}
+			if e.LedgerP != nil {
+				pSum += *e.LedgerP
+			}
+			if e.LedgerU != nil {
+				uSum += *e.LedgerU
+			}
+			if e.LedgerB != nil {
+				bSum += *e.LedgerB
+			}
+			if e.ConsumptionCost != nil {
+				consSum += *e.ConsumptionCost
+				hasCons = true
+			}
+		}
+		L := resp.Ledger
+		if L != nil {
+			if L.G != nil {
+				v := gSum
+				if math.Abs(v) < 1e-12 && totalPos > 1e-12 && w > 0 && L.G != nil {
+					v = *L.G * (w / totalPos)
+				} else if totalPos > 1e-12 && w <= 0 {
+					v = 0 // 成员环境无正额权重时不分摊全局 G（占位环境不与 POC/UAT 同额）
+				}
+				p.LedgerG = &v
+			}
+			if L.P != nil || (track == "finance" && math.Abs(p.TotalCost) > 1e-12) {
+				v := pSum
+				if math.Abs(v) < 1e-12 && totalPos > 1e-12 && w > 0 && L.P != nil {
+					v = *L.P * (w / totalPos)
+				} else if totalPos > 1e-12 && w <= 0 {
+					v = 0
+				} else if math.Abs(v) < 1e-12 && track == "finance" {
+					v = p.TotalCost // 本月未闭合等场景下 Hero 可能省略 P，项目实付与聚合 total 对齐
+				}
+				p.LedgerP = &v
+			}
+			if L.U != nil {
+				v := uSum
+				p.LedgerU = &v
+			}
+			if L.B != nil {
+				v := bSum
+				p.LedgerB = &v
+			}
+		}
+		if hasCons {
+			v := consSum
+			p.ConsumptionCost = &v
+		}
+	}
+}
+
+// enrichFinOpsLedger 填充 ledger / reconciliation（track=technical|finance）；C/G 与 P/U/B 合并填充以利五维快照。
+// accountIDs/envs 仅用于 **顶层** resp.Ledger（Hero 筛选）与 fillTechnicalLedgerCG / mergeFinanceLedgerPUB；**每条** env_breakdown 的 C/G/P 与 B/U 必须按全量 cost_env_account_config 逐环境填写（传 nil 给 enrichEnv*），否则 project_ids 筛选时未选项目成员环境缺事实、项目卡畸变。[Ref: 03_Phase6/01_FinOps、03_Phase6/03_前端全域成本透视 R15]
 func (s *CostService) enrichFinOpsLedger(ctx context.Context, resp *dto.GlobalCostResponse, track, reportType, periodKey string, now time.Time, accountIDs []string, envs []string) {
 	if track != "technical" && track != "finance" {
 		return
@@ -1712,9 +2022,13 @@ func (s *CostService) enrichFinOpsLedger(ctx context.Context, resp *dto.GlobalCo
 	s.fillTechnicalLedgerCG(ctx, resp, reportType, periodKey, now, accountIDs, envs)
 	pubIDs := s.financeAccountIDsForPUB(ctx, envs)
 	s.mergeFinanceLedgerPUB(ctx, resp, reportType, periodKey, now, pubIDs, envs)
+	s.alignLedgerPWithAggregatePaymentFallback(ctx, resp, reportType, periodKey, pubIDs)
+	s.enrichEnvBreakdownLedgerCGPPerAccount(ctx, resp, track, reportType, periodKey, now, nil)
 	applyLedgerOmitPCurrentMonth(resp, reportType, periodKey, now)
-	enrichEnvBreakdownLedgerDims(resp, track)
-	s.enrichEnvBreakdownLedgerPerEnvBUP(ctx, resp, reportType, periodKey, now, envs)
+	s.enrichEnvBreakdownLedgerPerEnvBUP(ctx, resp, reportType, periodKey, now, nil)
+	if projs, perr := s.repo.ListCostProjects(ctx); perr == nil && len(projs) > 0 {
+		enrichProjectBreakdownFromEnvBreakdown(resp, projs, track)
+	}
 	var ossSum float64
 	if nFact > 0 {
 		if len(idList) > 0 {
@@ -1756,7 +2070,7 @@ func (s *CostService) applyFinOpsCGMetadata(ctx context.Context, meta *dto.Globa
 	}
 	configs, err := s.repo.ListEnvAccountConfig(ctx)
 	if err != nil || len(configs) == 0 {
-		meta.FinOpsCGSource = s.finOpsCGSource
+		meta.FinOpsCGSource = "oss"
 		return
 	}
 	envSet := make(map[string]bool)
@@ -1777,30 +2091,10 @@ func (s *CostService) applyFinOpsCGMetadata(ctx context.Context, meta *dto.Globa
 		if !envSet[c.Environment] {
 			continue
 		}
-		byEnv[c.Environment] = s.finOpsCGSourceForEnv(c.Environment)
+		byEnv[c.Environment] = "oss"
 	}
 	meta.FinOpsCGSourceByEnv = byEnv
-	if len(byEnv) == 0 {
-		meta.FinOpsCGSource = s.finOpsCGSource
-		return
-	}
-	vals := make([]string, 0, len(byEnv))
-	for _, v := range byEnv {
-		vals = append(vals, v)
-	}
-	first := vals[0]
-	uniform := true
-	for _, v := range vals[1:] {
-		if v != first {
-			uniform = false
-			break
-		}
-	}
-	if uniform && first != "" {
-		meta.FinOpsCGSource = first
-	} else {
-		meta.FinOpsCGSource = "mixed"
-	}
+	meta.FinOpsCGSource = "oss"
 }
 
 // previousPeriodKey 返回上一周期的 period_key（用于 compare_mode=previous）。[Ref: 01_设计 report_type 与 period_key]
@@ -1954,6 +2248,36 @@ func (s *CostService) accountIDsForEnvs(ctx context.Context, envs []string) map[
 	return ids
 }
 
+// accountIDsForEnvsStrict 与 accountIDsForEnvs 类似，但每行配置仅加入「主键」：有 account_id 则只加 account_id，否则才加 environment 名。
+// 月原始表若同时存在数字 account_id 行与同名 environment 占位行，宽松 map 会导致 Hero 双计而 env 卡仍按单环境一行展示。[Ref: 03_Phase6/03_前端全域成本透视/01_设计 §环境筛选]
+func (s *CostService) accountIDsForEnvsStrict(ctx context.Context, envs []string) map[string]bool {
+	if len(envs) == 0 {
+		return nil
+	}
+	configs, err := s.repo.ListEnvAccountConfig(ctx)
+	if err != nil {
+		return nil
+	}
+	envSet := make(map[string]bool)
+	for _, e := range envs {
+		if e != "" {
+			envSet[e] = true
+		}
+	}
+	ids := make(map[string]bool)
+	for _, c := range configs {
+		if !envSet[c.Environment] {
+			continue
+		}
+		if strings.TrimSpace(c.AccountID) != "" {
+			ids[c.AccountID] = true
+		} else {
+			ids[c.Environment] = true
+		}
+	}
+	return ids
+}
+
 // accountIDsFromAllConfig 返回 cost_env_account_config 中所有 account_id，用于聚合时排除空 account 行（避免 ETL 写入 account_id=空 导致重复摊给多环境）。[Ref: 16_ §十三]
 func (s *CostService) accountIDsFromAllConfig(ctx context.Context) map[string]bool {
 	configs, err := s.repo.ListEnvAccountConfig(ctx)
@@ -1968,6 +2292,126 @@ func (s *CostService) accountIDsFromAllConfig(ctx context.Context) map[string]bo
 		ids[c.Environment] = true
 	}
 	return ids
+}
+
+// projectIDsCacheKey 将 project_ids 序列化进日期范围缓存键。[Ref: 03_Phase6/03_前端全域成本透视/01_设计]
+func projectIDsCacheKey(ids []int) string {
+	if len(ids) == 0 {
+		return ""
+	}
+	sort.Ints(ids)
+	var b strings.Builder
+	for i, id := range ids {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		fmt.Fprintf(&b, "%d", id)
+	}
+	return b.String()
+}
+
+// envsCacheKey 将 effective env 筛选序列化进日期范围缓存键（与聚合表路径一致）。[Ref: 03_Phase6/03_前端全域成本透视/01_设计]
+func envsCacheKey(envs []string) string {
+	if len(envs) == 0 {
+		return ""
+	}
+	cp := append([]string(nil), envs...)
+	sort.Strings(cp)
+	return strings.Join(cp, ",")
+}
+
+// effectiveEnvsForGlobalCost project_ids 优先：非空时展开为项目成员环境并忽略 URL envs。[Ref: 03_Phase6/03_前端全域成本透视/01_设计]
+func (s *CostService) effectiveEnvsForGlobalCost(ctx context.Context, envs []string, projectIDs []int) ([]string, error) {
+	if len(projectIDs) == 0 {
+		return envs, nil
+	}
+	return s.repo.EnvironmentsByProjectIDs(ctx, projectIDs)
+}
+
+// buildProjectBreakdownFromAggregateList 按聚合表全量 list 与各项目成员环境汇总。[Ref: 03_Phase6/03_前端全域成本透视/01_设计]
+func buildProjectBreakdownFromAggregateList(list []postgres.CloudBillAggregate, projects []postgres.CostProject, configs []postgres.EnvAccountConfig) []dto.ProjectBreakdownItem {
+	curByAccount := make(map[string]float64)
+	for i := range list {
+		a := &list[i]
+		curByAccount[a.AccountID] += a.TotalAmount
+	}
+	envToAccount := make(map[string]string)
+	for i := range configs {
+		c := &configs[i]
+		envToAccount[c.Environment] = c.AccountID
+	}
+	out := make([]dto.ProjectBreakdownItem, 0, len(projects))
+	for i := range projects {
+		p := &projects[i]
+		var sum float64
+		for _, env := range p.Environments {
+			acc := envToAccount[env]
+			if acc == "" {
+				continue
+			}
+			v := curByAccount[acc]
+			if v == 0 {
+				v = curByAccount[env]
+			}
+			sum += v
+		}
+		out = append(out, dto.ProjectBreakdownItem{
+			ProjectID: p.ID,
+			Code:        p.Code,
+			Name:        p.Name,
+			SortOrder:   p.SortOrder,
+			TotalCost:   sum,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].SortOrder != out[j].SortOrder {
+			return out[i].SortOrder < out[j].SortOrder
+		}
+		return out[i].ProjectID < out[j].ProjectID
+	})
+	return out
+}
+
+// buildProjectBreakdownFromAccountTotalsMap 自定义月区间按 account 累计映射到项目。[Ref: 03_Phase6/03_前端全域成本透视/01_设计]
+func buildProjectBreakdownFromAccountTotalsMap(projects []postgres.CostProject, configs []postgres.EnvAccountConfig, totals map[string]float64) []dto.ProjectBreakdownItem {
+	if len(totals) == 0 {
+		totals = map[string]float64{}
+	}
+	envToAccount := make(map[string]string)
+	for i := range configs {
+		c := &configs[i]
+		envToAccount[c.Environment] = c.AccountID
+	}
+	out := make([]dto.ProjectBreakdownItem, 0, len(projects))
+	for i := range projects {
+		p := &projects[i]
+		var sum float64
+		for _, env := range p.Environments {
+			acc := envToAccount[env]
+			if acc == "" {
+				continue
+			}
+			v := totals[acc]
+			if v == 0 {
+				v = totals[env]
+			}
+			sum += v
+		}
+		out = append(out, dto.ProjectBreakdownItem{
+			ProjectID: p.ID,
+			Code:        p.Code,
+			Name:        p.Name,
+			SortOrder:   p.SortOrder,
+			TotalCost:   sum,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].SortOrder != out[j].SortOrder {
+			return out[i].SortOrder < out[j].SortOrder
+		}
+		return out[i].ProjectID < out[j].ProjectID
+	})
+	return out
 }
 
 // normalizePeriod 规范化前端传入的 period，避免因大小写或别名导致 reportType 为空、env_breakdown 全 0。[Ref: 01_成本透视 环境卡片无数据]
@@ -1989,23 +2433,38 @@ func normalizePeriod(p string) string {
 
 // GetGlobalCost returns L0 cost. [Ref: 04_01_成本透视真实数据、16_ §三]
 // [Ref: 用户需求] 上月/上季度/去年/自定义月=月粒度现金/已付（绝对准确），不读聚合表；本月/这季度/今年=天叠可用消耗+回调日替代（支出参考），可读聚合表或降级。
-// envs 非空时仅汇总所选环境的成本（仅聚合表路径支持；降级路径无按环境数据则忽略过滤）。metricType 已废弃。
-// track：FinOps 双轨 technical|finance；空或非法则与现网一致不写 effective_track。[Ref: 03_Phase6/01_FinOps双轨语义与全域成本契约_设计 §API、track 与 UX]
-func (s *CostService) GetGlobalCost(ctx context.Context, period string, metricType string, envs []string, track string) (*dto.GlobalCostResponse, error) {
+// envs 非空时仅汇总所选环境的成本（仅聚合表路径支持）；project_ids 非空时展开为成员环境并忽略 envs。[Ref: 03_Phase6/03_前端全域成本透视/01_设计]
+// metricType 已废弃。
+// track：FinOps 双轨 technical|finance；空或非法则与现网一致不写 effective_track。[Ref: 03_Phase6/01_FinOps双轨与全域成本重构/01_设计 §API、track 与 UX]
+func (s *CostService) GetGlobalCost(ctx context.Context, period string, metricType string, envs []string, projectIDs []int, track string) (*dto.GlobalCostResponse, error) {
 	s.runFinOpsAuxiliarySyncIfRequested(ctx)
 	period = normalizePeriod(period)
 	now := time.Now().UTC()
+	envsEff, err := s.effectiveEnvsForGlobalCost(ctx, envs, projectIDs)
+	if err != nil {
+		return nil, err
+	}
 	reportType, periodKey := reportTypeAndPeriodKey(period, now)
+	// [Ref: 用户需求、03_Phase6/01_FinOps] 上月与自定义单月同口径：优先走月原始表（与 GET .../global?date_from&date_to 一致）。
+	// 聚合表 last_month+payment 若未落库或全零，资金轨 Hero 会显示实付 0 而 ledger 仍有消耗，与自定义选同月矛盾。
+	// 账期按北京时间自然月（Asia/Shanghai）；last_month 月原始回退见 resolveLastMonthFromMonthlyRaw。[Ref: 用户需求]
+	if period == "last_month" {
+		if respDR, errDR := s.resolveLastMonthFromMonthlyRaw(ctx, now, track, projectIDs, envs); errDR != nil {
+			return nil, errDR
+		} else if respDR != nil {
+			return respDR, nil
+		}
+	}
 	// [Ref: 聚合表主路径 方案A] 仅读聚合表，无降级；所有 period 映射到 report_type+period_key。
 	if reportType != "" && periodKey != "" {
 		metricTypeSel := globalMetricTypeForTrack(track, reportType)
-		accountIDsSlice := accountIDsToSlice(len(envs) > 0, s.accountIDsForEnvs(ctx, envs), s.accountIDsFromAllConfig(ctx))
+		accountIDsSlice := accountIDsToSlice(len(envsEff) > 0, s.accountIDsForEnvs(ctx, envsEff), s.accountIDsFromAllConfig(ctx))
 		list, _ := s.repo.ListCloudBillAggregateForReportPeriod(ctx, reportType, periodKey, metricTypeSel, accountIDsSlice)
 		// 环境卡片：始终展示各环境全量金额；筛选仅影响 Hero/分解/ledger 汇总 [Ref: 用户需求 环境卡片与筛选解耦]
 		listFull, _ := s.repo.ListCloudBillAggregateForReportPeriod(ctx, reportType, periodKey, metricTypeSel, nil)
 		if len(list) > 0 {
 			configs, cfgErr := s.repo.ListEnvAccountConfig(ctx)
-			configsF := filterEnvAccountConfigs(configs, envs)
+			configsF := filterEnvAccountConfigs(configs, envsEff)
 			var totalAmount float64
 			merged := make(map[string]float64)
 			if cfgErr == nil && len(configsF) > 0 {
@@ -2047,7 +2506,7 @@ func (s *CostService) GetGlobalCost(ctx context.Context, period string, metricTy
 					}
 				}
 				// 仅「全环境」时缩放到 Hero；有 env 筛选时卡片保持全量、Hero 为筛选后合计 [Ref: 用户需求]
-				if len(envs) == 0 {
+				if len(envsEff) == 0 {
 					scaleEnvBreakdownToTotal(envBreakdown, displayTotal)
 				}
 				if track == "finance" && len(envBreakdown) > 0 {
@@ -2070,7 +2529,11 @@ func (s *CostService) GetGlobalCost(ctx context.Context, period string, metricTy
 					Metadata:         meta,
 				}
 				dto.ApplyFinOpsGlobalMetadata(resp, track)
-				s.enrichFinOpsLedger(ctx, resp, track, reportType, periodKey, now, accountIDsSlice, envs)
+				if projects, perr := s.repo.ListCostProjects(ctx); perr == nil && len(projects) > 0 && len(configs) > 0 {
+					resp.ProjectBreakdown = buildProjectBreakdownFromAggregateList(listFull, projects, configs)
+				}
+				s.enrichFinOpsLedger(ctx, resp, track, reportType, periodKey, now, accountIDsSlice, envsEff)
+				s.finalizeGlobalCostResponse(ctx, resp)
 				return resp, nil
 			}
 		}
@@ -2088,7 +2551,11 @@ func (s *CostService) GetGlobalCost(ctx context.Context, period string, metricTy
 			Metadata:         &dto.GlobalCostMetadata{DataStatus: "aggregate", ReportType: reportType, PeriodKey: periodKey},
 		}
 		dto.ApplyFinOpsGlobalMetadata(resp, track)
-		s.enrichFinOpsLedger(ctx, resp, track, reportType, periodKey, now, accountIDsSlice, envs)
+		if projects, perr := s.repo.ListCostProjects(ctx); perr == nil && len(projects) > 0 && len(configs) > 0 {
+			resp.ProjectBreakdown = buildProjectBreakdownFromAggregateList(nil, projects, configs)
+		}
+		s.enrichFinOpsLedger(ctx, resp, track, reportType, periodKey, now, accountIDsSlice, envsEff)
+		s.finalizeGlobalCostResponse(ctx, resp)
 		return resp, nil
 	}
 
@@ -2106,6 +2573,10 @@ func (s *CostService) GetGlobalCost(ctx context.Context, period string, metricTy
 		Metadata:         &dto.GlobalCostMetadata{DataStatus: "aggregate"},
 	}
 	dto.ApplyFinOpsGlobalMetadata(resp, track)
+	if projects, perr := s.repo.ListCostProjects(ctx); perr == nil && len(projects) > 0 && len(configs) > 0 {
+		resp.ProjectBreakdown = buildProjectBreakdownFromAggregateList(nil, projects, configs)
+	}
+	s.finalizeGlobalCostResponse(ctx, resp)
 	return resp, nil
 }
 
@@ -2292,9 +2763,28 @@ func (s *CostService) MixedQueryTimeSeries(ctx context.Context, start, end time.
 	return nil, nil
 }
 
+// ListCostProjects 返回成本项目及成员环境，供前端项目卡。[Ref: 03_Phase6/03_前端全域成本透视/01_设计]
+func (s *CostService) ListCostProjects(ctx context.Context) ([]dto.CostProjectItem, error) {
+	rows, err := s.repo.ListCostProjects(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]dto.CostProjectItem, len(rows))
+	for i := range rows {
+		out[i] = dto.CostProjectItem{
+			ID:           rows[i].ID,
+			Code:         rows[i].Code,
+			Name:         rows[i].Name,
+			SortOrder:    rows[i].SortOrder,
+			Environments: rows[i].Environments,
+		}
+	}
+	return out, nil
+}
+
 // ListNamespaces returns all namespaces with cost summary for the frontend cost table.
 func (s *CostService) ListNamespaces(ctx context.Context, period string) ([]dto.NamespaceCostSummary, error) {
-	resp, err := s.GetGlobalCost(ctx, period, "payment", nil, "")
+	resp, err := s.GetGlobalCost(ctx, period, "payment", nil, nil, "")
 	if err != nil {
 		return nil, err
 	}

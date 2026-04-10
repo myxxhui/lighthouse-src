@@ -38,7 +38,7 @@ func TestOSSCSVRowCount(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer rc.Close()
-	rows, cycle, err := parseCSVToFacts(rc, key, "UAT", guessBillingCycleFromKey(key))
+	rows, cycle, err := parseCSVToFacts(rc, key, "UAT", GuessBillingCycleFromKey(key))
 	if err != nil {
 		t.Fatal(err)
 	}

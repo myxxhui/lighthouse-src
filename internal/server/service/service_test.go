@@ -110,7 +110,7 @@ func TestCostService_GetGlobalCost(t *testing.T) {
 	repo := postgres.NewMockRepository(postgres.DefaultMockConfig())
 	svc := NewCostService(repo, "", nil)
 	ctx := context.Background()
-	resp, err := svc.GetGlobalCost(ctx, "month", "consumption", nil, "")
+	resp, err := svc.GetGlobalCost(ctx, "month", "consumption", nil, nil, "")
 	if err != nil {
 		t.Fatalf("GetGlobalCost: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestCostService_GetGlobalCost(t *testing.T) {
 func TestCostService_GetGlobalCost_CloudBill(t *testing.T) {
 	repo := postgres.NewMockRepository(postgres.DefaultMockConfig())
 	ctx := context.Background()
-	prevCycle := time.Now().UTC().AddDate(0, -1, 0).Format("2006-01")
+	_, prevCycle := reportTypeAndPeriodKey("last_month", time.Now().UTC())
 	snap := time.Now()
 	err := repo.SaveCloudBillAggregate(ctx, postgres.CloudBillAggregate{
 		ReportType:       "last_month",
@@ -143,7 +143,7 @@ func TestCostService_GetGlobalCost_CloudBill(t *testing.T) {
 		t.Fatalf("SaveCloudBillAggregate: %v", err)
 	}
 	svc := NewCostService(repo, "", nil)
-	resp, err := svc.GetGlobalCost(ctx, "last_month", "payment", nil, "")
+	resp, err := svc.GetGlobalCost(ctx, "last_month", "payment", nil, nil, "")
 	if err != nil {
 		t.Fatalf("GetGlobalCost: %v", err)
 	}
@@ -162,19 +162,52 @@ func TestCostService_GetGlobalCost_CloudBill(t *testing.T) {
 	}
 }
 
-// TestCostService_GetGlobalCost_EffectiveTrack 合法 track 时写入 metadata.effective_track。[Ref: 03_Phase6/01_FinOps双轨语义与全域成本契约_设计 §API、track 与 UX]
+// TestCostService_GetGlobalCost_LastMonthFinance_LedgerPFromAggregateFallback BSS/月表现金为 0 时 ledger.P 仍与聚合 payment 一致（避免上月实付全 0）。[Ref: 03_Phase6/01_FinOps]
+func TestCostService_GetGlobalCost_LastMonthFinance_LedgerPFromAggregateFallback(t *testing.T) {
+	repo := postgres.NewMockRepository(postgres.DefaultMockConfig())
+	ctx := context.Background()
+	_, prevCycle := reportTypeAndPeriodKey("last_month", time.Now().UTC())
+	snap := time.Now()
+	wantP := 3200.0
+	if err := repo.SaveCloudBillAggregate(ctx, postgres.CloudBillAggregate{
+		ReportType:       "last_month",
+		PeriodKey:        prevCycle,
+		MetricType:       "payment",
+		TotalAmount:      wantP,
+		ProductBreakdown: map[string]float64{"计算资源": wantP},
+		AccountID:        "default",
+		LastSuccessAt:    &snap,
+		CreatedAt:        snap,
+		UpdatedAt:        snap,
+	}); err != nil {
+		t.Fatalf("SaveCloudBillAggregate: %v", err)
+	}
+	svc := NewCostService(repo, "", nil)
+	resp, err := svc.GetGlobalCost(ctx, "last_month", "payment", nil, nil, "finance")
+	if err != nil {
+		t.Fatalf("GetGlobalCost: %v", err)
+	}
+	if resp.Ledger == nil || resp.Ledger.P == nil {
+		t.Fatalf("Ledger.P want non-nil from aggregate fallback, got %+v", resp.Ledger)
+	}
+	if math.Abs(*resp.Ledger.P-wantP) > 1e-6 {
+		t.Fatalf("Ledger.P = %v want %v", *resp.Ledger.P, wantP)
+	}
+}
+
+// TestCostService_GetGlobalCost_EffectiveTrack 合法 track 时写入 metadata.effective_track。[Ref: 03_Phase6/01_FinOps双轨与全域成本重构/01_设计 §API、track 与 UX]
 func TestCostService_GetGlobalCost_EffectiveTrack(t *testing.T) {
 	repo := postgres.NewMockRepository(postgres.DefaultMockConfig())
 	svc := NewCostService(repo, "", nil)
 	ctx := context.Background()
-	resp, err := svc.GetGlobalCost(ctx, "month", "payment", nil, "technical")
+	resp, err := svc.GetGlobalCost(ctx, "month", "payment", nil, nil, "technical")
 	if err != nil {
 		t.Fatalf("GetGlobalCost: %v", err)
 	}
 	if resp.Metadata == nil || resp.Metadata.EffectiveTrack != "technical" {
 		t.Fatalf("EffectiveTrack want technical, got %+v", resp.Metadata)
 	}
-	resp2, err := svc.GetGlobalCost(ctx, "month", "payment", nil, "")
+	resp2, err := svc.GetGlobalCost(ctx, "month", "payment", nil, nil, "")
 	if err != nil {
 		t.Fatalf("GetGlobalCost: %v", err)
 	}
@@ -188,7 +221,7 @@ func TestCostService_GetGlobalCost_CloudBillZero(t *testing.T) {
 	repo := postgres.NewMockRepository(postgres.DefaultMockConfig())
 	ctx := context.Background()
 	svc := NewCostService(repo, "", nil)
-	resp, err := svc.GetGlobalCost(ctx, "month", "payment", nil, "")
+	resp, err := svc.GetGlobalCost(ctx, "month", "payment", nil, nil, "")
 	if err != nil {
 		t.Fatalf("GetGlobalCost: %v", err)
 	}
@@ -240,7 +273,7 @@ func TestGlobalMetricTypeForTrack_Contract(t *testing.T) {
 func TestCostService_GetGlobalCost_DomainBreakdownUsesTrackMetric(t *testing.T) {
 	repo := postgres.NewMockRepository(postgres.DefaultMockConfig())
 	ctx := context.Background()
-	prevCycle := time.Now().UTC().AddDate(0, -1, 0).Format("2006-01")
+	_, prevCycle := reportTypeAndPeriodKey("last_month", time.Now().UTC())
 	snap := time.Now()
 	acct := "a1"
 	if err := repo.SaveCloudBillAggregate(ctx, postgres.CloudBillAggregate{
@@ -270,14 +303,14 @@ func TestCostService_GetGlobalCost_DomainBreakdownUsesTrackMetric(t *testing.T) 
 		t.Fatalf("SaveCloudBillAggregate consumption: %v", err)
 	}
 	svc := NewCostService(repo, "", nil)
-	respFin, err := svc.GetGlobalCost(ctx, "last_month", "payment", nil, "finance")
+	respFin, err := svc.GetGlobalCost(ctx, "last_month", "payment", nil, nil, "finance")
 	if err != nil {
 		t.Fatalf("GetGlobalCost finance: %v", err)
 	}
 	if respFin.TotalCost != 100 {
 		t.Errorf("finance TotalCost=%v want 100", respFin.TotalCost)
 	}
-	respTech, err := svc.GetGlobalCost(ctx, "last_month", "payment", nil, "technical")
+	respTech, err := svc.GetGlobalCost(ctx, "last_month", "payment", nil, nil, "technical")
 	if err != nil {
 		t.Fatalf("GetGlobalCost technical: %v", err)
 	}
@@ -331,5 +364,69 @@ func TestDrilldownPeriodToDateRange_MonthLastMonth(t *testing.T) {
 	yesterday := now.AddDate(0, 0, -1)
 	if to2.Day() != yesterday.Day() || to2.Month() != yesterday.Month() {
 		t.Errorf("to = %v, want yesterday %v", to2.Format("2006-01-02"), yesterday.Format("2006-01-02"))
+	}
+}
+
+func f64ptr(f float64) *float64 { return &f }
+
+// TestEnrichProjectBreakdownFromEnvBreakdown_consumptionWeights 项目卡 P 等于成员环境 env 行 LedgerP 之和（与 env 卡一致）；不再用全局 Hero P 按比例回填。[Ref: 03_Phase6/03_前端全域成本透视 R16]
+func TestEnrichProjectBreakdownFromEnvBreakdown_consumptionWeights(t *testing.T) {
+	t.Parallel()
+	gp := 334.46
+	pocP := gp * 512 / (512 + 334.46)
+	uatP := gp - pocP
+	projects := []postgres.CostProject{
+		{ID: 1, Environments: []string{"POC"}},
+		{ID: 2, Environments: []string{"UAT"}},
+	}
+	resp := &dto.GlobalCostResponse{
+		EnvBreakdown: []dto.EnvBreakdownItem{
+			{Environment: "POC", TotalCost: 0, ConsumptionCost: f64ptr(512), LedgerP: f64ptr(pocP)},
+			{Environment: "UAT", TotalCost: 0, ConsumptionCost: f64ptr(334.46), LedgerP: f64ptr(uatP)},
+		},
+		ProjectBreakdown: []dto.ProjectBreakdownItem{
+			{ProjectID: 1, Name: "K8s"},
+			{ProjectID: 2, Name: "C66"},
+		},
+		Ledger: &dto.FinOpsLedger{P: &gp},
+	}
+	enrichProjectBreakdownFromEnvBreakdown(resp, projects, "finance")
+	if resp.ProjectBreakdown[0].LedgerP == nil || resp.ProjectBreakdown[1].LedgerP == nil {
+		t.Fatal("expected LedgerP on projects")
+	}
+	pK8s := *resp.ProjectBreakdown[0].LedgerP
+	pC66 := *resp.ProjectBreakdown[1].LedgerP
+	if math.Abs(pK8s-pocP) > 0.02 {
+		t.Fatalf("K8s P %v want ~%v", pK8s, pocP)
+	}
+	if math.Abs(pC66-uatP) > 0.02 {
+		t.Fatalf("C66 P %v want ~%v", pC66, uatP)
+	}
+	if math.Abs(pK8s+pC66-gp) > 0.02 {
+		t.Fatalf("sum P %v + %v want %v", pK8s, pC66, gp)
+	}
+}
+
+func TestEnrichProjectBreakdownFromEnvBreakdown_zeroWeightProjectGetsNoP(t *testing.T) {
+	t.Parallel()
+	gp := 334.0
+	projects := []postgres.CostProject{
+		{ID: 1, Environments: []string{"POC"}},
+		{ID: 2, Environments: []string{"FAT"}},
+	}
+	resp := &dto.GlobalCostResponse{
+		EnvBreakdown: []dto.EnvBreakdownItem{
+			{Environment: "POC", TotalCost: 0, ConsumptionCost: f64ptr(100)},
+			{Environment: "FAT", TotalCost: 0, ConsumptionCost: f64ptr(0)},
+		},
+		ProjectBreakdown: []dto.ProjectBreakdownItem{
+			{ProjectID: 1, Name: "K8s"},
+			{ProjectID: 2, Name: "Laroplus"},
+		},
+		Ledger: &dto.FinOpsLedger{P: &gp},
+	}
+	enrichProjectBreakdownFromEnvBreakdown(resp, projects, "finance")
+	if resp.ProjectBreakdown[1].LedgerP == nil || math.Abs(*resp.ProjectBreakdown[1].LedgerP) > 1e-6 {
+		t.Fatalf("zero-weight project P want 0 got %v", resp.ProjectBreakdown[1].LedgerP)
 	}
 }

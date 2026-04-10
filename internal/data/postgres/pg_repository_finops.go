@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // sqlExec 支持 *sql.DB 与 *sql.Tx 上执行 ExecContext。[Ref: 04_采集 §六]
@@ -64,7 +66,34 @@ func (p *PGRepository) ReplaceFinOpsBillingCycleWithFacts(ctx context.Context, b
 	return tx.Commit()
 }
 
+// dedupeFinOpsBillingFactRowsForBatchUpsert 单条 INSERT 内若多条命中同一 ON CONFLICT (account_id, dedup_key)，PostgreSQL 报 SQLSTATE 21000；BSS BillingItemDetail（含 zip 内 csv）常含重复主键行，保留末行与 UPSERT 语义一致。[Ref: 04_采集 §七 R14]
+func dedupeFinOpsBillingFactRowsForBatchUpsert(rows []FinOpsBillingFactRow) []FinOpsBillingFactRow {
+	if len(rows) <= 1 {
+		return rows
+	}
+	type pair struct {
+		acc, dedup string
+	}
+	lastIdx := make(map[pair]int, len(rows))
+	for i, r := range rows {
+		k := pair{acc: strings.TrimSpace(r.AccountID), dedup: strings.TrimSpace(r.DedupKey)}
+		lastIdx[k] = i
+	}
+	out := make([]FinOpsBillingFactRow, 0, len(lastIdx))
+	for i, r := range rows {
+		k := pair{acc: strings.TrimSpace(r.AccountID), dedup: strings.TrimSpace(r.DedupKey)}
+		if lastIdx[k] == i {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
 func (p *PGRepository) insertFinOpsBatch(ctx context.Context, execer sqlExec, rows []FinOpsBillingFactRow) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	rows = dedupeFinOpsBillingFactRowsForBatchUpsert(rows)
 	if len(rows) == 0 {
 		return nil
 	}
@@ -186,6 +215,19 @@ func (p *PGRepository) SumFinOpsFactPretaxTotalByDateRange(ctx context.Context, 
 	return 0, nil
 }
 
+// isMissingFinopsOSSCheckpointTable 库未执行 migrate-08 时表不存在；勿让 OSS_INCREMENTAL_SYNC 整段失败。[Ref: 04_采集 §七 R10]
+func isMissingFinopsOSSCheckpointTable(err error) bool {
+	if err == nil {
+		return false
+	}
+	var pe *pgconn.PgError
+	if errors.As(err, &pe) && pe.Code == "42P01" {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "finops_oss_sync_checkpoint") && strings.Contains(msg, "does not exist")
+}
+
 // GetFinOpsOSSSyncCheckpoint 读取 OSS 列举增量水位；无行时 found=false。[Ref: 04_采集 §七]
 func (p *PGRepository) GetFinOpsOSSSyncCheckpoint(ctx context.Context, accountID string) (time.Time, bool, error) {
 	var t time.Time
@@ -196,6 +238,9 @@ func (p *PGRepository) GetFinOpsOSSSyncCheckpoint(ctx context.Context, accountID
 		return time.Time{}, false, nil
 	}
 	if err != nil {
+		if isMissingFinopsOSSCheckpointTable(err) {
+			return time.Time{}, false, nil
+		}
 		return time.Time{}, false, err
 	}
 	return t.UTC(), true, nil
@@ -210,6 +255,9 @@ func (p *PGRepository) SetFinOpsOSSSyncCheckpoint(ctx context.Context, accountID
 		   max_object_last_modified = EXCLUDED.max_object_last_modified,
 		   updated_at = NOW()`,
 		accountID, maxObjectLastModified.UTC())
+	if err != nil && isMissingFinopsOSSCheckpointTable(err) {
+		return nil
+	}
 	return err
 }
 

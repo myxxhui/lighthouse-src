@@ -124,6 +124,9 @@ func (m *mockPipelineRepo) UpsertBSSBalanceSnapshot(ctx context.Context, s postg
 func (m *mockPipelineRepo) UpsertBillOutstandingMonthly(ctx context.Context, o postgres.BillOutstandingMonthlyRow) error {
 	return nil
 }
+func (m *mockPipelineRepo) RefreshBSSRechargeMonthlyForAccount(ctx context.Context, accountID string) error {
+	return nil
+}
 
 func (m *mockPipelineRepo) DeleteFinOpsBillingFactsByBillingCycle(ctx context.Context, billingCycle, accountID string) error {
 	return nil
@@ -201,6 +204,13 @@ func (m *mockBillingFetcher) FetchCallingAccountID(ctx context.Context, billingC
 		return "", m.err
 	}
 	return "", nil
+}
+
+func (m *mockBillingFetcher) FetchCouponDeductionMonthly(ctx context.Context, billingCycle string) (float64, float64, error) {
+	if m.err != nil {
+		return 0, 0, m.err
+	}
+	return 0, 0, nil
 }
 
 func TestBillingWorker_Run_NilFetcher(t *testing.T) {
@@ -291,8 +301,10 @@ func TestBillingWorker_Run_NoAlertWhenWithinThreshold(t *testing.T) {
 // TestBillingWorker_RunPipeline_MultiPageDaily 覆盖「多页返回」mock 场景：模拟合并多页后的日数据落库，校验总金额与条数正确（D4-2）。
 func TestBillingWorker_RunPipeline_MultiPageDaily(t *testing.T) {
 	repo := &mockPipelineRepo{}
+	// 固定「当前」为月中 UTC，避免真实运行日在每月 1 日时 firstOfMonth > yesterday 导致当月日区间为空、聚合全为 0。
+	fixedNow := time.Date(2026, 3, 15, 12, 0, 0, 0, time.UTC)
 	// 模拟分页拉全后的合并结果：总 150，3 个 category + 5 个 product 项
-	yesterday := time.Now().UTC().AddDate(0, 0, -1).Truncate(24 * time.Hour)
+	yesterday := fixedNow.AddDate(0, 0, -1).Truncate(24 * time.Hour)
 	fetcher := &mockBillingFetcher{
 		resp: &cloudbilling.FetchAccountSummaryResponse{
 			BillingCycle:    yesterday.Format("2006-01-02"),
@@ -310,7 +322,8 @@ func TestBillingWorker_RunPipeline_MultiPageDaily(t *testing.T) {
 			},
 		},
 	}
-	w := NewBillingWorker(fetcher, repo, time.Now().UTC().Format("2006-01"))
+	w := NewBillingWorker(fetcher, repo, fixedNow.Format("2006-01"))
+	w.NowFunc = func() time.Time { return fixedNow }
 	ctx := context.Background()
 	if err := w.RunPipeline(ctx); err != nil {
 		t.Fatalf("RunPipeline: %v", err)

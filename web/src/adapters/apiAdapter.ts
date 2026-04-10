@@ -5,6 +5,7 @@ import {
   DrilldownItem,
   DrilldownCostBreakdown,
   EnvBreakdownItem,
+  type ProjectBreakdownItem,
   type CostTrack,
   type FinOpsLedger,
   type FinOpsReconciliation,
@@ -19,6 +20,7 @@ export interface GlobalCostApiResponse {
   global_efficiency?: number;
   domain_breakdown?: DomainBreakdownApiItem[];
   env_breakdown?: EnvBreakdownApiItem[];
+  project_breakdown?: ProjectBreakdownApiItem[];
   namespaces: NamespaceCostSummaryApiItem[];
   timestamp: string;
   metadata?: {
@@ -26,18 +28,31 @@ export interface GlobalCostApiResponse {
     data_status?: string;
     bill_data_status?: string;
     display_note?: string;
-    /** 后端在合法 track 请求下返回 [Ref: 03_Phase6/01_FinOps双轨语义与全域成本契约_设计 §API、track 与 UX] */
+    /** 后端在合法 track 请求下返回 [Ref: 03_Phase6/01_FinOps双轨与全域成本重构/01_设计 §API、track 与 UX] */
     effective_track?: 'technical' | 'finance';
-    /** 五维并列快照与守恒式说明 [Ref: 03_Phase6/01_FinOps双轨语义与全域成本契约_设计 §五维并列快照与 UX] */
+    /** 五维并列快照与守恒式说明 [Ref: 03_Phase6/01_FinOps双轨与全域成本重构/01_设计 §五维并列快照与 UX] */
     ledger_snapshot_note?: string;
     /** 与 FINOPS_CG_SOURCE 一致；多环境混用为 mixed [Ref: 03_Phase6/01_FinOps] */
     finops_cg_source?: 'oss' | 'api' | 'mixed';
     /** 按环境名实际 C/G 源（与 cost_env_account_config.environment 一致） [Ref: 03_Phase6/01_FinOps] */
     finops_cg_source_by_env?: Partial<Record<string, 'oss' | 'api'>>;
   };
-  /** FinOps 五维 [Ref: 03_Phase6/01_FinOps双轨语义与全域成本契约_设计] */
+  /** FinOps 五维 [Ref: 03_Phase6/01_FinOps双轨与全域成本重构/01_设计] */
   ledger?: Partial<Record<'C' | 'G' | 'P' | 'U' | 'B', number>>;
   reconciliation?: FinOpsReconciliation;
+}
+
+export interface ProjectBreakdownApiItem {
+  project_id: number;
+  code: string;
+  name: string;
+  sort_order: number;
+  total_cost: number;
+  consumption_cost?: number;
+  ledger_g?: number;
+  ledger_p?: number;
+  ledger_u?: number;
+  ledger_b?: number;
 }
 
 export interface EnvBreakdownApiItem {
@@ -52,6 +67,8 @@ export interface EnvBreakdownApiItem {
   ledger_p?: number;
   ledger_u?: number;
   ledger_b?: number;
+  cloud_account_label?: string;
+  cloud_account_site_note?: string;
 }
 
 export interface DomainBreakdownApiItem {
@@ -71,14 +88,14 @@ export interface NamespaceCostSummaryApiItem {
 }
 
 export interface AdaptGlobalCostOptions {
-  /** 仅当 URL 含 track= 时传入 [Ref: 03_Phase6/01_FinOps双轨语义与全域成本契约_设计] */
+  /** 仅当 URL 含 track= 时传入 [Ref: 03_Phase6/01_FinOps双轨与全域成本重构/01_设计] */
   requestTrack?: CostTrack;
 }
 
 /**
  * GlobalCostApiResponse -> CostMetrics
  */
-// [Ref: 03_Phase6/01_FinOps双轨语义与全域成本契约_设计 §数据流与契约（前端依赖）]
+// [Ref: 03_Phase6/01_FinOps双轨与全域成本重构/01_设计 §数据流与契约（前端依赖）]
 export function adaptGlobalCostToCostMetrics(
   res: GlobalCostApiResponse,
   opts?: AdaptGlobalCostOptions,
@@ -127,6 +144,20 @@ export function adaptGlobalCostToCostMetrics(
     ledger_p: e.ledger_p,
     ledger_u: e.ledger_u,
     ledger_b: e.ledger_b,
+    cloud_account_label: e.cloud_account_label,
+    cloud_account_site_note: e.cloud_account_site_note,
+  }));
+  const projectBreakdown: ProjectBreakdownItem[] | undefined = res.project_breakdown?.map((p) => ({
+    project_id: p.project_id,
+    code: p.code,
+    name: p.name,
+    sort_order: p.sort_order,
+    total_cost: p.total_cost,
+    consumption_cost: p.consumption_cost,
+    ledger_g: p.ledger_g,
+    ledger_p: p.ledger_p,
+    ledger_u: p.ledger_u,
+    ledger_b: p.ledger_b,
   }));
   // [Ref: 用户需求 仅四大分类] 从 domain_breakdown 构建 billDetail（计算资源、存储、网络、安全）
   const billDetail =
@@ -151,7 +182,7 @@ export function adaptGlobalCostToCostMetrics(
         }
       : undefined;
 
-  const requestTrack = opts?.requestTrack ?? 'finance';
+  const requestTrack = opts?.requestTrack ?? 'technical';
   const reconciliation = res.reconciliation;
 
   return {
@@ -159,6 +190,7 @@ export function adaptGlobalCostToCostMetrics(
     totalOptimizableSpace: totalOptimizable,
     globalEfficiency,
     domainBreakdown,
+    projectBreakdown,
     envBreakdown,
     billDetail,
     lastUpdatedAt,

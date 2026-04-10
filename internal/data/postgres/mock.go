@@ -1062,6 +1062,14 @@ func (m *MockRepository) UpdateEnvAccountConfigAccountID(ctx context.Context, en
 	return nil
 }
 
+func (m *MockRepository) ListCostProjects(ctx context.Context) ([]CostProject, error) {
+	return nil, nil
+}
+
+func (m *MockRepository) EnvironmentsByProjectIDs(ctx context.Context, projectIDs []int) ([]string, error) {
+	return nil, nil
+}
+
 func (m *MockRepository) ListEnvAccountConfig(ctx context.Context) ([]EnvAccountConfig, error) {
 	return nil, nil
 }
@@ -1651,6 +1659,12 @@ func (tr *transactionRepository) UpdateEnvAccountConfigAccountID(ctx context.Con
 func (tr *transactionRepository) ListEnvAccountConfig(ctx context.Context) ([]EnvAccountConfig, error) {
 	return tr.tx.repo.ListEnvAccountConfig(ctx)
 }
+func (tr *transactionRepository) ListCostProjects(ctx context.Context) ([]CostProject, error) {
+	return tr.tx.repo.ListCostProjects(ctx)
+}
+func (tr *transactionRepository) EnvironmentsByProjectIDs(ctx context.Context, projectIDs []int) ([]string, error) {
+	return tr.tx.repo.EnvironmentsByProjectIDs(ctx, projectIDs)
+}
 func (tr *transactionRepository) GetProductCategory(ctx context.Context, productCode string) (string, bool) {
 	return tr.tx.repo.GetProductCategory(ctx, productCode)
 }
@@ -1698,6 +1712,9 @@ func (tr *transactionRepository) SumPretaxByChannelForDateRange(ctx context.Cont
 	return 0, nil
 }
 func (tr *transactionRepository) UpsertBSSTransaction(ctx context.Context, tx BSSTransactionRow) error { return nil }
+func (tr *transactionRepository) RefreshBSSRechargeMonthlyForAccount(ctx context.Context, accountID string) error {
+	return nil
+}
 func (tr *transactionRepository) UpsertBSSBalanceSnapshot(ctx context.Context, s BSSBalanceSnapshotRow) error {
 	return nil
 }
@@ -1805,6 +1822,9 @@ func (m *MockRepository) SumPretaxByChannelForDateRange(ctx context.Context, fro
 	return 0, nil
 }
 func (m *MockRepository) UpsertBSSTransaction(ctx context.Context, tx BSSTransactionRow) error { return nil }
+func (m *MockRepository) RefreshBSSRechargeMonthlyForAccount(ctx context.Context, accountID string) error {
+	return nil
+}
 func (m *MockRepository) UpsertBSSBalanceSnapshot(ctx context.Context, s BSSBalanceSnapshotRow) error {
 	return nil
 }

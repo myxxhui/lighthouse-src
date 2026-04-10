@@ -13,6 +13,7 @@ import (
 
 	"github.com/myxxhui/lighthouse-src/internal/data/cloudbilling"
 	"github.com/myxxhui/lighthouse-src/internal/data/postgres"
+	"github.com/myxxhui/lighthouse-src/pkg/billingcalendar"
 )
 
 // CloudBillRepository 仅需云账单落库能力，便于 ETL 依赖。
@@ -50,6 +51,7 @@ type CloudBillPipelineRepository interface {
 	UpsertBSSTransaction(ctx context.Context, tx postgres.BSSTransactionRow) error
 	UpsertBSSBalanceSnapshot(ctx context.Context, s postgres.BSSBalanceSnapshotRow) error
 	UpsertBillOutstandingMonthly(ctx context.Context, o postgres.BillOutstandingMonthlyRow) error
+	RefreshBSSRechargeMonthlyForAccount(ctx context.Context, accountID string) error
 	// OLAP 事实表（OSS CSV）[Ref: Phase6 finops_billing_fact]
 	DeleteFinOpsBillingFactsByBillingCycle(ctx context.Context, billingCycle, accountID string) error
 	BulkInsertFinOpsBillingFacts(ctx context.Context, rows []postgres.FinOpsBillingFactRow) error
@@ -103,19 +105,30 @@ type ETLDataConfig struct {
 }
 
 // BillingWorker 云账单 ETL：拉取总账与按产品占比，写入 cost_cloud_bill_summary 或 06_ 三表；支持固定五步流水线（D2）。
-// EnvKey 为环境键（POC/UAT/…），与 cost_env_account_config.environment、OSS AK 后缀一致；落库 account_id 用 dbAccountID()（BSS 解析优先）。[Ref: 01_设计 §按环境展示] [Ref: 03_Phase6/01_FinOps]
+// EnvKey 为环境键（POC/UAT 或 YAML 的 C66_UAT），与 cost_env_account_config.environment 一致；落库 account_id 用 dbAccountID()（BSS 解析优先）。[Ref: 01_设计 §按环境展示] [Ref: 03_Phase6/01_FinOps] [Ref: 03_Phase6 项目云账号]
 type BillingWorker struct {
 	fetcher             cloudbilling.CloudBillingFetcher
 	repo                CloudBillRepository
 	pipelineRepo        CloudBillPipelineRepository // 非 nil 时 RunPipeline 可用
 	billingCycle        string
-	EnvKey              string // 环境键（POC/UAT/…），用于 OSS 与配置行 environment；库内 account_id 见 dbAccountID()
+	EnvKey              string // 环境键；YAML 模式下为 environment_key（如 C66_UAT）
+	ProjectID           string // 可选；YAML 项目 id（如 C66）
+	ProjectCloudProfile *ProjectCloudProfile       // 可选；YAML 显式凭证 + 每环境 OSS；非 nil 时 OSS 段不依赖全局 OSS_BILLING_*
 	resolvedAliyunAccountID string // QueryAccountBill Data.AccountID，与 BSS/流水表一致
 	resolveMu               sync.Mutex
 	ETLData             *ETLDataConfig             // 拉取/保留月数，nil 时使用默认（日36月60）
 	ExpectedTotal       float64
 	OnReconcileAlert    func(actual, expected float64, diffPct float64)
 	OnPipelineFailAlert func(step string, err error) // D1-1：聚合/ETL 失败时告警，与 04_ 监控集成
+	// NowFunc 可选；非 nil 时 RunPipeline 用其替代 time.Now（测试注入固定时间，避免每月 1 日「当月首日 > 昨日」导致当月日区间为空、聚合为 0）。
+	NowFunc func() time.Time
+}
+
+func (w *BillingWorker) pipelineNowUTC() time.Time {
+	if w != nil && w.NowFunc != nil {
+		return w.NowFunc().UTC()
+	}
+	return time.Now().UTC()
 }
 
 func (w *BillingWorker) dailyRetentionMonths() int {
@@ -184,6 +197,54 @@ func (w *BillingWorker) resolveAliyunAccountIDOnce(ctx context.Context) {
 		slog.Warn("billing ETL: UpdateEnvAccountConfigAccountID failed", "env_key", envKey, "error", err2)
 	}
 	slog.Info("billing ETL: resolved aliyun account id for DB writes", "env_key", envKey, "aliyun_account_id", id)
+}
+
+// resolveAccountIDFromEnvConfig 无 Fetcher 时从 cost_env_account_config 读取已写入的阿里云主账号，使 OSS 事实表 account_id 与聚合查询一致。[Ref: 03_Phase6/01_FinOps]
+func (w *BillingWorker) resolveAccountIDFromEnvConfig(ctx context.Context) {
+	w.resolveMu.Lock()
+	defer w.resolveMu.Unlock()
+	if w.resolvedAliyunAccountID != "" {
+		return
+	}
+	if w.pipelineRepo == nil {
+		return
+	}
+	type lister interface {
+		ListEnvAccountConfig(ctx context.Context) ([]postgres.EnvAccountConfig, error)
+	}
+	lr, ok := w.pipelineRepo.(lister)
+	if !ok {
+		return
+	}
+	list, err := lr.ListEnvAccountConfig(ctx)
+	if err != nil {
+		return
+	}
+	want := strings.TrimSpace(w.EnvKey)
+	for _, c := range list {
+		if !strings.EqualFold(strings.TrimSpace(c.Environment), want) {
+			continue
+		}
+		id := strings.TrimSpace(c.AccountID)
+		if id == "" || !isLikelyAliyunNumericAccountID(id) {
+			return
+		}
+		w.resolvedAliyunAccountID = id
+		slog.Info("billing ETL: account id from cost_env_account_config for OSS", "env_key", want, "aliyun_account_id", id)
+		return
+	}
+}
+
+func isLikelyAliyunNumericAccountID(s string) bool {
+	if len(s) < 10 || len(s) > 24 {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // Run 执行一次拉取并落库；若设置了 ExpectedTotal>0 则对账，偏差 >1% 时记录并触发 OnReconcileAlert。建议由 cron 每日 02:00 调用。D7-1：打点开始/结束、period、错误码。
@@ -385,7 +446,9 @@ func (w *BillingWorker) RunPipeline(ctx context.Context) error {
 		slog.Debug("billing ETL: pipeline repo nil, skip RunPipeline")
 		return nil
 	}
-	now := time.Now().UTC()
+	now := w.pipelineNowUTC()
+	billingLoc := billingcalendar.Location()
+	billingRef := now.In(billingLoc)
 	if w.fetcher != nil {
 		w.resolveAliyunAccountIDOnce(ctx)
 	}
@@ -548,8 +611,8 @@ func (w *BillingWorker) RunPipeline(ctx context.Context) error {
 		t := now.AddDate(0, -nMonth+1+i, 0)
 		cyclesToWrite = append(cyclesToWrite, t.Format("2006-01"))
 	}
-	cycle := now.Format("2006-01")
-	prevMonthCycle := now.AddDate(0, -1, 0).Format("2006-01")
+	cycle := billingRef.Format("2006-01")
+	prevMonthCycle := billingcalendar.PreviousMonthYYYYMM(billingRef)
 	for _, writeCycle := range cyclesToWrite {
 		reqM := cloudbilling.FetchAccountSummaryRequest{BillingCycle: writeCycle, PeriodType: "month"}
 		respM, errM := w.fetcher.FetchAccountSummary(ctx, reqM)
@@ -628,9 +691,9 @@ func (w *BillingWorker) RunPipeline(ctx context.Context) error {
 	pipelineErr := w.runAggregateStep(ctx, now, yesterday, periodDay)
 
 	// ⑩ 月度校验（触发日为每月 5/10/15 日）[Ref: 16_ §五 步骤⑩]
-	dayOfMonth := now.Day()
+	dayOfMonth := billingRef.Day()
 	if dayOfMonth == 5 || dayOfMonth == 10 || dayOfMonth == 15 {
-		prevCycle := now.AddDate(0, -1, 0).Format("2006-01")
+		prevCycle := billingcalendar.PreviousMonthYYYYMM(billingRef)
 		slog.Info("billing ETL pipeline: step10 monthly reconcile triggered", "billing_cycle", prevCycle, "day_of_month", dayOfMonth)
 		if err := w.runMonthlyReconcile(ctx, prevCycle); err != nil {
 			slog.Warn("billing ETL pipeline: step10 monthly reconcile failed", "billing_cycle", prevCycle, "error", err)
@@ -682,7 +745,7 @@ func (w *BillingWorker) rebuildMonthlyRawFromLineItems(ctx context.Context, bill
 		}
 	}
 	snap := time.Now()
-	return w.pipelineRepo.SaveCloudBillMonthlyRaw(ctx, postgres.CloudBillMonthlyRaw{
+	row := postgres.CloudBillMonthlyRaw{
 		BillingCycle:         billingCycle,
 		TotalAmount:          pretaxSum,
 		ProductBreakdown:     byCat,
@@ -691,7 +754,24 @@ func (w *BillingWorker) rebuildMonthlyRawFromLineItems(ctx context.Context, bill
 		SnapshotAt:           snap,
 		CreatedAt:            snap,
 		AccountID:            w.dbAccountID(),
-	})
+	}
+	if w.fetcher != nil {
+		c, cc, errC := w.fetcher.FetchCouponDeductionMonthly(ctx, billingCycle)
+		if errC != nil {
+			slog.Warn("billing ETL: FetchCouponDeductionMonthly failed", "billing_cycle", billingCycle, "error", errC)
+			if prev, _ := w.pipelineRepo.GetCloudBillMonthlyRaw(ctx, billingCycle, w.dbAccountID()); prev != nil {
+				row.DeductedByCoupons = prev.DeductedByCoupons
+				row.DeductedByCashCoupons = prev.DeductedByCashCoupons
+				row.CouponSyncedAt = prev.CouponSyncedAt
+			}
+		} else {
+			row.DeductedByCoupons = &c
+			row.DeductedByCashCoupons = &cc
+			ts := snap
+			row.CouponSyncedAt = &ts
+		}
+	}
+	return w.pipelineRepo.SaveCloudBillMonthlyRaw(ctx, row)
 }
 
 // runAggregateStep 执行步骤⑨：从 daily_raw/monthly_raw 重算全部时间范围聚合数据并写入 aggregate 表。
@@ -700,9 +780,11 @@ func (w *BillingWorker) runAggregateStep(ctx context.Context, now, yesterday tim
 	successAt := time.Now()
 	_ = periodDay
 	yesterdayT := yesterday
-	month := now.Format("2006-01")
-	q := (int(now.Month())-1)/3 + 1
-	quarterKey := fmt.Sprintf("%s-Q%d", now.Format("2006"), q)
+	billingLoc := billingcalendar.Location()
+	billingRef := now.In(billingLoc)
+	month := billingRef.Format("2006-01")
+	q := (int(billingRef.Month())-1)/3 + 1
+	quarterKey := fmt.Sprintf("%s-Q%d", billingRef.Format("2006"), q)
 
 	var aggErr error
 	recordErr := func(err error) {
@@ -863,10 +945,10 @@ func (w *BillingWorker) runAggregateStep(ctx context.Context, now, yesterday tim
 	}
 
 	// month：当月 1 日至昨日，日原始表叠加；回调日（total_amount<0）用正常日日均替代 [Ref: 用户确认 本月+回调日替代]
-	firstOfMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	firstOfMonth := time.Date(billingRef.Year(), billingRef.Month(), 1, 0, 0, 0, 0, time.UTC)
 	rowsMonth, _ := w.pipelineRepo.ListCloudBillDailyRawFromTo(ctx, firstOfMonth, yesterdayT, w.dbAccountID())
 	totalMonth, byCatMonth := mergeDailyRowsWithCallbackReplacement(rowsMonth)
-	prevMonth := now.AddDate(0, -1, 0).Format("2006-01")
+	prevMonth := billingcalendar.PreviousMonthYYYYMM(billingRef)
 	pmCon, pmConByCat, _, _ := sumMonthlyRaw(prevMonth)
 	recordErr(saveAggWithPrev("month", month,
 		totalMonth, byCatMonth, 0, nil,
@@ -874,12 +956,12 @@ func (w *BillingWorker) runAggregateStep(ctx context.Context, now, yesterday tim
 		pmCon, pmConByCat, 0, nil))
 
 	// last_quarter 数据先算，供 quarter 的上一周期及 last_quarter 使用 [Ref: 01_设计 report_type 与 period_key]
-	currQ := (int(now.Month())-1)/3 + 1
+	currQ := (int(billingRef.Month())-1)/3 + 1
 	prevQ := currQ - 1
-	prevY := now.Year()
+	prevY := billingRef.Year()
 	if prevQ <= 0 {
 		prevQ = 4
-		prevY = now.Year() - 1
+		prevY = billingRef.Year() - 1
 	}
 	prevQuarterKey := fmt.Sprintf("%d-Q%d", prevY, prevQ)
 	prevQStartMonth := (prevQ-1)*3 + 1
@@ -908,9 +990,9 @@ func (w *BillingWorker) runAggregateStep(ctx context.Context, now, yesterday tim
 	cashByCatQ := make(map[string]float64)
 	qStartMonth := (q-1)*3 + 1
 	for m := 0; m < 3; m++ {
-		cycle := fmt.Sprintf("%04d-%02d", now.Year(), qStartMonth+m)
+		cycle := fmt.Sprintf("%04d-%02d", billingRef.Year(), qStartMonth+m)
 		if cycle == month {
-			firstOfCurMonth := time.Date(now.Year(), time.Month(qStartMonth+m), 1, 0, 0, 0, 0, time.UTC)
+			firstOfCurMonth := time.Date(billingRef.Year(), time.Month(qStartMonth+m), 1, 0, 0, 0, 0, time.UTC)
 			rowsCur, _ := w.pipelineRepo.ListCloudBillDailyRawFromTo(ctx, firstOfCurMonth, yesterdayT, w.dbAccountID())
 			t, pb, ct, cp := mergeDailyRows(rowsCur)
 			totalQ += t
@@ -942,7 +1024,8 @@ func (w *BillingWorker) runAggregateStep(ctx context.Context, now, yesterday tim
 	}
 
 	// last_month：上月（月原始表）；consumption + payment（整月绝对准确用 CashAmount）[Ref: 聚合表主路径]
-	prevPrevMonth := now.AddDate(0, -2, 0).Format("2006-01")
+	firstOfCurForPrev := time.Date(billingRef.Year(), billingRef.Month(), 1, 0, 0, 0, 0, billingLoc)
+	prevPrevMonth := firstOfCurForPrev.AddDate(0, -2, 0).Format("2006-01")
 	ppmCon, ppmConByCat, ppmPay, ppmPayByCat := sumMonthlyRaw(prevPrevMonth)
 	if monCur, _ := w.pipelineRepo.GetCloudBillMonthlyRaw(ctx, prevMonth, w.dbAccountID()); monCur != nil && (monCur.TotalAmount != 0 || len(monCur.ProductBreakdown) > 0) {
 		recordErr(saveAggWithPrev("last_month", prevMonth,
@@ -992,8 +1075,8 @@ func (w *BillingWorker) runAggregateStep(ctx context.Context, now, yesterday tim
 	}
 
 	// this_year：历史完整月（月原始表）+ 当月日累加 [Ref: 01_实践 §this_year 算法]
-	thisYearNum := now.Year()
-	currentMonthNum := int(now.Month())
+	thisYearNum := billingRef.Year()
+	currentMonthNum := int(billingRef.Month())
 	var totalThisYear, cashThisYear float64
 	byCatThisYear := make(map[string]float64)
 	cashByCatThisYear := make(map[string]float64)
